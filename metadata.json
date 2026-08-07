@@ -1,0 +1,6 @@
+{
+  "name": "FamiljeQuiz PWA",
+  "description": "En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

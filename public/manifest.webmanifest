@@ -1,6 +1,6 @@
 {
-  "name": "FamiljeQuiz PWA",
-  "short_name": "FamiljeQuiz",
+  "name": "FamilyQuiz-PWA",
+  "short_name": "FamilyQuiz",
   "description": "Interaktiv familjequiz som fungerar offline.",
   "lang": "sv",
   "start_url": "./",

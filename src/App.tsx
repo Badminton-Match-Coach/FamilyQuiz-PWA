@@ -20,19 +20,58 @@ import {
   Trash2,
   Plus,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Copy,
+  Sparkles,
+  HelpCircle,
+  FileText,
+  Code,
+  Check,
+  CheckSquare,
+  MapPin,
+  Map,
+  Locate,
+  Navigation,
+  Compass,
+  Search,
+  Maximize2,
+  Globe
 } from 'lucide-react';
-import { Participant, QuizConfig, AnswerRecord, UserType, Question } from './types';
+import { Participant, QuizConfig, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { defaultQuiz } from './data/defaultQuiz';
+import { AdminMapPicker, ParticipantMap, calculateDistanceMeters, formatDistance } from './components/MapComponent';
+import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion } from './i18n';
+import { subscribeTranslationCache, requestQuestionTranslations } from './translationCache';
 
 const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
 const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
 
 export default function App() {
+  const [lang, setLang] = useState<Language>(() => detectLanguage());
+  const [, setTranslationTick] = useState(0);
+
+  const changeLanguage = (newLang: Language) => {
+    setLang(newLang);
+    localStorage.setItem('quiz_app_lang', newLang);
+    
+    // Update default participant name if language changes
+    setParticipants(prev => prev.map(p => 
+      p.id === 'default-du' ? { ...p, name: t(newLang, 'you') } : p
+    ));
+  };
+
   const [participants, setParticipants] = useState<Participant[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PARTICIPANTS);
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [{ id: 'default-du', name: t(detectLanguage(), 'you'), type: 'vuxen' }];
   });
 
   const [answers, setAnswers] = useState<AnswerRecord[]>(() => {
@@ -42,88 +81,351 @@ export default function App() {
 
   const [quizConfig, setQuizConfig] = useState<QuizConfig>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_CONFIG);
-    return saved ? JSON.parse(saved) : defaultQuiz;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Migration: ensure correctAnswers and originalLanguage exist
+        const migrateQuestions = (qs: any[]) => (qs || []).map(q => ({
+          ...q,
+          correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (typeof q.correctAnswer === 'number' ? [q.correctAnswer] : [0]),
+          originalLanguage: q.originalLanguage || 'en'
+        }));
+        return {
+          ...parsed,
+          barnQuestions: migrateQuestions(parsed.barnQuestions),
+          vuxenQuestions: migrateQuestions(parsed.vuxenQuestions)
+        };
+      } catch (e) {
+        return defaultQuiz;
+      }
+    }
+    return defaultQuiz;
   });
 
+  useEffect(() => {
+    return subscribeTranslationCache(() => {
+      setTranslationTick(t => t + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    const allQuestions = [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions];
+    requestQuestionTranslations(allQuestions, lang);
+  }, [lang, quizConfig.barnQuestions, quizConfig.vuxenQuestions]);
+
   const [view, setView] = useState<'setup' | 'quiz' | 'results' | 'config'>('setup');
+  const [userLocation, setUserLocation] = useState<Location | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+
+  const locateUser = () => {
+    if (!navigator.geolocation) {
+      alert(t(lang, 'noGpsSupport'));
+      return;
+    }
+    setIsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+        setIsLocating(false);
+      },
+      (err) => {
+        console.error(err);
+        alert(t(lang, 'couldNotGetPosition'));
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    // Request immediate location
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
+
+    // Continuous GPS tracking for participants on the walk
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+      },
+      (err) => {
+        console.warn('Geolocation watch error:', err);
+      },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
+  const [lockNotice, setLockNotice] = useState<{
+    questionIndex: number;
+    distanceMeters: number | null;
+    message: string;
+  } | null>(null);
+
+  const MAX_UNLOCK_DISTANCE_METERS = 35; // 35 meters radius
+
+  const handleSelectQuestionIndex = (idx: number) => {
+    const bQ = quizConfig.barnQuestions[idx];
+    const vQ = quizConfig.vuxenQuestions[idx];
+    const location = bQ?.location || vQ?.location;
+
+    if (location) {
+      if (!userLocation) {
+        setLockNotice({
+          questionIndex: idx,
+          distanceMeters: null,
+          message: 'Denna fråga har en geotag på kartan. Slå på din GPS-position för att kunna låsa upp och svara på den!',
+        });
+        return;
+      }
+
+      const dist = calculateDistanceMeters(userLocation.lat, userLocation.lng, location.lat, location.lng);
+      if (dist > MAX_UNLOCK_DISTANCE_METERS) {
+        setLockNotice({
+          questionIndex: idx,
+          distanceMeters: dist,
+          message: `Du är ${formatDistance(dist)} från stationen. Du behöver gå närmare (inom ${MAX_UNLOCK_DISTANCE_METERS} meter) för att låsa upp fråga ${idx + 1}!`,
+        });
+        return;
+      }
+    }
+
+    // Question is non-geotagged or within 35m -> open question!
+    setSelectedQuestionIndex(idx);
+    setSelectedParticipantId(null);
+    setLockNotice(null);
+  };
   const [viewingParticipantId, setViewingParticipantId] = useState<string | null>(null);
+  const [fullScreenEditingQuestionId, setFullScreenEditingQuestionId] = useState<string | null>(null);
+  const [showCreateQuestionModal, setShowCreateQuestionModal] = useState<UserType | null>(null);
   const [passwordInput, setPasswordInput] = useState('');
   const [configMasterPasswordInput, setConfigMasterPasswordInput] = useState('');
   const [isConfigUnlocked, setIsConfigUnlocked] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isPasswordCorrect, setIsPasswordCorrect] = useState(false);
   const [showConfigInput, setShowConfigInput] = useState(false);
   const [configJsonInput, setConfigJsonInput] = useState('');
-  const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType | null>(null);
+  const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
+  const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'general'>('questions');
+  const [questionSearch, setQuestionSearch] = useState('');
   const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
   const [newQuizPassword, setNewQuizPassword] = useState('');
   const [newQuizTitle, setNewQuizTitle] = useState('');
-  const [importTarget, setImportTarget] = useState<UserType>('barn');
+  const [importTarget, setImportTarget] = useState<'barn' | 'vuxen' | 'båda'>('båda');
+  const [showFacit, setShowFacit] = useState(false);
+  const [facitPasswordInput, setFacitPasswordInput] = useState('');
+  const [isFacitUnlocked, setIsFacitUnlocked] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<'text' | 'json' | null>(null);
+  const [copiedConfigCode, setCopiedConfigCode] = useState(false);
+  const [showFormatGuide, setShowFormatGuide] = useState(false);
+  const [formatTab, setFormatTab] = useState<'text' | 'json'>('text');
+  const [pointsInputValue, setPointsInputValue] = useState<number>(0);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [showSettingsHelp, setShowSettingsHelp] = useState(false);
 
-  const parseQuizText = (text: string) => {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l !== '');
-    const questions: any[] = [];
-    const answersMap: Record<number, number> = {};
-    
-    let currentQuestion: any = null;
-    let isInAnswers = false;
-
-    for (const line of lines) {
-      if (line.toUpperCase().includes('RÄTT SVAR') || line.toUpperCase().includes('FACIT')) {
-        isInAnswers = true;
-        continue;
-      }
-
-      if (isInAnswers) {
-        const match = line.match(/^(\d+)\s*:\s*([1X2])/i);
-        if (match) {
-          const qNum = parseInt(match[1]);
-          const ansChar = match[2].toUpperCase();
-          const ansIdx = ansChar === '1' ? 0 : ansChar === 'X' ? 1 : 2;
-          answersMap[qNum] = ansIdx;
-        }
-        continue;
-      }
-
-      if (line.toLowerCase().startsWith('fråga')) {
-        if (currentQuestion) questions.push(currentQuestion);
-        
-        const qNumMatch = line.match(/fråga\s*(\d+)/i);
-        const categoryMatch = line.match(/\(([^)]+)\)/);
-        
-        currentQuestion = {
-          num: qNumMatch ? parseInt(qNumMatch[1]) : questions.length + 1,
-          category: categoryMatch ? categoryMatch[1] : '',
-          text: '',
-          options: [],
-          id: crypto.randomUUID()
-        };
-      } else if (currentQuestion) {
-        if (line.match(/^[1X2]\.\s/i)) {
-          currentQuestion.options.push(line.replace(/^[1X2]\.\s/i, ''));
-        } else if (!currentQuestion.text) {
-          currentQuestion.text = line;
-        } else {
-          currentQuestion.text += ' ' + line;
+  useEffect(() => {
+    if (selectedParticipantId && selectedQuestionIndex !== null) {
+      const participant = participants.find(p => p.id === selectedParticipantId);
+      if (participant) {
+        const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+        const q = questions[selectedQuestionIndex];
+        if (q && q.type === 'points') {
+          const ans = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+          setPointsInputValue(typeof ans?.pointsScored === 'number' ? ans.pointsScored : 0);
         }
       }
     }
-    if (currentQuestion) questions.push(currentQuestion);
+  }, [selectedParticipantId, selectedQuestionIndex, participants, quizConfig, answers]);
+
+  const copyAiPrompt = (type: 'text' | 'json') => {
+    const promptText = type === 'text' 
+      ? t(lang, 'aiPromptTextFull')
+      : t(lang, 'aiPromptJsonFull');
+
+    navigator.clipboard.writeText(promptText).then(() => {
+      setCopiedPrompt(type);
+      setTimeout(() => setCopiedPrompt(null), 3000);
+    });
+  };
+
+  const parseQuizText = (text: string): Question[] => {
+    // Strip markdown code fences if present
+    let cleanedText = text
+      .replace(/^```(?:json|text|markdown)?\s*/gm, '')
+      .replace(/```\s*$/gm, '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+
+    const rawLines = cleanedText.split('\n').map(l => l.trim().replace(/\u00A0/g, ' '));
+    
+    const questions: {
+      id: string;
+      num: number;
+      category: string;
+      text: string;
+      options: string[];
+      correctAnswers?: number[];
+    }[] = [];
+
+    let currentQuestion: {
+      id: string;
+      num: number;
+      category: string;
+      text: string;
+      options: string[];
+      correctAnswers?: number[];
+    } | null = null;
+
+    const finalizeCurrentQuestion = () => {
+      if (!currentQuestion) return;
+      if (!currentQuestion.text || currentQuestion.text.trim().length === 0) {
+        currentQuestion = null;
+        return;
+      }
+      if (!currentQuestion.correctAnswers || currentQuestion.correctAnswers.length === 0) {
+        currentQuestion.correctAnswers = [0];
+      }
+      if (!currentQuestion.options || currentQuestion.options.length === 0) {
+        currentQuestion.options = ['Svar 1', 'Svar X', 'Svar 2'];
+      }
+      questions.push({
+        id: currentQuestion.id || crypto.randomUUID(),
+        num: currentQuestion.num,
+        category: currentQuestion.category,
+        text: currentQuestion.text.trim(),
+        options: currentQuestion.options,
+        correctAnswers: currentQuestion.correctAnswers
+      });
+      currentQuestion = null;
+    };
+
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      if (!line) continue;
+
+      // Check for inline answer line ("Svar: A", "Rätt svar: 2", "Facit: C")
+      const inlineAnswerMatch = line.match(/^(?:rätt\s*)?(?:svar|facit)\s*[\:\-\=]\s*(.+)$/i);
+      if (inlineAnswerMatch && currentQuestion) {
+        const ansRaw = inlineAnswerMatch[1].trim().replace(/[\)\.]/g, '').toUpperCase();
+        let ansIdx = -1;
+
+        if (/^[A-D]$/.test(ansRaw)) {
+          ansIdx = ansRaw.charCodeAt(0) - 65;
+        } else if (/^[1X2]$/.test(ansRaw)) {
+          ansIdx = ansRaw === '1' ? 0 : ansRaw === 'X' ? 1 : 2;
+        } else if (/^\d+$/.test(ansRaw)) {
+          const num = parseInt(ansRaw);
+          if (num >= 1 && num <= 10) ansIdx = num - 1;
+        }
+
+        if (ansIdx < 0 || ansIdx >= currentQuestion.options.length) {
+          const foundIdx = currentQuestion.options.findIndex(
+            (opt: string) => opt.toLowerCase() === inlineAnswerMatch[1].trim().toLowerCase()
+          );
+          if (foundIdx >= 0) ansIdx = foundIdx;
+        }
+
+        if (ansIdx >= 0) {
+          if (!currentQuestion.correctAnswers) currentQuestion.correctAnswers = [];
+          if (!currentQuestion.correctAnswers.includes(ansIdx)) {
+            currentQuestion.correctAnswers.push(ansIdx);
+          }
+        }
+        continue;
+      }
+
+      // Check for Option match (A), A., A:, A -, 1), 1., 1:, 1 -)
+      const optionMatch = line.match(/^([A-D1-4IX2])[\.\)\:\-\/]\s*(.+)$/i);
+
+      // Check for Question start
+      const isExplicitFraga = /^fråga\s*\d*/i.test(line);
+      const numberedQuestionMatch = line.match(/^(\d+)[\.\)]\s+(.+)$/);
+
+      let isNewQuestion = false;
+
+      if (!currentQuestion) {
+        isNewQuestion = true;
+      } else if (isExplicitFraga) {
+        isNewQuestion = true;
+      } else if (numberedQuestionMatch) {
+        if (currentQuestion.options.length > 0 || (currentQuestion.correctAnswers && currentQuestion.correctAnswers.length > 0) || line.endsWith('?')) {
+          isNewQuestion = true;
+        }
+      } else if (currentQuestion.options.length >= 2 || (currentQuestion.correctAnswers && currentQuestion.correctAnswers.length > 0)) {
+        if (!optionMatch && !inlineAnswerMatch) {
+          isNewQuestion = true;
+        }
+      }
+
+      if (isNewQuestion) {
+        finalizeCurrentQuestion();
+
+        const categoryMatch = line.match(/\(([^)]+)\)/);
+        let qText = line.replace(/^fråga\s*\d*\s*[\:\-\)]?\s*/i, '').replace(/^\d+[\.\)]\s*/, '');
+        if (categoryMatch) {
+          qText = qText.replace(/\([^)]+\)/, '').trim();
+        }
+
+        currentQuestion = {
+          num: questions.length + 1,
+          category: categoryMatch ? categoryMatch[1] : '',
+          text: qText,
+          options: [],
+          id: crypto.randomUUID()
+        };
+        continue;
+      }
+
+      // Option match
+      if (optionMatch && currentQuestion) {
+        currentQuestion.options.push(optionMatch[2].trim());
+        continue;
+      }
+
+      // Continuation of question text
+      if (currentQuestion && currentQuestion.options.length === 0) {
+        currentQuestion.text += ' ' + line;
+      }
+    }
+
+    finalizeCurrentQuestion();
 
     return questions.map(q => ({
       id: q.id,
       text: q.text + (q.category ? ` (${q.category})` : ''),
       options: q.options,
-      correctAnswer: answersMap[q.num] ?? 0
+      correctAnswers: q.correctAnswers ?? [0]
     }));
   };
 
   // Persist data to "cache" (localStorage)
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(participants));
-  }, [participants]);
+    if (participants.length === 0) {
+      setParticipants([{ id: 'default-du', name: t(lang, 'you'), type: 'vuxen' }]);
+    } else {
+      localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(participants));
+    }
+  }, [participants, lang]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_ANSWERS, JSON.stringify(answers));
@@ -141,7 +443,7 @@ export default function App() {
   }, [view, quizConfig]);
 
   const totalQuestions = useMemo(() => {
-    return Math.min(quizConfig.barnQuestions.length, quizConfig.vuxenQuestions.length);
+    return Math.max(quizConfig.barnQuestions.length, quizConfig.vuxenQuestions.length, 1);
   }, [quizConfig]);
 
   const addParticipant = (name: string, type: UserType) => {
@@ -172,7 +474,7 @@ export default function App() {
     const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
     const question = questions[selectedQuestionIndex];
     
-    const isCorrect = answerIndex === question.correctAnswer;
+    const isCorrect = (question?.correctAnswers || []).includes(answerIndex);
 
     const newAnswer: AnswerRecord = {
       participantId: selectedParticipantId,
@@ -195,15 +497,47 @@ export default function App() {
     setSelectedQuestionIndex(null);
   };
 
-  const resetQuiz = () => {
-    if (confirm('Vill du verkligen återställa alla svar?')) {
-      setAnswers([]);
-      setSelectedQuestionIndex(null);
-      setView('setup');
-      setIsPasswordCorrect(false);
-      setPasswordInput('');
+  const submitPointsAnswer = (pointsScored: number) => {
+    if (!selectedParticipantId || selectedQuestionIndex === null) return;
+
+    const newAnswer: AnswerRecord = {
+      participantId: selectedParticipantId,
+      questionIndex: selectedQuestionIndex,
+      pointsScored: Math.max(0, pointsScored),
+      timestamp: Date.now()
+    };
+
+    const existingIndex = answers.findIndex(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+    if (existingIndex > -1) {
+      const newAnswers = [...answers];
+      newAnswers[existingIndex] = newAnswer;
+      setAnswers(newAnswers);
+    } else {
+      setAnswers([...answers, newAnswer]);
     }
+
+    setSelectedParticipantId(null);
+    setSelectedQuestionIndex(null);
   };
+
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const resetQuiz = () => {
+    setShowResetConfirm(true);
+  };
+
+  const confirmResetQuiz = () => {
+    setAnswers([]);
+    setSelectedQuestionIndex(null);
+    setView('setup');
+    setIsPasswordCorrect(false);
+    setPasswordInput('');
+    setFacitPasswordInput('');
+    setIsFacitUnlocked(false);
+    setShowResetConfirm(false);
+  };
+
+  const [lastTaggedLocation, setLastTaggedLocation] = useState<Location | null>(null);
 
   const updateQuestion = (category: UserType, id: string, updates: Partial<Question>) => {
     setQuizConfig(prev => {
@@ -211,7 +545,12 @@ export default function App() {
       const questions = category === 'barn' ? [...newConfig.barnQuestions] : [...newConfig.vuxenQuestions];
       const index = questions.findIndex(q => q.id === id);
       if (index > -1) {
-        questions[index] = { ...questions[index], ...updates };
+        // If question text or options are modified manually, set/preserve originalLanguage to active language
+        const currentOrigLang = questions[index].originalLanguage || 'sv';
+        const newOrigLang = (updates.text !== undefined || updates.options !== undefined) 
+          ? (updates.originalLanguage || lang) 
+          : currentOrigLang;
+        questions[index] = { ...questions[index], ...updates, originalLanguage: newOrigLang };
         if (category === 'barn') {
           newConfig.barnQuestions = questions;
         } else {
@@ -222,9 +561,112 @@ export default function App() {
     });
   };
 
+  const handleGeotagQuestion = (category: UserType, questionId: string, loc: Location) => {
+    updateQuestion(category, questionId, { location: loc });
+    setLastTaggedLocation(loc);
+
+    const questions = category === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    const currentIndex = questions.findIndex(q => q.id === questionId);
+
+    // Look for next untagged question starting after currentIndex
+    let nextUntagged = questions.slice(currentIndex + 1).find(q => !q.location);
+    if (!nextUntagged) {
+      // Search from start if none found after
+      nextUntagged = questions.slice(0, currentIndex).find(q => !q.location && q.id !== questionId);
+    }
+
+    if (nextUntagged) {
+      setExpandedQuestionId(nextUntagged.id);
+    }
+  };
+
+  const [questionToDelete, setQuestionToDelete] = useState<{ category: UserType; id: string } | null>(null);
+  const [participantToDelete, setParticipantToDelete] = useState<Participant | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Bulk question selection state
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [numberSelectionInput, setNumberSelectionInput] = useState('');
+
+  // Clear selected question IDs when switching active editing category
+  useEffect(() => {
+    setSelectedQuestionIds([]);
+    setNumberSelectionInput('');
+  }, [editingQuestionsCategory]);
+
+  const toggleSelectQuestion = (id: string) => {
+    setSelectedQuestionIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllQuestions = () => {
+    if (!editingQuestionsCategory) return;
+    const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    if (selectedQuestionIds.length === questions.length) {
+      setSelectedQuestionIds([]);
+    } else {
+      setSelectedQuestionIds(questions.map(q => q.id));
+    }
+  };
+
+  const selectQuestionsByNumbers = () => {
+    if (!editingQuestionsCategory || !numberSelectionInput.trim()) return;
+    const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    
+    const parts = numberSelectionInput.split(',').map(s => s.trim());
+    const idsToSelect = new Set<string>(selectedQuestionIds);
+
+    parts.forEach(part => {
+      if (part.includes('-')) {
+        const rangeParts = part.split('-').map(s => parseInt(s.trim(), 10));
+        if (rangeParts.length === 2 && !isNaN(rangeParts[0]) && !isNaN(rangeParts[1])) {
+          const start = Math.min(rangeParts[0], rangeParts[1]);
+          const end = Math.max(rangeParts[0], rangeParts[1]);
+          for (let i = start; i <= end; i++) {
+            if (i >= 1 && i <= questions.length) {
+              idsToSelect.add(questions[i - 1].id);
+            }
+          }
+        }
+      } else {
+        const num = parseInt(part, 10);
+        if (!isNaN(num) && num >= 1 && num <= questions.length) {
+          idsToSelect.add(questions[num - 1].id);
+        }
+      }
+    });
+
+    setSelectedQuestionIds(Array.from(idsToSelect));
+  };
+
+  const confirmDeleteSelectedQuestions = () => {
+    if (!editingQuestionsCategory || selectedQuestionIds.length === 0) return;
+    const category = editingQuestionsCategory;
+    const idsToRemove = new Set(selectedQuestionIds);
+    
+    setQuizConfig(prev => {
+      const newConfig = { ...prev };
+      if (category === 'barn') {
+        newConfig.barnQuestions = newConfig.barnQuestions.filter(q => !idsToRemove.has(q.id));
+      } else {
+        newConfig.vuxenQuestions = newConfig.vuxenQuestions.filter(q => !idsToRemove.has(q.id));
+      }
+      return newConfig;
+    });
+    setSelectedQuestionIds([]);
+    setShowBulkDeleteConfirm(false);
+  };
+
   const deleteQuestion = (category: UserType | null, id: string) => {
     if (!category) return;
-    if (!confirm('Är du säker på att du vill ta bort denna fråga?')) return;
+    setQuestionToDelete({ category, id });
+  };
+
+  const confirmDeleteQuestion = () => {
+    if (!questionToDelete) return;
+    const { category, id } = questionToDelete;
     
     setQuizConfig(prev => {
       const newConfig = { ...prev };
@@ -235,14 +677,18 @@ export default function App() {
       }
       return newConfig;
     });
+    setQuestionToDelete(null);
   };
 
-  const addNewQuestion = (category: UserType) => {
+  const addNewQuestion = (category: UserType, type: QuestionType = 'options') => {
     const newQuestion: Question = {
       id: crypto.randomUUID(),
-      text: 'Ny fråga...',
-      options: ['Svar 1', 'Svar X', 'Svar 2'],
-      correctAnswer: 0
+      type,
+      text: type === 'points' ? 'Ny poängfråga...' : 'Ny fråga...',
+      options: type === 'points' ? [] : ['Svar 1', 'Svar X', 'Svar 2'],
+      correctAnswers: type === 'points' ? [] : [0],
+      maxPoints: type === 'points' ? 10 : undefined,
+      originalLanguage: lang,
     };
     
     setQuizConfig(prev => {
@@ -254,13 +700,36 @@ export default function App() {
       }
       return newConfig;
     });
-    setExpandedQuestionId(newQuestion.id);
+    setShowCreateQuestionModal(null);
+    setFullScreenEditingQuestionId(newQuestion.id);
+  };
+
+  const tryBase64Decode = (str: string): string | null => {
+    try {
+      const cleaned = str.trim().replace(/\s+/g, '');
+      if (!cleaned) return null;
+      let decoded = '';
+      try {
+        decoded = decodeURIComponent(escape(atob(cleaned)));
+      } catch {
+        decoded = atob(cleaned);
+      }
+      return decoded;
+    } catch {
+      return null;
+    }
   };
 
   const xorEncryptDecrypt = (input: string, key: string): string => {
+    let safeInput = input;
+    try {
+      safeInput = unescape(encodeURIComponent(input));
+    } catch (e) {
+      safeInput = input;
+    }
     let output = '';
-    for (let i = 0; i < input.length; i++) {
-      const charCode = input.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+    for (let i = 0; i < safeInput.length; i++) {
+      const charCode = safeInput.charCodeAt(i) ^ key.charCodeAt(i % key.length);
       output += String.fromCharCode(charCode);
     }
     try {
@@ -272,79 +741,211 @@ export default function App() {
 
   const xorDecrypt = (input: string, key: string): string => {
     try {
-      let decoded = '';
-      try {
-        decoded = decodeURIComponent(escape(atob(input)));
-      } catch (e) {
-        decoded = atob(input);
+      const cleaned = input.trim().replace(/\s+/g, '');
+      let decoded = tryBase64Decode(cleaned);
+      if (decoded === null) {
+        decoded = cleaned;
       }
       let output = '';
       for (let i = 0; i < decoded.length; i++) {
         const charCode = decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length);
         output += String.fromCharCode(charCode);
       }
-      return output;
+      try {
+        return decodeURIComponent(escape(output));
+      } catch (e) {
+        return output;
+      }
     } catch (e) {
       return input;
     }
   };
 
+  const applyQuestionsToConfig = (formattedQuestions: Question[]) => {
+    if (formattedQuestions.length === 0) return;
+    setQuizConfig(prev => {
+      const newConfig = { ...prev };
+      if (importTarget === 'båda') {
+        newConfig.barnQuestions = formattedQuestions;
+        newConfig.vuxenQuestions = formattedQuestions.map(q => ({ ...q, id: crypto.randomUUID() }));
+      } else if (importTarget === 'barn') {
+        newConfig.barnQuestions = formattedQuestions;
+        if (newConfig.vuxenQuestions.length < formattedQuestions.length) {
+          newConfig.vuxenQuestions = formattedQuestions.map(q => ({ ...q, id: crypto.randomUUID() }));
+        }
+      } else {
+        newConfig.vuxenQuestions = formattedQuestions;
+        if (newConfig.barnQuestions.length < formattedQuestions.length) {
+          newConfig.barnQuestions = formattedQuestions.map(q => ({ ...q, id: crypto.randomUUID() }));
+        }
+      }
+      return newConfig;
+    });
+
+    setShowConfigInput(false);
+    setConfigJsonInput('');
+    setAnswers([]);
+    setParticipants([]);
+    setView('setup');
+    const targetText = importTarget === 'båda' ? 'båda kategorier' : importTarget === 'barn' ? 'Barn' : 'Vuxna';
+    alert(t(lang, 'importedQuestionsAlert', { count: formattedQuestions.length.toString() }));
+  };
+
   const handleImportConfig = () => {
     try {
-      let input = configJsonInput.trim();
-      
-      // Try to decrypt with "Password" if it's likely an encrypted string
-      if (!input.startsWith('{')) {
-        const decrypted = xorDecrypt(input, 'Password');
-        if (decrypted.trim().startsWith('{')) {
-          input = decrypted.trim();
+      let rawInput = configJsonInput.trim();
+      if (!rawInput) return;
+
+      // Clean markdown code blocks if wrapped
+      let cleanInput = rawInput
+        .replace(/^```(?:json|text|markdown)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      let jsonCandidate = cleanInput;
+
+      // If it doesn't look like JSON array '[' or object '{', try decryption/base64 decoding
+      if (!jsonCandidate.startsWith('{') && !jsonCandidate.startsWith('[')) {
+        const decryptedDollar = xorDecrypt(rawInput, '$');
+        const decDollarTrim = decryptedDollar.trim();
+        if (decDollarTrim.startsWith('{') || decDollarTrim.startsWith('[')) {
+          jsonCandidate = decDollarTrim;
+        } else {
+          const decryptedPassword = xorDecrypt(rawInput, 'Password');
+          const decPassTrim = decryptedPassword.trim();
+          if (decPassTrim.startsWith('{') || decPassTrim.startsWith('[')) {
+            jsonCandidate = decPassTrim;
+          } else {
+            const directBase64 = tryBase64Decode(rawInput);
+            if (directBase64) {
+              const base64Trim = directBase64.trim();
+              if (base64Trim.startsWith('{') || base64Trim.startsWith('[')) {
+                jsonCandidate = base64Trim;
+              }
+            }
+          }
         }
       }
 
-      // Try JSON
-      if (input.startsWith('{')) {
-        const parsed = JSON.parse(input);
-        if (parsed.barnQuestions && parsed.vuxenQuestions) {
-          setQuizConfig(parsed);
-          setShowConfigInput(false);
-          setConfigJsonInput('');
-          setAnswers([]);
-          setParticipants([]); // Clear names on import
-          setView('setup');
-          alert('Quiz importerat och deltagarlistan rensad! ✨');
-          return;
+      // Try parsing JSON if candidate starts with '{' or '['
+      if (jsonCandidate.startsWith('{') || jsonCandidate.startsWith('[')) {
+        try {
+          const parsed = JSON.parse(jsonCandidate);
+          
+          // Case 1: Full Quiz Config with barnQuestions and vuxenQuestions
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.barnQuestions && parsed.vuxenQuestions) {
+            const ensureLang = (qs: any[]) => (qs || []).map(q => ({
+              ...q,
+              originalLanguage: q.originalLanguage || lang || 'sv'
+            }));
+            setQuizConfig({
+              ...parsed,
+              barnQuestions: ensureLang(parsed.barnQuestions),
+              vuxenQuestions: ensureLang(parsed.vuxenQuestions)
+            });
+            setShowConfigInput(false);
+            setConfigJsonInput('');
+            setAnswers([]);
+            setParticipants([]);
+            setView('setup');
+            alert(t(lang, 'importClearedAlert'));
+            return;
+          }
+
+          // Case 2: Array of questions [{ text, options, correctAnswer }, ...]
+          let questionArray: any[] | null = null;
+          if (Array.isArray(parsed)) {
+            questionArray = parsed;
+          } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.questions)) {
+            questionArray = parsed.questions;
+          } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed[importTarget + 'Questions'])) {
+            questionArray = parsed[importTarget + 'Questions'];
+          }
+
+          if (questionArray && questionArray.length > 0) {
+            const formattedQuestions: Question[] = questionArray.map((q, idx) => ({
+              id: q.id || crypto.randomUUID(),
+              text: q.text || q.question || `${t(lang, 'question')} ${idx + 1}`,
+              options: Array.isArray(q.options) && q.options.map(String).length > 0 ? q.options.map(String) : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
+              correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (typeof q.correctAnswer === 'number' ? [q.correctAnswer] : [0]),
+              originalLanguage: q.originalLanguage || lang || 'sv'
+            }));
+
+            applyQuestionsToConfig(formattedQuestions);
+            return;
+          }
+        } catch (jsonErr) {
+          console.warn('JSON parsing failed, falling back to text parsing', jsonErr);
         }
       }
       
-      // Otherwise, parse as text
-      const newQuestions = parseQuizText(configJsonInput);
-      if (newQuestions.length > 0) {
-        const newConfig = { ...quizConfig };
-        if (importTarget === 'barn') {
-          newConfig.barnQuestions = newQuestions;
-        } else {
-          newConfig.vuxenQuestions = newQuestions;
+      // Otherwise, parse as plain text
+      let newQuestions = parseQuizText(cleanInput);
+      if (newQuestions.length === 0) {
+        const base64DecodedText = tryBase64Decode(rawInput);
+        if (base64DecodedText) {
+          newQuestions = parseQuizText(base64DecodedText);
         }
-        setQuizConfig(newConfig);
-        setShowConfigInput(false);
-        setConfigJsonInput('');
-        setAnswers([]);
-        setParticipants([]); // Clear names on import
-        setView('setup');
-        alert(`Importerade ${newQuestions.length} frågor för ${importTarget} och rensade deltagarlistan! 📝`);
+      }
+
+      if (newQuestions.length > 0) {
+        applyQuestionsToConfig(newQuestions);
       } else {
-        alert('Kunde inte hitta några frågor i texten. Kontrollera formatet.');
+        alert(t(lang, 'noQuestionsFoundAlert'));
       }
     } catch (e) {
-      alert('Kunde inte läsa inmatningen. Kontrollera formatet.');
+      alert(t(lang, 'couldNotReadInputAlert'));
+    }
+  };
+
+  const [aiTopic, setAiTopic] = useState('');
+  const [aiCount, setAiCount] = useState(5);
+  const [aiTarget, setAiTarget] = useState<'barn' | 'vuxen' | 'båda'>('båda');
+  const [aiKidAgeFrom, setAiKidAgeFrom] = useState(5);
+  const [aiKidAgeTo, setAiKidAgeTo] = useState(10);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const generateWithAi = async () => {
+    if (!aiTopic) return alert(t(lang, 'enterTopicAlert'));
+    setIsGenerating(true);
+    try {
+      const response = await fetch('/api/generate-quiz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          topics: aiTopic, 
+          count: aiCount, 
+          target: aiTarget, 
+          lang,
+          ageFrom: aiKidAgeFrom,
+          ageTo: aiKidAgeTo
+        }),
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      
+      setQuizConfig(prev => ({
+        ...prev,
+        barnQuestions: data.barnQuestions ? [...prev.barnQuestions, ...data.barnQuestions] : prev.barnQuestions,
+        vuxenQuestions: data.vuxenQuestions ? [...prev.vuxenQuestions, ...data.vuxenQuestions] : prev.vuxenQuestions,
+      }));
+      
+      const totalGenerated = (data.barnQuestions?.length || 0) + (data.vuxenQuestions?.length || 0);
+      alert(t(lang, 'aiDoneAlert', { count: totalGenerated.toString() }));
+      setAiTopic('');
+    } catch (err: any) {
+      alert(t(lang, 'generationError') + err.message);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
   const shareConfig = () => {
     const configStr = JSON.stringify(quizConfig);
-    const encrypted = xorEncryptDecrypt(configStr, 'Password');
+    const encrypted = xorEncryptDecrypt(configStr, '$');
     navigator.clipboard.writeText(encrypted).then(() => {
-      alert('Quiz-koden har kopierats till urklipp (krypterad)! 🔐');
+      setCopiedConfigCode(true);
+      setTimeout(() => setCopiedConfigCode(false), 6000);
     });
   };
 
@@ -355,38 +956,111 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-4 md:p-8 flex flex-col overflow-hidden">
-      <div className="max-w-4xl mx-auto w-full flex flex-col flex-1">
+    <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-3 sm:p-4 md:p-8 flex flex-col">
+      <div className="max-w-5xl mx-auto w-full flex flex-col flex-1">
         
-        {/* Header - Vibrant Theme */}
-        <header className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white/10 p-4 rounded-3xl backdrop-blur-md border border-white/20 gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-yellow-400 rounded-2xl flex items-center justify-center shadow-lg transform rotate-3">
-              <span className="text-2xl font-black text-indigo-900">?</span>
+        {/* Clean Header with Unified View Navigation Bar */}
+        <header className="flex flex-col gap-4 mb-6 sm:mb-8 bg-white/10 p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] backdrop-blur-md border border-white/20 shadow-xl">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3.5 w-full">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-11 h-11 sm:w-12 sm:h-12 bg-yellow-400 rounded-2xl flex items-center justify-center shadow-lg transform -rotate-2 shrink-0">
+                  <span className="text-xl sm:text-2xl font-black text-indigo-950">?</span>
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
+                    {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
+                  </h1>
+                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 mt-0.5">
+                    <span>{totalQuestions} {t(lang, 'questionsCount')}</span>
+                    <span>•</span>
+                    <span>{participants.length} {t(lang, 'participantsCount')}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Language Selector Bar */}
+              <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15 shrink-0 self-start sm:self-center">
+                <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold" title={t(lang, 'autoLanguageDetected')}>
+                  <Globe className="w-3.5 h-3.5" />
+                </div>
+                {SUPPORTED_LANGUAGES.map((l) => (
+                  <button
+                    key={l.code}
+                    onClick={() => changeLanguage(l.code)}
+                    className={`px-2 sm:px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 ${
+                      lang === l.code
+                        ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
+                        : 'text-white/70 hover:text-white hover:bg-white/10'
+                    }`}
+                    title={l.name}
+                  >
+                    <span className="text-base leading-none">{l.flag}</span>
+                    <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div>
-              <h1 className="text-2xl font-black text-white leading-none tracking-tight">
-                {quizConfig.title.toUpperCase()}
-              </h1>
-              <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">
-                Quiz-o-matic • {totalQuestions} frågor
-              </p>
+
+            {/* Top View Selector Navigation Tabs */}
+            <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1.5 rounded-2xl border border-white/10 w-full overflow-visible">
+              <button
+                onClick={() => setView('setup')}
+                className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                  view === 'setup' 
+                    ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>{t(lang, 'participantsTab')}</span>
+              </button>
+
+              <button
+                onClick={() => setView('quiz')}
+                className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                  view === 'quiz' 
+                    ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>{t(lang, 'walkQuizTab')}</span>
+              </button>
+
+              <button
+                onClick={() => setView('results')}
+                className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                  view === 'results' 
+                    ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                <span>{t(lang, 'resultsTab')}</span>
+              </button>
+
+              <button
+                onClick={() => setView('config')}
+                className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                  view === 'config' 
+                    ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>{t(lang, 'edit')}</span>
+              </button>
+
+              <button 
+                onClick={() => setShowConfigInput(true)}
+                className="flex-1 px-3 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0"
+                title="Importera färdigt quiz"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{t(lang, 'import')}</span>
+              </button>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={() => setShowConfigInput(true)}
-              className="bg-emerald-400 hover:bg-emerald-500 text-white px-6 py-2 rounded-2xl font-bold flex items-center gap-2 shadow-[0_4px_0_0_#059669] transition-all active:translate-y-1 active:shadow-none text-sm"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Importera</span>
-            </button>
-            <button 
-              onClick={() => setView('config')}
-              className="bg-white text-indigo-600 px-6 py-2 rounded-2xl font-bold shadow-[0_4px_0_0_#cbd5e1] hover:bg-slate-50 transition-all active:translate-y-1 active:shadow-none text-sm"
-            >
-              Inställningar
-            </button>
           </div>
         </header>
 
@@ -399,66 +1073,72 @@ export default function App() {
               exit={{ opacity: 0, scale: 0.95 }}
               className="grid grid-cols-1 md:grid-cols-12 gap-6 flex-1"
             >
-              <div className="md:col-span-4 flex flex-col gap-4">
-                <h2 className="text-indigo-100 text-xs font-bold uppercase tracking-widest px-2">Vilka spelar?</h2>
+              <div className="md:col-span-5 flex flex-col gap-4">
+                <h2 className="text-indigo-100 text-xs font-bold uppercase tracking-widest px-2 flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  <span>{t(lang, 'participantsTab')} ({participants.length})</span>
+                </h2>
                 <div className="bg-white rounded-[2rem] p-6 shadow-2xl flex flex-col gap-4 flex-1 border border-indigo-200/50">
                   <div className="flex-1 space-y-3 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
-                    {participants.length === 0 ? (
-                      <div className="text-center py-10 opacity-30">
-                        <Users className="w-12 h-12 mx-auto mb-2" />
-                        <p className="text-sm font-bold">Inga spelare än</p>
-                      </div>
-                    ) : (
-                      participants.map(p => (
-                        <div key={p.id} className="p-4 rounded-2xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-between group">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white ${
-                              p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
-                            }`}>
-                              {p.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex-1">
-                              {editingParticipantId === p.id ? (
-                                <input 
-                                  autoFocus
-                                  className="w-full bg-white border border-indigo-200 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none focus:border-indigo-500"
-                                  value={p.name}
-                                  onChange={(e) => updateParticipantName(p.id, e.target.value)}
-                                  onBlur={() => setEditingParticipantId(null)}
-                                  onKeyDown={(e) => e.key === 'Enter' && setEditingParticipantId(null)}
-                                />
-                              ) : (
-                                <p 
-                                  className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors"
-                                  onClick={() => setEditingParticipantId(p.id)}
-                                >
-                                  {p.name}
-                                </p>
-                              )}
-                              <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase ${
-                                p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
-                              }`}>
-                                {p.type}
-                              </span>
-                            </div>
+                    {participants.map(p => (
+                      <div key={p.id} className="p-4 rounded-2xl bg-indigo-50/80 border-2 border-indigo-100 flex items-center justify-between group">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 ${
+                            p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
+                          }`}>
+                            {p.name.charAt(0).toUpperCase()}
                           </div>
-                          <button 
-                            onClick={() => removeParticipant(p.id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-600 p-1"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex-1 min-w-0">
+                            {editingParticipantId === p.id ? (
+                              <input 
+                                autoFocus
+                                className="w-full bg-white border border-indigo-300 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none focus:border-indigo-500"
+                                value={p.name}
+                                onChange={(e) => updateParticipantName(p.id, e.target.value)}
+                                onBlur={() => setEditingParticipantId(null)}
+                                onKeyDown={(e) => e.key === 'Enter' && setEditingParticipantId(null)}
+                              />
+                            ) : (
+                              <p 
+                                className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors truncate"
+                                onClick={() => setEditingParticipantId(p.id)}
+                                title={t(lang, 'clickToEditName')}
+                              >
+                                {p.name}
+                              </p>
+                            )}
+                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase inline-block mt-0.5 ${
+                              p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
+                            }`}>
+                              {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}
+                            </span>
+                          </div>
                         </div>
-                      ))
-                    )}
+                        <button 
+                          onClick={() => setParticipantToDelete(p)}
+                          className="opacity-60 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-red-500 p-2"
+                          title={t(lang, 'deleteParticipant')}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                   
                   <div className="space-y-3 pt-4 border-t border-slate-100">
+                    <p className="text-xs font-bold text-slate-500">{t(lang, 'addNewParticipant')}</p>
                     <input 
                       type="text" 
-                      placeholder="Namn..."
-                      className="w-full p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 outline-none focus:border-indigo-500 font-bold text-sm"
+                      placeholder={t(lang, 'writeNameHere')}
+                      className="w-full p-4 bg-slate-50 rounded-2xl border-2 border-slate-200 outline-none focus:border-indigo-500 font-bold text-sm text-slate-800"
                       id="name-input"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const el = e.currentTarget;
+                          addParticipant(el.value, 'vuxen');
+                          el.value = '';
+                        }
+                      }}
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <button 
@@ -467,9 +1147,9 @@ export default function App() {
                           addParticipant(el.value, 'barn');
                           el.value = '';
                         }}
-                        className="py-3 bg-amber-400 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#d97706] active:translate-y-1 active:shadow-none transition-all"
+                        className="py-3.5 bg-amber-400 hover:bg-amber-300 text-indigo-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#d97706] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-1.5"
                       >
-                        + Barn
+                        <Plus className="w-4 h-4" /> {t(lang, 'kid')}
                       </button>
                       <button 
                         onClick={() => {
@@ -477,30 +1157,64 @@ export default function App() {
                           addParticipant(el.value, 'vuxen');
                           el.value = '';
                         }}
-                        className="py-3 bg-pink-400 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#db2777] active:translate-y-1 active:shadow-none transition-all"
+                        className="py-3.5 bg-pink-400 hover:bg-pink-300 text-indigo-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#db2777] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-1.5"
                       >
-                        + Vuxen
+                        <Plus className="w-4 h-4" /> {t(lang, 'adult')}
                       </button>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="md:col-span-8 flex flex-col items-center justify-center text-center p-8">
-                <div className="max-w-sm space-y-8">
-                  <div className="w-32 h-32 bg-white/20 rounded-[2.5rem] flex items-center justify-center mx-auto backdrop-blur-sm border-2 border-white/30 rotate-6 shadow-2xl">
-                    <Trophy className="w-16 h-16 text-yellow-300 drop-shadow-lg" />
+              <div className="md:col-span-7 flex flex-col justify-between p-6 sm:p-8 bg-white/10 backdrop-blur-md rounded-[2.5rem] border border-white/20 text-white space-y-6">
+                <div className="space-y-4">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-yellow-400 text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl text-3xl font-black">
+                    🚶‍♂️
                   </div>
-                  <div className="space-y-4">
-                    <h2 className="text-5xl font-black text-white leading-tight drop-shadow-md">Redo för utmaningen?</h2>
-                    <p className="text-indigo-100 font-bold opacity-80">Välj dina deltagare och starta spelet. Ni kan svara i vilken ordning ni vill!</p>
+                  <div>
+                    <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-md">
+                      {t(lang, 'readyForWalk')}
+                    </h2>
+                    <p className="text-indigo-100 font-medium text-sm sm:text-base mt-2 opacity-90">
+                      {t(lang, 'readyWalkDesc')}
+                    </p>
                   </div>
+                </div>
+
+                <div className="bg-black/20 p-4 sm:p-5 rounded-2xl border border-white/10 space-y-2 text-xs">
+                  <div className="flex items-center justify-between py-1 border-b border-white/10">
+                    <span className="text-indigo-200">{t(lang, 'totalQuestionsLabel')}</span>
+                    <span className="font-black text-sm">{totalQuestions}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1 border-b border-white/10">
+                    <span className="text-indigo-200">{t(lang, 'kidsQuestionsLabel')}</span>
+                    <span className="font-bold text-amber-300">{quizConfig.barnQuestions.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1 border-b border-white/10">
+                    <span className="text-indigo-200">{t(lang, 'adultsQuestionsLabel')}</span>
+                    <span className="font-bold text-pink-300">{quizConfig.vuxenQuestions.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-1">
+                    <span className="text-indigo-200">{t(lang, 'geotaggedStations')}</span>
+                    <span className="font-bold text-emerald-300">
+                      {Array.from({ length: totalQuestions }).filter((_, idx) => quizConfig.barnQuestions[idx]?.location || quizConfig.vuxenQuestions[idx]?.location).length}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
                   <button 
-                    disabled={participants.length === 0}
                     onClick={() => setView('quiz')}
-                    className="w-full py-6 bg-yellow-400 text-indigo-900 rounded-3xl font-black text-xl uppercase shadow-[0_8px_0_0_#b45309] hover:bg-yellow-300 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50 disabled:active:translate-y-0 disabled:active:shadow-[0_8px_0_0_#b45309]"
+                    className="w-full py-5 bg-yellow-400 text-indigo-950 rounded-2xl font-black text-lg uppercase shadow-[0_6px_0_0_#b45309] hover:bg-yellow-300 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
                   >
-                    Starta Quizzet 🚀
+                    <span>{t(lang, 'startQuizBtn')}</span>
+                  </button>
+                  <button 
+                    onClick={() => setShowHowItWorks(true)}
+                    className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-sm uppercase border border-white/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    <HelpCircle className="w-4 h-4" />
+                    <span>{t(lang, 'howItWorksBtn')}</span>
                   </button>
                 </div>
               </div>
@@ -513,208 +1227,541 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="grid grid-cols-1 md:grid-cols-12 gap-6 flex-1"
+              className="flex flex-col gap-6 flex-1 max-w-5xl mx-auto w-full"
             >
-              {/* Question Picker - Any order */}
-              <div className="md:col-span-3 flex flex-col gap-4">
-                <h2 className="text-indigo-100 text-xs font-bold uppercase tracking-widest px-2">Välj Fråga</h2>
-                <div className="bg-white rounded-[2rem] p-6 shadow-2xl flex-1 border border-indigo-200/50">
-                  <div className="grid grid-cols-4 gap-2">
-                    {Array.from({ length: totalQuestions }).map((_, idx) => {
-                      // Status logic: Check if all participants answered this question
-                      const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
-                      const isFullyAnswered = answeredBy.length === participants.length;
-                      const isPartiallyAnswered = answeredBy.length > 0 && answeredBy.length < participants.length;
-                      const isSelected = selectedQuestionIndex === idx;
+              {selectedQuestionIndex === null ? (
+                /* Unified Overview View: Map + Unified Question Selection */
+                (() => {
+                  const hasAnyGeotag = [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions].some(q => !!q.location);
 
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => {
-                            setSelectedQuestionIndex(idx);
-                            setSelectedParticipantId(null);
-                          }}
-                          className={`aspect-square rounded-xl flex items-center justify-center font-black text-lg transition-all border-4 ${
-                            isSelected 
-                              ? 'bg-indigo-600 text-white border-indigo-800 scale-110 shadow-lg' 
-                              : isFullyAnswered
-                                ? 'bg-emerald-100 text-emerald-600 border-emerald-400 shadow-[0_4px_0_0_#34d399]'
-                                : isPartiallyAnswered
-                                  ? 'bg-amber-100 text-amber-600 border-amber-400 shadow-[0_4px_0_0_#fbbf24]'
-                                  : 'bg-slate-50 text-slate-400 border-slate-200 hover:border-indigo-300'
-                          }`}
-                        >
-                          {idx + 1}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-8 space-y-4">
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
-                      <div className="w-3 h-3 bg-emerald-400 rounded-sm" /> Alla svarat
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-400">
-                      <div className="w-3 h-3 bg-amber-400 rounded-sm" /> Några svarat
-                    </div>
-                    <button 
-                      onClick={() => setView('results')}
-                      className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase hover:bg-slate-800 transition-colors mt-auto"
-                    >
-                      Se Resultat 🏆
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Main Interaction Area */}
-              <div className="md:col-span-9 flex flex-col gap-6">
-                {selectedQuestionIndex === null ? (
-                  <div className="bg-white/10 rounded-[3rem] border-4 border-dashed border-white/20 flex-1 flex flex-col items-center justify-center text-center p-12 backdrop-blur-sm">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mb-4">
-                      <ChevronRight className="w-10 h-10 text-white animate-bounce" />
-                    </div>
-                    <h3 className="text-3xl font-black text-white">Välj en fråga till vänster</h3>
-                    <p className="text-indigo-100 mt-2 font-bold opacity-60 italic">Gå i ordning eller hoppa runt som ni vill!</p>
-                  </div>
-                ) : !selectedParticipantId ? (
-                  <div className="bg-white rounded-[3rem] p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
-                    <div className="mb-10">
-                      <span className="text-indigo-500 font-black text-xl uppercase tracking-tighter">Vems tur?</span>
-                      <h3 className="text-4xl font-black mt-2 leading-tight text-slate-800">Vem ska svara på fråga {selectedQuestionIndex + 1}?</h3>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      {participants.map(p => {
-                        const answer = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
-                        const hasAnswered = !!answer;
-                        return (
-                          <button
-                            key={p.id}
-                            onClick={() => setSelectedParticipantId(p.id)}
-                            className={`p-6 rounded-3xl border-4 transition-all flex items-center gap-4 relative text-left ${
-                              hasAnswered 
-                                ? 'bg-indigo-50 border-indigo-500' 
-                                : 'bg-slate-50 border-slate-100 hover:border-indigo-300'
-                            }`}
-                          >
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-white text-xl ${
-                              p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
-                            }`}>
-                              {p.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                              <p className="font-black text-xl text-slate-800">{p.name}</p>
-                              <span className="text-xs font-black uppercase text-slate-400">{p.type}</span>
-                            </div>
-                            {hasAnswered && (
-                              <div className="absolute top-4 right-4 bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded-lg uppercase">
-                                Ändra svar
+                  return (
+                    <div className="space-y-6">
+                      {/* Top Bar with Participants & Results action */}
+                      <div className="bg-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 backdrop-blur-md border border-white/20 text-white flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                          <div className="w-10 h-10 bg-yellow-400 text-indigo-900 rounded-2xl flex items-center justify-center font-black text-lg shrink-0 shadow">
+                            🗺️
+                          </div>
+                          <div>
+                            <h2 className="font-black text-lg sm:text-xl leading-tight">{t(lang, 'selectQuestionAndStation')}</h2>
+                            <div className="flex items-center gap-2 text-xs font-bold text-indigo-100/80">
+                              <span>{t(lang, 'participantsTab')}:</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {participants.map(p => (
+                                  <span key={p.id} className="bg-white/20 px-2 py-0.5 rounded-full text-[10px] font-black">
+                                    {p.name}
+                                  </span>
+                                ))}
                               </div>
-                            )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+                          {hasAnyGeotag && (
+                            <button 
+                              onClick={locateUser}
+                              disabled={isLocating}
+                              className="px-3.5 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold uppercase border border-white/20 flex items-center gap-2 active:scale-95 transition-all"
+                            >
+                              <Locate className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
+                              <span>{isLocating ? t(lang, 'gpsSearch') : userLocation ? t(lang, 'gpsActive') : t(lang, 'turnOnGPS')}</span>
+                            </button>
+                          )}
+
+                          <button 
+                            onClick={() => setView('results')}
+                            className="px-4 py-2 bg-yellow-400 hover:bg-yellow-300 text-indigo-950 font-black rounded-xl text-xs uppercase shadow-md active:scale-95 transition-all"
+                          >
+                            {t(lang, 'seeResultsBtn')}
                           </button>
-                        );
-                      })}
-                    </div>
-                    <button 
-                      onClick={() => setSelectedQuestionIndex(null)}
-                      className="mt-auto text-slate-400 font-bold hover:text-slate-600 transition-colors pt-6"
-                    >
-                      ← Tillbaka till översikten
-                    </button>
-                  </div>
-                ) : (
-                  <motion.div 
-                    initial={{ x: 50, opacity: 0 }}
-                    animate={{ x: 0, opacity: 1 }}
-                    className="bg-white rounded-[3rem] p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50 relative overflow-hidden"
-                  >
-                    {/* Big Decorative Number */}
-                    <div className="absolute top-0 right-0 -mt-10 -mr-10 opacity-[0.03] pointer-events-none">
-                      <span className="text-[20rem] font-black">{selectedQuestionIndex + 1}</span>
-                    </div>
-
-                    <div className="mb-10 relative">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-white ${
-                          participants.find(p => p.id === selectedParticipantId)?.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
-                        }`}>
-                          {participants.find(p => p.id === selectedParticipantId)?.type} - {participants.find(p => p.id === selectedParticipantId)?.name}
-                        </span>
-                        <span className="text-indigo-500 font-black text-sm uppercase tracking-widest opacity-40">Fråga {selectedQuestionIndex + 1}</span>
+                        </div>
                       </div>
-                      <h3 className="text-4xl font-black leading-tight text-slate-800">
-                        {participants.find(p => p.id === selectedParticipantId)?.type === 'barn' 
-                          ? quizConfig.barnQuestions[selectedQuestionIndex].text
-                          : quizConfig.vuxenQuestions[selectedQuestionIndex].text}
-                      </h3>
-                    </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
-                      {(participants.find(p => p.id === selectedParticipantId)?.type === 'barn' 
-                          ? quizConfig.barnQuestions[selectedQuestionIndex].options
-                          : quizConfig.vuxenQuestions[selectedQuestionIndex].options
-                      ).map((opt, idx) => {
-                        const colors = ['border-rose-500 bg-rose-50 text-rose-600 hover:bg-rose-100', 'border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100', 'border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100', 'border-sky-500 bg-sky-50 text-sky-600 hover:bg-sky-100'];
-                        const color = colors[idx % colors.length];
-                        const isCurrentAnswer = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex)?.answerIndex === idx;
+                      {/* Interactive Map */}
+                      {hasAnyGeotag && (
+                        <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl border border-indigo-200/50 space-y-3">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-indigo-600 font-black text-xs uppercase tracking-widest flex items-center gap-1.5">
+                              <Compass className="w-4 h-4" />
+                              <span>{t(lang, 'mapAllStations')}</span>
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-500 hidden sm:inline">
+                              {t(lang, 'clickButtonOnMapOrList')}
+                            </span>
+                          </div>
+
+                          <ParticipantMap 
+                            questions={Array.from({ length: totalQuestions }).map((_, idx) => {
+                              const bQ = quizConfig.barnQuestions[idx];
+                              const vQ = quizConfig.vuxenQuestions[idx];
+                              const location = bQ?.location || vQ?.location;
+                              const rawQ = bQ || vQ || { id: `q-${idx}`, text: `${t(lang, 'question')} ${idx + 1}`, options: [], correctAnswers: [0] };
+                              const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang);
+                              const q = { ...rawQ, text: trans.text, options: trans.options };
+                              const qWithLoc = { ...q, location: q.location || location };
+
+                              const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
+                              const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
+
+                              return {
+                                q: qWithLoc,
+                                index: idx,
+                                isAnswered: isFullyAnswered,
+                              };
+                            })}
+                            userType={participants[0]?.type || 'barn'}
+                            userLocation={userLocation}
+                            onSelectQuestion={handleSelectQuestionIndex}
+                          />
+                        </div>
+                      )}
+
+                      {/* Unified Single Question Selection List / Grid */}
+                      <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-5 sm:p-7 shadow-2xl border border-indigo-200/50 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                          <div>
+                            <h3 className="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-2">
+                              <MapPin className="w-6 h-6 text-indigo-600" />
+                              <span>{t(lang, 'questionListTitle')} ({totalQuestions})</span>
+                            </h3>
+                          </div>
+
+                          {/* Legend */}
+                          <div className="flex items-center gap-3 text-[10px] font-black uppercase text-slate-500 flex-wrap">
+                            <span className="flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full border border-emerald-200">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500" /> {t(lang, 'fullyAnsweredByAll')}
+                            </span>
+                            {hasAnyGeotag && (
+                              <span className="flex items-center gap-1.5 bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full border border-slate-200">
+                                <span className="w-2 h-2 rounded-full bg-slate-400" /> {t(lang, 'lockedBtn')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                      {Array.from({ length: totalQuestions }).map((_, idx) => {
+                        const bQ = quizConfig.barnQuestions[idx];
+                        const vQ = quizConfig.vuxenQuestions[idx];
+                        const location = bQ?.location || vQ?.location;
+                        const rawQ = bQ || vQ;
+                        const trans = rawQ ? translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage) : null;
+                        const sampleQ = rawQ && trans ? { ...rawQ, text: trans.text, options: trans.options } : null;
+                        
+                        const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
+                        const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
+                        const isPartiallyAnswered = answeredBy.length > 0 && answeredBy.length < participants.length;
+
+                        let dist: number | null = null;
+                        if (location && userLocation) {
+                          dist = calculateDistanceMeters(userLocation.lat, userLocation.lng, location.lat, location.lng);
+                        }
+
+                        const isUnlocked = isFullyAnswered || !location || (dist !== null && dist <= MAX_UNLOCK_DISTANCE_METERS);
 
                         return (
                           <button
                             key={idx}
-                            onClick={() => submitAnswer(idx)}
-                            className={`p-6 rounded-[2rem] border-4 flex items-center justify-center text-xl font-black transition-all active:scale-95 shadow-[0_6px_0_0_rgba(0,0,0,0.1)] hover:shadow-none hover:translate-y-1 ${color} ${
-                              isCurrentAnswer ? 'ring-4 ring-indigo-600 ring-offset-4' : ''
+                            onClick={() => handleSelectQuestionIndex(idx)}
+                            className={`p-4 rounded-2xl border-2 font-bold transition-all text-left flex flex-col justify-between gap-3 relative group active:scale-98 ${
+                              isFullyAnswered 
+                                ? 'bg-emerald-50/90 border-emerald-400 text-emerald-950 shadow-sm' 
+                                : isUnlocked
+                                  ? isPartiallyAnswered
+                                    ? 'bg-amber-50/90 border-amber-400 text-amber-950 shadow-sm hover:border-amber-500'
+                                    : 'bg-white border-slate-200 hover:border-indigo-400 text-slate-800 shadow-sm hover:shadow-md'
+                                  : 'bg-slate-100/80 border-slate-200/90 text-slate-400 opacity-65 hover:opacity-90'
                             }`}
                           >
-                            {opt}
+                            <div className="flex items-start justify-between gap-2 w-full">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-sm ${
+                                  isFullyAnswered
+                                    ? 'bg-emerald-600 text-white'
+                                    : isUnlocked
+                                      ? 'bg-indigo-600 text-white'
+                                      : 'bg-slate-300 text-slate-600'
+                                }`}>
+                                  {idx + 1}
+                                </span>
+                                <div>
+                                  <span className="font-black text-sm block leading-tight text-slate-800">
+                                    {t(lang, 'question')} {idx + 1}
+                                  </span>
+                                  {sampleQ?.text && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] text-slate-500 line-clamp-1 font-normal flex-1">
+                                        {sampleQ.text}
+                                      </span>
+                                      {isFacitUnlocked && (
+                                        <span className="bg-emerald-100 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1 shrink-0">
+                                          {sampleQ?.type === 'points' 
+                                            ? `🎯 ${t(lang, 'pointQuestion')}` 
+                                            : `${t(lang, 'correctAnswer')}: ${(sampleQ?.correctAnswers || []).map(ans => ans === 0 ? '1' : ans === 1 ? 'X' : '2').join(', ')}`}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Status Badge */}
+                              {isFullyAnswered ? (
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-800 shrink-0">
+                                  ✓ {t(lang, 'fullyAnsweredByAll')}
+                                </span>
+                              ) : isPartiallyAnswered ? (
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-800 shrink-0">
+                                  {t(lang, 'partiallyAnswered')}
+                                </span>
+                              ) : isUnlocked ? (
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 shrink-0">
+                                  {t(lang, 'answerBtn')}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 shrink-0 flex items-center gap-1">
+                                  {t(lang, 'lockedBtn')}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Distance / Location info */}
+                            <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between text-xs font-semibold">
+                              {location ? (
+                                <div className={`flex items-center gap-1 font-mono text-[11px] ${
+                                  isUnlocked ? 'text-emerald-700 font-bold' : 'text-amber-700'
+                                }`}>
+                                  <span>📍</span>
+                                  <span>
+                                    {dist !== null 
+                                      ? `${formatDistance(dist)} ${dist <= MAX_UNLOCK_DISTANCE_METERS ? t(lang, 'withinRange') : t(lang, 'lockedDistance')}`
+                                      : t(lang, 'requiresGPS')}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 font-normal">
+                                  {t(lang, 'notGeotagged')}
+                                </span>
+                              )}
+
+                              {/* Participant response dots */}
+                              <div className="flex items-center gap-1">
+                                {participants.map(p => {
+                                  const answered = answers.some(a => a.participantId === p.id && a.questionIndex === idx);
+                                  return (
+                                    <span 
+                                      key={p.id}
+                                      title={`${p.name}: ${answered ? t(lang, 'answeredStatus') : t(lang, 'notAnsweredStatus')}`}
+                                      className={`w-2.5 h-2.5 rounded-full ${
+                                        answered ? 'bg-emerald-500' : 'bg-slate-300'
+                                      }`}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
                           </button>
                         );
                       })}
                     </div>
-                    
-                    <button 
-                      onClick={() => setSelectedParticipantId(null)}
-                      className="mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors"
-                    >
-                      ← Byt person
-                    </button>
-                  </motion.div>
-                )}
-
-                {/* Progress Lock Bar - Dark Theme */}
-                <div className="bg-slate-900 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between text-white shadow-xl border border-slate-800">
-                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                    <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center text-2xl">
-                      🔒
-                    </div>
-                    <div>
-                      <p className="font-bold">Resultaten är låsta</p>
-                      <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Ange lösenord för att se ställningen</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <input 
-                      type="password" 
-                      placeholder="Lösenord..." 
-                      className="bg-slate-800 border-none rounded-xl px-4 py-2 focus:ring-2 ring-indigo-500 outline-none flex-1 sm:w-32 font-mono text-sm"
-                      value={passwordInput}
-                      onChange={(e) => setPasswordInput(e.target.value)}
-                    />
-                    <button 
-                      onClick={() => {
-                        if (passwordInput === (quizConfig.password || '123')) {
-                          setView('results');
-                          setIsPasswordCorrect(true);
-                        } else {
-                          alert('Fel lösenord!');
-                        }
-                      }}
-                      className="bg-indigo-500 px-6 py-2 rounded-xl font-black text-xs uppercase hover:bg-indigo-400 transition-colors active:scale-95"
-                    >
-                      Lås upp
-                    </button>
                   </div>
                 </div>
-              </div>
+              );
+            })()
+          ) : (
+                /* Question View: Quick Question Navbar + Question Form */
+                <div className="space-y-4">
+                  {/* Top Bar for fast navigation between questions */}
+                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-md border border-white/20 text-white flex items-center justify-between gap-3 overflow-x-auto">
+                    <button
+                      onClick={() => {
+                        setSelectedQuestionIndex(null);
+                        setSelectedParticipantId(null);
+                      }}
+                      className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 shrink-0 transition-all"
+                    >
+                      {t(lang, 'allQuestionsAndMap')}
+                    </button>
+
+                    <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                      {Array.from({ length: totalQuestions }).map((_, idx) => {
+                        const bQ = quizConfig.barnQuestions[idx];
+                        const vQ = quizConfig.vuxenQuestions[idx];
+                        const location = bQ?.location || vQ?.location;
+                        const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
+                        const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
+
+                        let dist: number | null = null;
+                        if (location && userLocation) {
+                          dist = calculateDistanceMeters(userLocation.lat, userLocation.lng, location.lat, location.lng);
+                        }
+
+                        const isUnlocked = isFullyAnswered || !location || (dist !== null && dist <= MAX_UNLOCK_DISTANCE_METERS);
+                        const isSelected = selectedQuestionIndex === idx;
+
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => handleSelectQuestionIndex(idx)}
+                            className={`w-8 h-8 rounded-xl font-black text-xs shrink-0 flex items-center justify-center transition-all ${
+                              isSelected
+                                ? 'bg-yellow-400 text-indigo-950 scale-110 shadow-md ring-2 ring-yellow-200'
+                                : isFullyAnswered
+                                  ? 'bg-emerald-500 text-white'
+                                  : isUnlocked
+                                    ? 'bg-white/20 text-white hover:bg-white/30'
+                                    : 'bg-black/30 text-white/40'
+                            }`}
+                          >
+                            {idx + 1}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {!selectedParticipantId ? (
+                    <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
+                      <div className="mb-6 sm:mb-10">
+                        <span className="text-indigo-500 font-black text-lg sm:text-xl uppercase tracking-tighter">{t(lang, 'selectParticipantToAnswer')}</span>
+                        <h3 className="text-2xl sm:text-4xl font-black mt-2 leading-tight text-slate-800">{t(lang, 'whoWillAnswer', { num: (selectedQuestionIndex + 1).toString() })}</h3>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                        {participants.map(p => {
+                          const answer = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
+                          const hasAnswered = !!answer;
+                          return (
+                            <button
+                              key={p.id}
+                              onClick={() => setSelectedParticipantId(p.id)}
+                              className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all flex items-center gap-4 relative text-left ${
+                                hasAnswered 
+                                  ? 'bg-indigo-50 border-indigo-500' 
+                                  : 'bg-slate-50 border-slate-100 hover:border-indigo-300'
+                              }`}
+                            >
+                              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-black text-white text-lg sm:text-xl shrink-0 ${
+                                p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
+                              }`}>
+                                {p.name.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-black text-lg sm:text-xl text-slate-800 truncate">{p.name}</p>
+                                <span className="text-[10px] font-black uppercase text-slate-400">{p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}</span>
+                              </div>
+                              {hasAnswered && (
+                                <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-indigo-600 text-white text-[8px] sm:text-[10px] font-black px-2 py-0.5 sm:py-1 rounded-lg uppercase">
+                                  {t(lang, 'answeredBadge')}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button 
+                        onClick={() => setSelectedQuestionIndex(null)}
+                        className="mt-6 sm:mt-auto text-slate-400 font-bold hover:text-slate-600 transition-colors pt-6 text-sm"
+                      >
+                        {t(lang, 'allQuestionsAndMap')}
+                      </button>
+                    </div>
+                  ) : (
+                    <motion.div 
+                      initial={{ x: 50, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50 relative overflow-hidden"
+                    >
+                      {/* Big Decorative Number */}
+                      <div className="absolute top-0 right-0 -mt-6 -mr-6 sm:-mt-10 sm:-mr-10 opacity-[0.03] pointer-events-none">
+                        <span className="text-[10rem] sm:text-[20rem] font-black">{selectedQuestionIndex + 1}</span>
+                      </div>
+
+                      {(() => {
+                        const currentParticipant = participants.find(p => p.id === selectedParticipantId);
+                        const isBarn = currentParticipant?.type === 'barn';
+                        const primaryQuestions = isBarn ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                        const fallbackQuestions = isBarn ? quizConfig.vuxenQuestions : quizConfig.barnQuestions;
+                        const rawQ = primaryQuestions[selectedQuestionIndex] || fallbackQuestions[selectedQuestionIndex] || { id: '', text: t(lang, 'noQuestionFound'), options: [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')] };
+                        const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage);
+                        const baseQ = { ...rawQ, text: trans.text, options: trans.options };
+                        const loc = primaryQuestions[selectedQuestionIndex]?.location || fallbackQuestions[selectedQuestionIndex]?.location;
+                        const activeQ = { ...baseQ, location: baseQ.location || loc };
+                        
+                        return (
+                          <>
+                            <div className="mb-6 sm:mb-10 relative">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className={`px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white ${
+                                  isBarn ? 'bg-amber-400' : 'bg-pink-400'
+                                }`}>
+                                  {currentParticipant?.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')} - {currentParticipant?.name}
+                                </span>
+                                <span className="text-indigo-500 font-black text-xs sm:text-sm uppercase tracking-widest opacity-40">{t(lang, 'question')} {selectedQuestionIndex + 1}</span>
+                              </div>
+                              <h3 className="text-2xl sm:text-4xl font-black leading-tight text-slate-800">
+                                {activeQ.text}
+                              </h3>
+
+                              {activeQ.location && (
+                                <div className="mt-4 p-3.5 bg-indigo-50/90 border-2 border-indigo-200/80 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-indigo-950 shadow-sm">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                                      <MapPin className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{t(lang, 'geotaggedStations')}</p>
+                                      {userLocation ? (
+                                        <p className="text-xs sm:text-sm font-bold text-slate-700">
+                                          {t(lang, 'distanceToQuestion')}: <span className="text-indigo-600 font-black">{formatDistance(calculateDistanceMeters(userLocation.lat, userLocation.lng, activeQ.location.lat, activeQ.location.lng))}</span> 📍
+                                        </p>
+                                      ) : (
+                                        <p className="text-xs text-slate-600 font-medium">{t(lang, 'requiresGPS')}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedQuestionIndex(null);
+                                      setSelectedParticipantId(null);
+                                    }}
+                                    className="text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0 self-end sm:self-auto"
+                                  >
+                                    <Map className="w-3.5 h-3.5" />
+                                    <span>{t(lang, 'allQuestionsAndMap')}</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {activeQ.type === 'points' ? (
+                              <div className="bg-indigo-50/80 border-4 border-indigo-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">
+                                <div className="space-y-1">
+                                  <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm">
+                                    <Trophy className="w-4 h-4" />
+                                    <span>{t(lang, 'pointQuestion')}</span>
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-slate-600 font-semibold pt-2">
+                                    {t(lang, 'answeringAs', { name: currentParticipant?.name || '' })}
+                                  </p>
+                                  {activeQ.maxPoints && (
+                                    <p className="text-xs text-indigo-700 font-bold">
+                                      {t(lang, 'maxPoints')}: {activeQ.maxPoints} p
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center justify-center gap-3 sm:gap-6">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPointsInputValue(prev => Math.max(0, prev - 1))}
+                                    className="w-14 h-14 sm:w-16 sm:h-16 bg-white border-4 border-slate-200 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl shadow-md active:scale-90 transition-all"
+                                  >
+                                    -
+                                  </button>
+
+                                  <div className="relative">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max={activeQ.maxPoints ?? undefined}
+                                      value={pointsInputValue}
+                                      onChange={(e) => {
+                                        const val = parseInt(e.target.value, 10);
+                                        if (!isNaN(val)) {
+                                          setPointsInputValue(Math.max(0, activeQ.maxPoints ? Math.min(activeQ.maxPoints, val) : val));
+                                        } else {
+                                          setPointsInputValue(0);
+                                        }
+                                      }}
+                                      className="w-28 sm:w-36 h-16 sm:h-20 bg-white border-4 border-indigo-500 rounded-3xl text-center text-3xl sm:text-5xl font-black text-indigo-950 shadow-inner outline-none"
+                                    />
+                                    <span className="block text-[11px] font-black uppercase tracking-widest text-indigo-500 mt-1">{t(lang, 'points')}</span>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setPointsInputValue(prev => activeQ.maxPoints ? Math.min(activeQ.maxPoints, prev + 1) : prev + 1)}
+                                    className="w-14 h-14 sm:w-16 sm:h-16 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl shadow-lg shadow-indigo-200 active:scale-90 transition-all"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
+                                  {[1, 5, 10].map(step => (
+                                    <button
+                                      key={step}
+                                      type="button"
+                                      onClick={() => setPointsInputValue(prev => activeQ.maxPoints ? Math.min(activeQ.maxPoints, prev + step) : prev + step)}
+                                      className="px-3.5 py-1.5 bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-black shadow-sm active:scale-95 transition-all"
+                                    >
+                                      +{step} p
+                                    </button>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => setPointsInputValue(0)}
+                                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl text-xs font-black active:scale-95 transition-all"
+                                  >
+                                    {t(lang, 'resetPoints')}
+                                  </button>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => submitPointsAnswer(pointsInputValue)}
+                                  className="w-full py-4 sm:py-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-base sm:text-lg uppercase shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                >
+                                  <CheckCircle2 className="w-5 h-5 stroke-[3]" />
+                                  <span>{t(lang, 'savePointsBtn', { points: pointsInputValue.toString() })}</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 flex-1">
+                                {activeQ.options.map((opt, idx) => {
+                                  const colors = ['border-rose-500 bg-rose-50 text-rose-600 hover:bg-rose-100', 'border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100', 'border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100', 'border-sky-500 bg-sky-50 text-sky-600 hover:bg-sky-100'];
+                                  const color = colors[idx % colors.length];
+                                  const isCurrentAnswer = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex)?.answerIndex === idx;
+                                  const isCorrectAnswer = (activeQ?.correctAnswers || []).includes(idx);
+
+                                  return (
+                                    <button
+                                      key={idx}
+                                      onClick={() => submitAnswer(idx)}
+                                      className={`p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border-4 flex items-center justify-between text-lg sm:text-xl font-black transition-all active:scale-95 shadow-[0_4px_0_0_rgba(0,0,0,0.1)] sm:shadow-[0_6px_0_0_rgba(0,0,0,0.1)] hover:shadow-none hover:translate-y-1 ${color} ${
+                                        isCurrentAnswer ? 'ring-4 ring-indigo-600 ring-offset-4' : ''
+                                      } ${
+                                        isFacitUnlocked && isCorrectAnswer 
+                                          ? 'ring-4 ring-emerald-500 ring-offset-4 bg-emerald-100 border-emerald-600 text-emerald-700' 
+                                          : ''
+                                      }`}
+                                    >
+                                      <span>{opt}</span>
+                                      {isFacitUnlocked && isCorrectAnswer && (
+                                        <div className="bg-emerald-600 text-white p-1 rounded-lg">
+                                          <Check className="w-5 h-5 stroke-[3]" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+                      
+                      <button 
+                        onClick={() => setSelectedParticipantId(null)}
+                        className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
+                      >
+                        {t(lang, 'changePerson')}
+                      </button>
+                    </motion.div>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -726,55 +1773,136 @@ export default function App() {
               className="max-w-2xl mx-auto w-full space-y-6"
             >
               {viewingParticipantId ? (
-                <motion.div 
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="bg-white rounded-[3rem] p-8 shadow-2xl border border-indigo-100 flex flex-col max-h-[85vh]"
-                >
-                  <div className="flex items-center justify-between mb-8 shrink-0">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-white text-xl ${
+                !isFacitUnlocked ? (
+                  <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-8 sm:p-12 shadow-2xl border border-indigo-200/50 text-center space-y-8">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-indigo-100 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-4 shadow-inner">
+                      <Lock className="text-indigo-600 w-10 h-10 sm:w-12 sm:h-12" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl sm:text-4xl font-black text-slate-800 mb-2">{t(lang, 'resultsLocked')}</h2>
+                      <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] sm:text-xs">{t(lang, 'enterPasswordToSeeResults')}</p>
+                    </div>
+                    
+                    <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                      <input 
+                        type="password"
+                        placeholder={t(lang, 'enterQuizPassword')}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center text-lg font-black tracking-widest outline-none focus:border-indigo-500 transition-all shadow-sm"
+                        value={facitPasswordInput}
+                        onChange={(e) => setFacitPasswordInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                              setIsFacitUnlocked(true);
+                            } else {
+                              alert(t(lang, 'wrongPasswordAlert'));
+                            }
+                          }
+                        }}
+                      />
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => setViewingParticipantId(null)}
+                          className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest transition-all"
+                        >
+                          {t(lang, 'back')}
+                        </button>
+                        <button 
+                          onClick={() => {
+                            if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                              setIsFacitUnlocked(true);
+                            } else {
+                              alert(t(lang, 'wrongPasswordAlert'));
+                            }
+                          }}
+                          className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-100"
+                        >
+                          {t(lang, 'unlockResultsBtn')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <motion.div 
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-8 shadow-2xl border border-indigo-100 flex flex-col max-h-[90vh]"
+                  >
+                  <div className="flex items-center justify-between mb-6 sm:mb-8 shrink-0">
+                    <div className="flex items-center gap-3 sm:gap-4">
+                      <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-black text-white text-lg sm:text-xl shrink-0 ${
                         participants.find(p => p.id === viewingParticipantId)?.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
                       }`}>
                         {participants.find(p => p.id === viewingParticipantId)?.name.charAt(0).toUpperCase()}
                       </div>
-                      <div>
-                        <h3 className="text-2xl font-black text-slate-800 leading-none mb-1">{participants.find(p => p.id === viewingParticipantId)?.name}</h3>
-                        <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Detaljerad genomgång</p>
+                      <div className="min-w-0">
+                        <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-none mb-1 truncate">{participants.find(p => p.id === viewingParticipantId)?.name}</h3>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t(lang, 'detailedReview')}</p>
                       </div>
                     </div>
                     <button 
                       onClick={() => setViewingParticipantId(null)}
-                      className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"
+                      className="w-8 h-8 sm:w-10 sm:h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors shrink-0"
                     >
                       ×
                     </button>
                   </div>
 
-                  <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
+                  <div className="space-y-3 sm:space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1">
                     {Array.from({ length: totalQuestions }).map((_, idx) => {
                       const participant = participants.find(p => p.id === viewingParticipantId);
                       const questions = participant?.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
-                      const question = questions[idx];
+                      const rawQuestion = questions[idx];
+                      if (!rawQuestion) return null;
+
+                      const trans = translateQuestion(rawQuestion.id, rawQuestion.text, rawQuestion.options || [], lang, rawQuestion.originalLanguage);
+                      const question = { ...rawQuestion, text: trans.text, options: trans.options };
                       const answer = answers.find(a => a.participantId === viewingParticipantId && a.questionIndex === idx);
-                      
+
+                      if (question.type === 'points') {
+                        return (
+                          <div key={idx} className="p-4 sm:p-5 rounded-xl sm:rounded-2xl bg-amber-50/50 border border-amber-200/80 space-y-3">
+                            <div className="flex justify-between items-start gap-4">
+                              <h4 className="font-bold text-slate-800 text-xs sm:text-sm leading-tight">
+                                <span className="text-amber-600 mr-2">{idx + 1}.</span>
+                                {question.text}
+                              </h4>
+                              <div className="shrink-0">
+                                <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                                  🎯 {t(lang, 'pointQuestion')}
+                                </span>
+                              </div>
+                            </div>
+                            
+                            <div className="p-3 bg-white rounded-xl border border-amber-100 flex items-center justify-between text-xs sm:text-sm">
+                              <span className="font-bold text-slate-600">{t(lang, 'reportedResult')}</span>
+                              {typeof answer?.pointsScored === 'number' ? (
+                                <span className="font-black text-amber-700 text-sm sm:text-base">{answer.pointsScored} {t(lang, 'points')}</span>
+                              ) : (
+                                <span className="font-bold text-slate-400 italic">{t(lang, 'notAnsweredBadge')}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
-                        <div key={idx} className="p-5 rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
+                        <div key={idx} className="p-4 sm:p-5 rounded-xl sm:rounded-2xl bg-slate-50 border border-slate-100 space-y-3">
                           <div className="flex justify-between gap-4">
-                            <h4 className="font-bold text-slate-800 text-sm leading-tight">
+                            <h4 className="font-bold text-slate-800 text-xs sm:text-sm leading-tight">
                               <span className="text-indigo-500 mr-2">{idx + 1}.</span>
                               {question.text}
                             </h4>
                             <div className="shrink-0">
                               {answer?.isCorrect ? (
-                                <div className="flex items-center gap-1 text-emerald-600 font-black text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100">
-                                  <CheckCircle2 className="w-3 h-3" />
-                                  Rätt
+                                <div className="flex items-center gap-1 text-emerald-600 font-black text-[8px] sm:text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100">
+                                  <CheckCircle2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                                  {t(lang, 'correct')}
                                 </div>
                               ) : (
-                                <div className="flex items-center gap-1 text-rose-600 font-black text-[10px] uppercase bg-rose-50 px-2 py-1 rounded-lg border border-rose-100">
-                                  <span className="w-3 h-3 flex items-center justify-center">×</span>
-                                  Fel
+                                <div className="flex items-center gap-1 text-rose-600 font-black text-[8px] sm:text-[10px] uppercase bg-rose-50 px-2 py-1 rounded-lg border border-rose-100">
+                                  <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex items-center justify-center">×</span>
+                                  {t(lang, 'wrong')}
                                 </div>
                               )}
                             </div>
@@ -783,16 +1911,16 @@ export default function App() {
                           <div className="space-y-2">
                             {question.options.map((opt, oIdx) => {
                               const isUserAnswer = answer?.answerIndex === oIdx;
-                              const isCorrectAnswer = question.correctAnswer === oIdx;
+                              const isCorrectAnswer = (question?.correctAnswers || []).includes(oIdx);
                               
                               let statusClass = "bg-white border-slate-100 text-slate-500";
                               if (isCorrectAnswer) statusClass = "bg-emerald-50 border-emerald-200 text-emerald-700 shadow-sm";
                               if (isUserAnswer && !isCorrectAnswer) statusClass = "bg-rose-50 border-rose-200 text-rose-700 shadow-sm";
 
                               return (
-                                <div key={oIdx} className={`p-3 rounded-xl border-2 flex items-center justify-between transition-all text-[11px] ${statusClass}`}>
+                                <div key={oIdx} className={`p-2.5 sm:p-3 rounded-lg sm:rounded-xl border-2 flex items-center justify-between transition-all text-[10px] sm:text-[11px] ${statusClass}`}>
                                   <div className="flex items-center gap-3">
-                                    <span className={`w-5 h-5 flex items-center justify-center rounded-full font-black text-[10px] ${
+                                    <span className={`w-4 h-4 sm:w-5 sm:h-5 flex items-center justify-center rounded-full font-black text-[9px] sm:text-[10px] ${
                                       isCorrectAnswer ? 'bg-emerald-200/50 text-emerald-700' : 
                                       (isUserAnswer && !isCorrectAnswer) ? 'bg-rose-200/50 text-rose-700' : 'bg-black/5 text-slate-400'
                                     }`}>
@@ -802,10 +1930,10 @@ export default function App() {
                                   </div>
                                   <div className="flex items-center gap-2">
                                     {isUserAnswer && (
-                                      <span className="text-[9px] font-black uppercase tracking-widest opacity-60">Svarat</span>
+                                      <span className="text-[8px] sm:text-[9px] font-black uppercase tracking-widest opacity-60">{t(lang, 'answered')}</span>
                                     )}
-                                    {isCorrectAnswer && <CheckCircle2 className="w-4 h-4 shrink-0" />}
-                                    {isUserAnswer && !isCorrectAnswer && <XCircle className="w-4 h-4 shrink-0" />}
+                                    {isCorrectAnswer && <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />}
+                                    {isUserAnswer && !isCorrectAnswer && <XCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />}
                                   </div>
                                 </div>
                               );
@@ -818,62 +1946,100 @@ export default function App() {
 
                   <button 
                     onClick={() => setViewingParticipantId(null)}
-                    className="w-full mt-6 py-5 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase shadow-lg shadow-slate-200 hover:bg-slate-800 active:scale-95 transition-all shrink-0"
+                    className="w-full mt-6 py-4 sm:py-5 bg-slate-900 text-white rounded-[1.25rem] sm:rounded-2xl font-black text-xs sm:text-sm uppercase shadow-lg shadow-slate-200 hover:bg-slate-800 active:scale-95 transition-all shrink-0"
                   >
-                    Tillbaka till listan
+                    {t(lang, 'backToList')}
                   </button>
                 </motion.div>
-              ) : (
+              )) : (
                 <div className="space-y-6">
-                  <div className="bg-white rounded-[3rem] p-10 shadow-2xl border border-indigo-200/50 text-center">
-                    <div className="w-24 h-24 bg-yellow-400 rounded-[2rem] flex items-center justify-center mx-auto mb-8 shadow-xl rotate-6 border-4 border-white">
-                      <Trophy className="text-indigo-900 w-12 h-12" />
+                  <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-2xl border border-indigo-200/50 text-center">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-yellow-400 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white">
+                      <Trophy className="text-indigo-900 w-10 h-10 sm:w-12 sm:h-12" />
                     </div>
-                    <h2 className="text-5xl font-black text-slate-800 mb-2">Topplistan!</h2>
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-sm mb-10">Klicka på ett namn för att se detaljer</p>
+                    <h2 className="text-3xl sm:text-5xl font-black text-slate-800 mb-2">{t(lang, 'scoreboard')}</h2>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm mb-6 sm:mb-10">{t(lang, 'clickParticipantForDetails')}</p>
                     
-                    <div className="space-y-4">
-                      {participants
-                        .map(p => ({
-                          ...p,
-                          score: answers.filter(a => a.participantId === p.id && a.isCorrect).length,
-                          total: answers.filter(a => a.participantId === p.id).length
-                        }))
-                        .sort((a, b) => b.score - a.score)
-                        .map((p, idx) => (
-                          <button 
-                            key={p.id} 
-                            onClick={() => setViewingParticipantId(p.id)}
-                            className={`w-full flex items-center justify-between p-6 rounded-3xl border-4 transition-all hover:scale-[1.02] active:scale-95 ${
-                              idx === 0 ? 'bg-indigo-600 text-white border-indigo-800 shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-800'
-                            }`}
-                          >
-                            <div className="flex items-center gap-4 text-left">
-                              <span className={`text-2xl font-black ${idx === 0 ? 'text-yellow-300' : 'text-slate-300'}`}>#{idx + 1}</span>
-                              <div>
-                                <span className="font-black text-2xl block leading-none">{p.name}</span>
-                                <span className={`text-[10px] font-bold uppercase tracking-widest ${idx === 0 ? 'text-indigo-200' : 'text-slate-400'}`}>
-                                  {p.type} • {p.total} svarade
-                                </span>
+                    <div className="space-y-3 sm:space-y-4">
+                      {(() => {
+                        const allQuestions = [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions];
+                        const hasOptionQuestions = allQuestions.some(q => (q.type || 'options') === 'options');
+                        const hasPointQuestions = allQuestions.some(q => q.type === 'points');
+
+                        return participants
+                          .map(p => {
+                            const pAnswers = answers.filter(a => a.participantId === p.id);
+                            const score = pAnswers.filter(a => a.isCorrect === true).length;
+                            const totalPoints = pAnswers.filter(a => typeof a.pointsScored === 'number').reduce((sum, a) => sum + (a.pointsScored || 0), 0);
+                            const total = pAnswers.length;
+
+                            return {
+                              ...p,
+                              score,
+                              totalPoints,
+                              total
+                            };
+                          })
+                          .sort((a, b) => {
+                            if (hasOptionQuestions && hasPointQuestions) {
+                              return (b.score + b.totalPoints) - (a.score + a.totalPoints);
+                            } else if (hasPointQuestions) {
+                              return b.totalPoints - a.totalPoints;
+                            } else {
+                              return b.score - a.score;
+                            }
+                          })
+                          .map((p, idx) => (
+                            <button 
+                              key={p.id} 
+                              onClick={() => setViewingParticipantId(p.id)}
+                              className={`w-full flex items-center justify-between p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all hover:scale-[1.02] active:scale-95 ${
+                                idx === 0 ? 'bg-indigo-600 text-white border-indigo-800 shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 sm:gap-4 text-left min-w-0">
+                                <span className={`text-xl sm:text-2xl font-black shrink-0 ${idx === 0 ? 'text-yellow-300' : 'text-slate-300'}`}>#{idx + 1}</span>
+                                <div className="min-w-0">
+                                  <span className="font-black text-lg sm:text-xl block leading-none truncate">{p.name}</span>
+                                  <span className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-widest ${idx === 0 ? 'text-indigo-200' : 'text-slate-400'}`}>
+                                    {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')} • {p.total} {t(lang, 'answered')}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <span className="text-4xl font-black">{p.score}</span>
-                                <span className={`text-sm font-bold opacity-60 ml-1`}>poäng</span>
+
+                              <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                                <div className="text-right flex items-center gap-2 sm:gap-3">
+                                  {hasOptionQuestions && (
+                                    <div className="text-right">
+                                      <span className="text-xl sm:text-3xl font-black">{p.score}</span>
+                                      <span className={`text-[10px] sm:text-xs font-bold opacity-75 ml-1 ${idx === 0 ? 'text-indigo-100' : 'text-slate-500'}`}>{t(lang, 'correct')}</span>
+                                    </div>
+                                  )}
+
+                                  {hasOptionQuestions && hasPointQuestions && (
+                                    <span className={`text-lg sm:text-xl font-black ${idx === 0 ? 'text-indigo-300' : 'text-slate-300'}`}>+</span>
+                                  )}
+
+                                  {hasPointQuestions && (
+                                    <div className="text-right">
+                                      <span className={`text-xl sm:text-3xl font-black ${idx === 0 ? 'text-yellow-300' : 'text-amber-600'}`}>{p.totalPoints}</span>
+                                      <span className={`text-[10px] sm:text-xs font-bold opacity-80 ml-1 ${idx === 0 ? 'text-indigo-100' : 'text-amber-700'}`}>{t(lang, 'pointsTotal')}</span>
+                                    </div>
+                                  )}
+                                </div>
+                                <ChevronRight className={`w-4 h-4 sm:w-5 sm:h-5 ${idx === 0 ? 'text-white/40' : 'text-slate-300'}`} />
                               </div>
-                              <ChevronRight className={`w-5 h-5 ${idx === 0 ? 'text-white/40' : 'text-slate-300'}`} />
-                            </div>
-                          </button>
-                        ))}
+                            </button>
+                          ));
+                      })()}
                     </div>
 
-                    <div className="pt-10 flex gap-4">
+                    <div className="pt-8 sm:pt-10 flex flex-col sm:flex-row gap-3 sm:gap-4">
                       <button 
-                        onClick={resetQuiz}
-                        className="flex-1 py-5 bg-slate-100 text-slate-600 rounded-2xl font-black text-sm uppercase hover:bg-slate-200 transition-colors active:scale-95"
+                        onClick={() => setShowResetConfirm(true)}
+                        className="w-full py-4 sm:py-5 bg-slate-100 text-slate-600 rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase hover:bg-slate-200 transition-colors active:scale-95"
                       >
-                        Starta om 🔄
+                        {t(lang, 'restartBtn')}
                       </button>
                       <button 
                         onClick={() => {
@@ -881,10 +2047,196 @@ export default function App() {
                           setSelectedQuestionIndex(null);
                           setSelectedParticipantId(null);
                         }}
-                        className="flex-1 py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase hover:bg-indigo-700 transition-colors shadow-lg active:scale-95"
+                        className="w-full py-4 sm:py-5 bg-indigo-600 text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase hover:bg-indigo-700 transition-colors shadow-lg active:scale-95"
                       >
-                        Tillbaka till frågor 🎯
+                        {t(lang, 'backToQuestionsBtn')}
                       </button>
+                    </div>
+
+                    <div className="pt-8 sm:pt-10 border-t border-slate-100">
+                      {!isFacitUnlocked ? (
+                        <div className="space-y-4">
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t(lang, 'seeAnswersTitle')}</label>
+                            <div className="flex gap-2">
+                              <input 
+                                type="password"
+                                placeholder={t(lang, 'enterQuizPassword')}
+                                className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono outline-none focus:border-indigo-500 transition-all shadow-sm"
+                                value={facitPasswordInput}
+                                onChange={(e) => setFacitPasswordInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                                      setIsFacitUnlocked(true);
+                                    } else {
+                                      alert(t(lang, 'wrongPasswordAlert'));
+                                    }
+                                  }
+                                }}
+                              />
+                              <button 
+                                onClick={() => {
+                                  if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                                    setIsFacitUnlocked(true);
+                                  } else {
+                                    alert(t(lang, 'wrongPasswordAlert'));
+                                  }
+                                }}
+                                className="px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase shadow-md transition-all active:scale-95"
+                              >
+                                {t(lang, 'showFacitBtn')}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between gap-4 bg-emerald-500 p-4 rounded-2xl shadow-lg border border-emerald-400">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                                <Check className="w-6 h-6 text-white stroke-[3]" />
+                              </div>
+                              <div>
+                                <h3 className="font-black text-sm text-white">{t(lang, 'facitUnlocked')}</h3>
+                                <p className="text-[11px] text-emerald-100 font-medium">{t(lang, 'facitUnlockedDesc')}</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setIsFacitUnlocked(false);
+                                setFacitPasswordInput('');
+                              }}
+                              className="w-10 h-10 bg-black/10 hover:bg-black/20 text-white rounded-xl flex items-center justify-center transition-all"
+                              title={t(lang, 'hideFacit')}
+                            >
+                              ✕
+                            </button>
+                          </div>
+
+                          <div className="space-y-10">
+                            {/* Barnfrågor */}
+                            {quizConfig.barnQuestions.length > 0 && (
+                              <div className="space-y-5">
+                                <div className="flex items-center justify-between px-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-6 bg-indigo-500 rounded-full" />
+                                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">Barnfrågor ({quizConfig.barnQuestions.length})</h4>
+                                  </div>
+                                </div>
+                                <div className="grid gap-4">
+                                  {quizConfig.barnQuestions.map((qRaw, idx) => {
+                                    const trans = translateQuestion(qRaw.id, qRaw.text, qRaw.options || [], lang, qRaw.originalLanguage);
+                                    const q = { ...qRaw, text: trans.text, options: trans.options };
+                                    return (
+                                    <div key={q.id} className="bg-slate-50 border border-slate-200/60 rounded-3xl p-5 sm:p-6 shadow-sm">
+                                      <div className="flex gap-4 mb-4">
+                                        <span className="w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-xs font-black text-indigo-600 shadow-sm shrink-0">{idx + 1}</span>
+                                        <p className="text-base font-bold text-slate-800 leading-tight pt-1">{q.text}</p>
+                                      </div>
+                                      {q.type === 'points' ? (
+                                        <div className="p-3.5 bg-amber-50 rounded-2xl text-xs font-bold border border-amber-200 text-amber-900 flex items-center justify-between">
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🎯</span>
+                                            <span>Poängfråga (inget facit för svarsalternativ)</span>
+                                          </span>
+                                          {q.maxPoints && (
+                                            <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                                              Max: {q.maxPoints} p
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                          {q.options.map((opt, oIdx) => (
+                                            <div 
+                                              key={oIdx}
+                                              className={`p-3 rounded-2xl text-xs font-bold text-center border transition-all flex items-center justify-center gap-3 ${
+                                                (q?.correctAnswers || []).includes(oIdx) 
+                                                  ? 'bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-100 scale-[1.02]' 
+                                                  : 'bg-white border-slate-100 text-slate-400 opacity-60'
+                                              }`}
+                                            >
+                                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
+                                                (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
+                                              }`}>
+                                                {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                              </span>
+                                              <span className="flex-1">{opt}</span>
+                                              {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Vuxenfrågor */}
+                            {quizConfig.vuxenQuestions.length > 0 && (
+                              <div className="space-y-5">
+                                <div className="flex items-center justify-between px-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-6 bg-indigo-500 rounded-full" />
+                                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-widest">Vuxenfrågor ({quizConfig.vuxenQuestions.length})</h4>
+                                  </div>
+                                </div>
+                                <div className="grid gap-4">
+                                  {quizConfig.vuxenQuestions.map((qRaw, idx) => {
+                                    const trans = translateQuestion(qRaw.id, qRaw.text, qRaw.options || [], lang, qRaw.originalLanguage);
+                                    const q = { ...qRaw, text: trans.text, options: trans.options };
+                                    return (
+                                    <div key={q.id} className="bg-slate-50 border border-slate-200/60 rounded-3xl p-5 sm:p-6 shadow-sm">
+                                      <div className="flex gap-4 mb-4">
+                                        <span className="w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-xs font-black text-indigo-600 shadow-sm shrink-0">{idx + 1}</span>
+                                        <p className="text-base font-bold text-slate-800 leading-tight pt-1">{q.text}</p>
+                                      </div>
+                                      {q.type === 'points' ? (
+                                        <div className="p-3.5 bg-amber-50 rounded-2xl text-xs font-bold border border-amber-200 text-amber-900 flex items-center justify-between">
+                                          <span className="flex items-center gap-2">
+                                            <span className="text-base">🎯</span>
+                                            <span>Poängfråga (inget facit för svarsalternativ)</span>
+                                          </span>
+                                          {q.maxPoints && (
+                                            <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                                              Max: {q.maxPoints} p
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                          {q.options.map((opt, oIdx) => (
+                                            <div 
+                                              key={oIdx}
+                                              className={`p-3 rounded-2xl text-xs font-bold text-center border transition-all flex items-center justify-center gap-3 ${
+                                                (q?.correctAnswers || []).includes(oIdx) 
+                                                  ? 'bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-100 scale-[1.02]' 
+                                                  : 'bg-white border-slate-100 text-slate-400 opacity-60'
+                                              }`}
+                                            >
+                                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
+                                                (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
+                                              }`}>
+                                                {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                              </span>
+                                              <span className="flex-1">{opt}</span>
+                                              {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -900,288 +2252,1187 @@ export default function App() {
               className="max-w-2xl mx-auto w-full"
             >
               {!isConfigUnlocked ? (
-                <div className="bg-white rounded-[3rem] p-10 border border-indigo-200/50 shadow-2xl text-center space-y-6">
+                <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 border border-indigo-200/50 shadow-2xl text-center space-y-6">
                   <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto">
                     <Lock className="text-slate-600 w-8 h-8" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black text-slate-800">Inställningar låsta</h2>
-                    <p className="text-slate-500 text-sm mt-1">Ange administratörslösenordet.</p>
+                    <h2 className="text-2xl font-black text-slate-800">{t(lang, 'settingsLocked')}</h2>
+                    <p className="text-slate-500 text-sm mt-1">{t(lang, 'enterAdminPasswordPrompt')}</p>
                   </div>
                   <div className="flex flex-col gap-2">
                     <input 
                       type="password" 
-                      placeholder="Admin lösenord..."
+                      placeholder={t(lang, 'adminPasswordPlaceholder')}
                       className="p-4 bg-slate-50 rounded-2xl border border-slate-200 outline-none focus:border-indigo-500 text-center"
                       value={configMasterPasswordInput}
                       onChange={(e) => setConfigMasterPasswordInput(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter' && configMasterPasswordInput === 'Password') {
-                          setIsConfigUnlocked(true);
+                        const currentPassword = quizConfig.password || 'Password';
+                        if (e.key === 'Enter') {
+                          if (configMasterPasswordInput === 'Password') {
+                            setIsConfigUnlocked(true);
+                            setIsAdmin(true);
+                          } else if (configMasterPasswordInput === currentPassword) {
+                            setIsConfigUnlocked(true);
+                            setIsAdmin(false);
+                          } else {
+                            alert(t(lang, 'wrongPasswordAlert'));
+                          }
                         }
                       }}
                     />
                     <button 
                       onClick={() => {
+                        const currentPassword = quizConfig.password || 'Password';
                         if (configMasterPasswordInput === 'Password') {
                           setIsConfigUnlocked(true);
+                          setIsAdmin(true);
+                        } else if (configMasterPasswordInput === currentPassword) {
+                          setIsConfigUnlocked(true);
+                          setIsAdmin(false);
                         } else {
-                          alert('Fel lösenord!');
+                          alert(t(lang, 'wrongPasswordAlert'));
                         }
                       }}
                       className="w-full py-4 bg-slate-900 text-white rounded-2xl font-bold hover:bg-slate-800 transition-colors"
                     >
-                      Lås upp inställningar
+                      {t(lang, 'unlockSettingsBtn')}
                     </button>
                     <button 
                       onClick={() => setView('setup')}
                       className="w-full py-2 text-slate-400 text-sm hover:underline"
                     >
-                      Avbryt
+                      {t(lang, 'cancelBtn')}
                     </button>
-
-                    <div className="pt-4 border-t border-slate-100">
-                      <button 
-                        onClick={() => {
-                          if (confirm('Är du säker på att du vill ta bort ALLA deltagare och deras svar?')) {
-                            setParticipants([]);
-                            setAnswers([]);
-                            alert('Alla namn och svar har raderats.');
-                          }
-                        }}
-                        className="w-full py-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 hover:bg-rose-100 transition-all font-black text-[10px] uppercase flex items-center justify-center gap-2"
-                      >
-                        <Trash2 className="w-3 h-3" /> Rensa alla deltagare
-                      </button>
-                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="bg-white rounded-[3rem] p-10 border border-indigo-200/50 shadow-2xl space-y-8">
-                  <div className="flex items-center justify-between">
+                <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-5 sm:p-8 border border-indigo-200/50 shadow-2xl space-y-6">
+                  {/* Top Bar / Header */}
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center">
-                        <Settings className="text-white w-5 h-5" />
+                      <div className="w-10 h-10 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-md">
+                        <Settings className="w-5 h-5" />
                       </div>
-                      <h2 className="text-2xl font-black text-slate-800">Hantera Quiz</h2>
+                      <div>
+                        <h2 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">{t(lang, 'settingsTitle')}</h2>
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{quizConfig.title || 'Tipspromenad'}</p>
+                      </div>
                     </div>
-                    <button 
-                      onClick={() => {
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => setShowSettingsHelp(true)}
+                        className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors active:scale-95 shadow-sm border border-indigo-200/50"
+                        title={t(lang, 'settingsHelpTitle')}
+                      >
+                        <HelpCircle className="w-5 h-5" />
+                      </button>
+                      <button 
+                        onClick={() => {
                         setView('setup');
                         setIsConfigUnlocked(false);
                         setConfigMasterPasswordInput('');
                       }} 
-                      className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors font-black"
+                      className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors font-black text-lg active:scale-95"
+                      title={t(lang, 'closeSettingsBtn')}
                     >
                       ×
                     </button>
                   </div>
+                </div>
 
-                  {/* Quiz Configuration */}
-                  <div className="space-y-6">
-                    <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100 space-y-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Edit2 className="w-4 h-4 text-indigo-600" />
-                        <h3 className="font-black text-xs text-slate-400 uppercase tracking-widest">Quiz Rubrik</h3>
-                      </div>
-                      <div className="flex gap-2">
-                        <input 
-                          type="text" 
-                          placeholder="Namn på quizet..."
-                          className="flex-1 p-3 bg-white rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-500"
-                          value={newQuizTitle}
-                          onChange={(e) => setNewQuizTitle(e.target.value)}
-                        />
-                        <button 
-                          onClick={() => {
-                            setQuizConfig({ ...quizConfig, title: newQuizTitle });
-                            alert('Rubriken har uppdaterats!');
-                          }}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs uppercase"
-                        >
-                          Spara
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100 space-y-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Lock className="w-4 h-4 text-indigo-600" />
-                        <h3 className="font-black text-xs text-slate-400 uppercase tracking-widest">Lösenord för resultat</h3>
-                      </div>
-                      <div className="flex gap-2">
-                        <input 
-                          type="text" 
-                          placeholder="Nytt lösenord för resultat..."
-                          className="flex-1 p-3 bg-white rounded-xl border border-slate-200 text-sm outline-none focus:border-indigo-500"
-                          value={newQuizPassword}
-                          onChange={(e) => setNewQuizPassword(e.target.value)}
-                        />
-                        <button 
-                          onClick={() => {
-                            setQuizConfig({ ...quizConfig, password: newQuizPassword });
-                            alert('Resultatlösenordet har uppdaterats!');
-                          }}
-                          className="px-4 py-2 bg-indigo-600 text-white rounded-xl font-bold text-xs uppercase"
-                        >
-                          Spara
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-slate-400 italic">Nuvarande: {quizConfig.password || 'Inget'}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    <button 
-                      onClick={shareConfig}
-                      className="flex flex-col items-center gap-3 p-8 bg-indigo-50 rounded-[2rem] border-4 border-indigo-100 hover:border-indigo-500 transition-all text-indigo-600 font-black group"
+                  {/* Navigation Tabs */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
+                    <button
+                      onClick={() => setConfigTab('questions')}
+                      className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                        configTab === 'questions' 
+                          ? 'bg-white text-indigo-600 shadow-md border border-indigo-100' 
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
                     >
-                      <Share2 className="w-8 h-8 group-hover:scale-110 transition-transform" />
-                      <span className="text-xs uppercase tracking-widest">Kopiera Kod (Messenger)</span>
+                      <HelpCircle className="w-4 h-4" />
+                      <span>{t(lang, 'questionsTab')}</span>
+                      <span className="hidden sm:inline-block text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full font-black">
+                        {quizConfig.barnQuestions.length + quizConfig.vuxenQuestions.length}
+                      </span>
+                    </button>
+
+                    {isAdmin && (
+                      <button
+                        onClick={() => setConfigTab('ai')}
+                        className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                          configTab === 'ai' 
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' 
+                            : 'text-slate-500 hover:text-slate-800'
+                        }`}
+                      >
+                        <Sparkles className="w-4 h-4" />
+                        <span>{t(lang, 'aiTab')}</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => setConfigTab('general')}
+                      className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                        configTab === 'general' 
+                          ? 'bg-white text-indigo-600 shadow-md border border-indigo-100' 
+                          : 'text-slate-500 hover:text-slate-800'
+                      } ${!isAdmin ? 'col-span-1' : ''}`}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                      <span>{t(lang, 'generalTab')}</span>
                     </button>
                   </div>
 
-                  <div className="pt-8 border-t border-slate-100 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-black text-xs text-slate-400 uppercase tracking-widest">Frågor i detta Quiz</h3>
-                      <div className="flex gap-2">
+                  {/* TAB 1: QUESTIONS EDITOR */}
+                  {configTab === 'questions' && (
+                    <div className="space-y-5">
+                      {/* Category Switcher Pills */}
+                      <div className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200/60">
                         <button 
-                          onClick={() => setEditingQuestionsCategory(editingQuestionsCategory === 'barn' ? null : 'barn')}
-                          className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${
-                            editingQuestionsCategory === 'barn' ? 'bg-amber-400 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                          onClick={() => setEditingQuestionsCategory('barn')}
+                          className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                            editingQuestionsCategory === 'barn' 
+                              ? 'bg-amber-400 text-white shadow-md' 
+                              : 'text-slate-500 hover:bg-slate-200/60'
                           }`}
                         >
-                          Barn 🧒
+                          <span>{t(lang, 'childrenQuestionsCategory')} 🧒</span>
+                          <span className="bg-white/30 text-white px-2 py-0.5 rounded-full text-[10px]">
+                            {quizConfig.barnQuestions.length}
+                          </span>
                         </button>
                         <button 
-                          onClick={() => setEditingQuestionsCategory(editingQuestionsCategory === 'vuxen' ? null : 'vuxen')}
-                          className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${
-                            editingQuestionsCategory === 'vuxen' ? 'bg-pink-400 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                          onClick={() => setEditingQuestionsCategory('vuxen')}
+                          className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                            editingQuestionsCategory === 'vuxen' 
+                              ? 'bg-pink-400 text-white shadow-md' 
+                              : 'text-slate-500 hover:bg-slate-200/60'
                           }`}
                         >
-                          Vuxen 🧔
+                          <span>{t(lang, 'adultQuestionsCategory')} 🧔</span>
+                          <span className="bg-white/30 text-white px-2 py-0.5 rounded-full text-[10px]">
+                            {quizConfig.vuxenQuestions.length}
+                          </span>
                         </button>
                       </div>
-                    </div>
 
-                    <AnimatePresence mode="wait">
-                      {editingQuestionsCategory && (
-                        <motion.div 
-                          key={editingQuestionsCategory}
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="space-y-4"
-                        >
-                          <div className="max-h-96 overflow-y-auto pr-2 custom-scrollbar space-y-3">
-                            {(editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions).map((q, idx) => (
-                              <div key={q.id} className="bg-slate-50 border border-slate-100 rounded-2xl overflow-hidden">
+                      {/* Search & Bulk Toolbar */}
+                      <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200/60 space-y-3">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input 
+                            type="text"
+                            placeholder={t(lang, 'searchQuestionsPlaceholder')}
+                            value={questionSearch}
+                            onChange={(e) => setQuestionSearch(e.target.value)}
+                            className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-medium outline-none focus:border-indigo-500"
+                          />
+                          {questionSearch && (
+                            <button 
+                              onClick={() => setQuestionSearch('')}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-sm"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={selectAllQuestions}
+                              className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-[11px] font-extrabold text-slate-700 hover:bg-slate-100 transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+                            >
+                              <CheckSquare className="w-3.5 h-3.5 text-indigo-600" />
+                              {(editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions).length === selectedQuestionIds.length && selectedQuestionIds.length > 0
+                                ? t(lang, 'deselectAllBtn')
+                                : t(lang, 'selectAllBtn')}
+                            </button>
+                            {selectedQuestionIds.length > 0 && (
+                              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
+                                {t(lang, 'selectedCount', { count: selectedQuestionIds.length.toString() })}
+                              </span>
+                            )}
+                          </div>
+
+                          {isAdmin && selectedQuestionIds.length > 0 && (
+                            <button 
+                              onClick={() => setShowBulkDeleteConfirm(true)}
+                              className="px-3.5 py-1.5 bg-rose-600 text-white rounded-xl text-[11px] font-black uppercase shadow-md shadow-rose-200 hover:bg-rose-700 transition-all flex items-center gap-1.5 active:scale-95"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>{t(lang, 'deleteSelectedCount', { count: selectedQuestionIds.length.toString() })}</span>
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60">
+                          <input 
+                            type="text"
+                            placeholder={t(lang, 'selectByNumbersPlaceholder')}
+                            value={numberSelectionInput}
+                            onChange={(e) => setNumberSelectionInput(e.target.value)}
+                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 font-medium"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                selectQuestionsByNumbers();
+                              }
+                            }}
+                          />
+                          <button 
+                            onClick={selectQuestionsByNumbers}
+                            className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-900 transition-all shrink-0 active:scale-95"
+                          >
+                            {t(lang, 'selectNumbersBtn')}
+                          </button>
+                          {selectedQuestionIds.length > 0 && (
+                            <button 
+                              onClick={() => setSelectedQuestionIds([])}
+                              className="px-2 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold shrink-0"
+                            >
+                              {t(lang, 'clearSelectionBtn')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Question List */}
+                      <div className="max-h-[460px] overflow-y-auto pr-1.5 custom-scrollbar space-y-3">
+                        {(editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions)
+                          .map(qRaw => {
+                            const trans = translateQuestion(qRaw.id, qRaw.text, qRaw.options || [], lang, qRaw.originalLanguage);
+                            return { ...qRaw, text: trans.text, options: trans.options };
+                          })
+                          .filter(q => !questionSearch || q.text.toLowerCase().includes(questionSearch.toLowerCase()))
+                          .map((q, idx) => {
+                            const isSelected = selectedQuestionIds.includes(q.id);
+                            return (
+                              <div 
+                                key={q.id} 
+                                className={`border rounded-2xl overflow-hidden transition-all ${
+                                  isSelected ? 'bg-rose-50/60 border-rose-300 shadow-sm' : 'bg-slate-50 border-slate-200/70 hover:border-indigo-200'
+                                }`}
+                              >
                                 <div 
-                                  className="w-full p-4 flex items-center justify-between hover:bg-slate-100/50 transition-colors cursor-pointer"
-                                  onClick={() => setExpandedQuestionId(expandedQuestionId === q.id ? null : q.id)}
+                                  className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors cursor-pointer"
+                                  onClick={() => setFullScreenEditingQuestionId(q.id)}
                                 >
-                                  <div className="flex items-center gap-3 text-left">
-                                    <span className="w-6 h-6 bg-white border border-slate-200 rounded-lg flex items-center justify-center text-[10px] font-black text-slate-400">
+                                  <div className="flex items-center gap-2.5 text-left min-w-0 pr-2">
+                                    <button 
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleSelectQuestion(q.id);
+                                      }}
+                                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${
+                                        isSelected 
+                                          ? 'bg-rose-500 border-rose-500 text-white shadow-sm' 
+                                          : 'bg-white border-slate-300 text-transparent hover:border-indigo-400'
+                                      }`}
+                                    >
+                                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                    </button>
+
+                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
+                                      isSelected ? 'bg-rose-100 text-rose-700' : 'bg-white border border-slate-200 text-slate-500'
+                                    }`}>
                                       {idx + 1}
                                     </span>
-                                    <span className="text-sm font-bold text-slate-700 truncate max-w-[180px]">{q.text}</span>
+
+                                    <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">{q.text}</span>
+
+                                    {q.location && (
+                                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 flex items-center gap-1">
+                                        <MapPin className="w-3 h-3" /> {t(lang, 'mapTabName')}
+                                      </span>
+                                    )}
                                   </div>
-                                  <div className="flex items-center gap-2">
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {isAdmin && (
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          deleteQuestion(editingQuestionsCategory, q.id);
+                                        }}
+                                        className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                        title={t(lang, 'deleteQuestionBtn')}
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
                                     <button 
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        deleteQuestion(editingQuestionsCategory, q.id);
+                                        setFullScreenEditingQuestionId(q.id);
                                       }}
-                                      className="p-2 text-rose-400 hover:text-rose-600 transition-colors"
+                                      className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                      title={t(lang, 'openQuestionBtn')}
                                     >
-                                      <Trash2 className="w-4 h-4" />
+                                      <Maximize2 className="w-4 h-4" />
                                     </button>
-                                    {expandedQuestionId === q.id ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
                                   </div>
                                 </div>
-
-                                <AnimatePresence>
-                                  {expandedQuestionId === q.id && (
-                                    <motion.div 
-                                      initial={{ opacity: 0, height: 0 }}
-                                      animate={{ opacity: 1, height: 'auto' }}
-                                      exit={{ opacity: 0, height: 0 }}
-                                      className="p-4 pt-0 space-y-4 border-t border-slate-200/50"
-                                    >
-                                      <div className="space-y-1">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Frågetext</label>
-                                        <textarea 
-                                          className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-500 custom-scrollbar"
-                                          value={q.text}
-                                          rows={2}
-                                          onChange={(e) => updateQuestion(editingQuestionsCategory, q.id, { text: e.target.value })}
-                                        />
-                                      </div>
-
-                                      <div className="space-y-3">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Svarsalternativ</label>
-                                        <div className="space-y-2">
-                                          {q.options.map((opt, oIdx) => (
-                                            <div key={oIdx} className="flex gap-2 items-center">
-                                              <button 
-                                                onClick={() => updateQuestion(editingQuestionsCategory, q.id, { correctAnswer: oIdx })}
-                                                className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-[10px] transition-all ${
-                                                  q.correctAnswer === oIdx ? 'bg-emerald-500 text-white shadow-lg' : 'bg-white border border-slate-200 text-slate-400'
-                                                }`}
-                                              >
-                                                {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : '2'}
-                                              </button>
-                                              <input 
-                                                type="text"
-                                                className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500"
-                                                value={opt}
-                                                onChange={(e) => {
-                                                  const newOpts = [...q.options];
-                                                  newOpts[oIdx] = e.target.value;
-                                                  updateQuestion(editingQuestionsCategory, q.id, { options: newOpts });
-                                                }}
-                                              />
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
                               </div>
-                            ))}
-                          </div>
-                          
-                          <button 
-                            onClick={() => addNewQuestion(editingQuestionsCategory)}
-                            className="w-full py-4 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center gap-2 text-slate-400 font-bold hover:bg-slate-50 transition-all text-xs"
-                          >
-                            <Plus className="w-4 h-4" /> Lägg till fråga
-                          </button>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-
-                    <div className="space-y-4">
-                      <h3 className="font-black text-xs text-slate-400 uppercase tracking-widest">Statistik & Data</h3>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100">
-                        <p className="text-[10px] font-black text-slate-400 uppercase">Frågor</p>
-                        <p className="text-2xl font-black text-slate-800">{totalQuestions}</p>
+                            );
+                          })}
                       </div>
-                      <div className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100">
-                        <p className="text-[10px] font-black text-slate-400 uppercase">Deltagare</p>
-                        <p className="text-2xl font-black text-slate-800">{participants.length}</p>
+
+                      {isAdmin && (
+                        <button 
+                          onClick={() => setShowCreateQuestionModal(editingQuestionsCategory)}
+                          className="w-full py-3.5 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                        >
+                          <Plus className="w-4 h-4" /> {t(lang, 'addNewQuestionBtn', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: AI GENERATOR */}
+                  {configTab === 'ai' && (
+                    <div className="space-y-6">
+                      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-3xl border-2 border-indigo-100 space-y-5">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-sm">
+                            <Sparkles className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-sm text-indigo-900 uppercase tracking-wider">{t(lang, 'aiGenerateTitle')}</h3>
+                            <p className="text-xs text-indigo-700 font-medium">{t(lang, 'aiGenerateDesc')}</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4 pt-2">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'categoryLabel')}</label>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => setAiTarget('barn')}
+                                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all ${
+                                  aiTarget === 'barn' ? 'bg-amber-400 text-white shadow-md' : 'bg-white text-slate-500 border border-indigo-100'
+                                }`}
+                              >
+                                {t(lang, 'kids')} 🧒
+                              </button>
+                              <button 
+                                onClick={() => setAiTarget('vuxen')}
+                                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all ${
+                                  aiTarget === 'vuxen' ? 'bg-pink-400 text-white shadow-md' : 'bg-white text-slate-500 border border-indigo-100'
+                                }`}
+                              >
+                                {t(lang, 'adults')} 🧔
+                              </button>
+                              <button 
+                                onClick={() => setAiTarget('båda')}
+                                className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase transition-all ${
+                                  aiTarget === 'båda' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-500 border border-indigo-100'
+                                }`}
+                              >
+                                {t(lang, 'bothCategory')} 🔄
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'themeTopicLabel')}</label>
+                            <input 
+                              type="text" 
+                              placeholder={t(lang, 'themeTopicPlaceholder')}
+                              className="w-full p-3.5 bg-white rounded-xl border border-indigo-200 text-sm font-medium outline-none focus:border-indigo-500 shadow-sm"
+                              value={aiTopic}
+                              onChange={(e) => setAiTopic(e.target.value)}
+                            />
+                            {/* Topic chips */}
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {(t(lang, 'aiTopicPresets') as unknown as string[]).map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => setAiTopic(preset)}
+                                  className="px-2.5 py-1 bg-white/80 hover:bg-white text-indigo-700 text-[10px] font-bold rounded-lg border border-indigo-100 shadow-2xs transition-all active:scale-95"
+                                >
+                                  + {preset}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-end">
+                            <div className="flex-1 space-y-1.5">
+                              <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'questionCountPerCategoryLabel')}</label>
+                              <input 
+                                type="number" 
+                                min="1"
+                                max="15"
+                                className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                value={aiCount}
+                                onChange={(e) => setAiCount(parseInt(e.target.value) || 1)}
+                              />
+                            </div>
+                            {(aiTarget === 'barn' || aiTarget === 'båda') && (
+                              <>
+                                <div className="flex-1 space-y-1.5">
+                                  <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'aiKidAgeFromLabel')}</label>
+                                  <input 
+                                    type="number" 
+                                    min="1"
+                                    max="18"
+                                    className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                    value={aiKidAgeFrom}
+                                    onChange={(e) => setAiKidAgeFrom(parseInt(e.target.value) || 1)}
+                                  />
+                                </div>
+                                <div className="flex-1 space-y-1.5">
+                                  <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'aiKidAgeToLabel')}</label>
+                                  <input 
+                                    type="number" 
+                                    min="1"
+                                    max="18"
+                                    className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                    value={aiKidAgeTo}
+                                    onChange={(e) => setAiKidAgeTo(parseInt(e.target.value) || 1)}
+                                  />
+                                </div>
+                              </>
+                            )}
+                            <button 
+                              onClick={generateWithAi}
+                              disabled={isGenerating || !aiTopic}
+                              className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-indigo-200 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap active:scale-95 transition-all"
+                            >
+                              {isGenerating ? (
+                                <>
+                                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                  <span>{t(lang, 'generatingWithAi')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-4 h-4" />
+                                  <span>{t(lang, 'generateQuestionsNowBtn')}</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          <p className="text-[11px] text-indigo-700 font-bold bg-indigo-100/80 p-3 rounded-xl flex items-center gap-2">
+                            <span>💡</span>
+                            <span>{t(lang, 'aiGeneratedNotice')}</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Format Guide & AI Prompts */}
+                      <div className="bg-slate-50 rounded-2xl border-2 border-slate-100 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <button 
+                            onClick={() => setShowFormatGuide(!showFormatGuide)}
+                            className="flex items-center gap-2 text-xs font-black text-slate-600 hover:text-indigo-600 transition-colors uppercase tracking-wider"
+                          >
+                            <HelpCircle className="w-4 h-4 text-indigo-500" />
+                            <span>{t(lang, 'formatGuideTitle')}</span>
+                            {showFormatGuide ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+                          </button>
+                        </div>
+
+                        <AnimatePresence>
+                          {showFormatGuide && (
+                            <motion.div 
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="space-y-3 pt-2 border-t border-slate-200/60 overflow-hidden"
+                            >
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => setFormatTab('text')}
+                                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${
+                                    formatTab === 'text' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200/70 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  <FileText className="w-3.5 h-3.5" /> {t(lang, 'simpleTextFormat')}
+                                </button>
+                                <button 
+                                  onClick={() => setFormatTab('json')}
+                                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${
+                                    formatTab === 'json' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200/70 text-slate-600 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  <Code className="w-3.5 h-3.5" /> {t(lang, 'jsonFormat')}
+                                </button>
+                              </div>
+
+                              {formatTab === 'text' ? (
+                                <div className="space-y-2.5">
+                                  <p className="text-[11px] text-slate-500 font-medium">{t(lang, 'textFormatExplanation')}</p>
+                                  <pre className="bg-slate-900 text-emerald-400 p-3.5 rounded-xl text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap select-all border border-slate-800">
+{t(lang, 'textFormatExample')}
+                                  </pre>
+                                  <button 
+                                    onClick={() => copyAiPrompt('text')}
+                                    className="w-full py-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98"
+                                  >
+                                    {copiedPrompt === 'text' ? (
+                                      <>
+                                        <Check className="w-4 h-4 text-emerald-600" />
+                                        <span className="text-emerald-600 font-extrabold">{t(lang, 'textPromptCopied')}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Sparkles className="w-4 h-4 text-indigo-500" />
+                                        <span>{t(lang, 'copyTextPromptBtn')}</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="space-y-2.5">
+                                  <p className="text-[11px] text-slate-500 font-medium">{t(lang, 'jsonFormatExplanation')}</p>
+                                  <pre className="bg-slate-900 text-emerald-400 p-3.5 rounded-xl text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap select-all border border-slate-800">
+{t(lang, 'jsonFormatExample')}
+                                  </pre>
+                                  <button 
+                                    onClick={() => copyAiPrompt('json')}
+                                    className="w-full py-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98"
+                                  >
+                                    {copiedPrompt === 'json' ? (
+                                      <>
+                                        <Check className="w-4 h-4 text-emerald-600" />
+                                        <span className="text-emerald-600 font-extrabold">{t(lang, 'jsonPromptCopied')}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-4 h-4 text-indigo-500" />
+                                        <span>{t(lang, 'copyJsonPromptBtn')}</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* TAB 3: GENERAL & CONFIG */}
+                  {configTab === 'general' && (
+                    <div className="space-y-6">
+                      {/* Quiz Title */}
+                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Edit2 className="w-4 h-4 text-indigo-600" />
+                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'quizTitleHeading')}</h3>
+                        </div>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder={t(lang, 'quizTitlePlaceholder')}
+                            className={`flex-1 p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
+                              isAdmin 
+                                ? 'bg-white border-slate-200 focus:border-indigo-500' 
+                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                            value={newQuizTitle}
+                            readOnly={!isAdmin}
+                            onChange={(e) => setNewQuizTitle(e.target.value)}
+                          />
+                          {isAdmin && (
+                            <button 
+                              onClick={() => {
+                                setQuizConfig({ ...quizConfig, title: newQuizTitle });
+                                alert(t(lang, 'titleUpdatedAlert'));
+                              }}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
+                            >
+                              {t(lang, 'saveBtn')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Password for Results */}
+                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Lock className="w-4 h-4 text-indigo-600" />
+                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'resultsPasswordHeading')}</h3>
+                        </div>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder={t(lang, 'newPasswordPlaceholder')}
+                            className={`flex-1 p-3 border rounded-xl text-sm font-mono outline-none transition-all ${
+                              isAdmin 
+                                ? 'bg-white border-slate-200 focus:border-indigo-500' 
+                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                            value={newQuizPassword}
+                            readOnly={!isAdmin}
+                            onChange={(e) => setNewQuizPassword(e.target.value)}
+                          />
+                          {isAdmin && (
+                            <button 
+                              onClick={() => {
+                                setQuizConfig({ ...quizConfig, password: newQuizPassword });
+                                alert(t(lang, 'passwordUpdatedAlert'));
+                              }}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
+                            >
+                              {t(lang, 'saveBtn')}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'currentPasswordLabel')} <span className="font-mono font-bold text-slate-600">{quizConfig.password || t(lang, 'noPasswordSet')}</span></p>
+                      </div>
+
+                      {/* Share & Import */}
+                      {isAdmin && (
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button 
+                              onClick={shareConfig}
+                              className={`flex items-center justify-center gap-3 p-4 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
+                                copiedConfigCode 
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
+                                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                              }`}
+                            >
+                              {copiedConfigCode ? (
+                                <>
+                                  <Check className="w-5 h-5 text-emerald-600 stroke-[3]" />
+                                  <span>{t(lang, 'codeCopiedToClipboard')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Share2 className="w-5 h-5" />
+                                  <span>{t(lang, 'copyCodeBtn')}</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button 
+                              onClick={() => setShowConfigInput(true)}
+                              className="flex items-center justify-center gap-3 p-4 bg-slate-100 hover:bg-slate-200 rounded-2xl border border-slate-200 transition-all text-slate-700 font-black text-xs uppercase shadow-2xs active:scale-95"
+                            >
+                              <Upload className="w-5 h-5 text-indigo-600" />
+                              <span>{t(lang, 'importExportJsonBtn')}</span>
+                            </button>
+                          </div>
+
+                          {/* Clipboard Notice Box */}
+                          <AnimatePresence>
+                            {copiedConfigCode && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                                className="p-4 bg-emerald-500 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                                    <Check className="w-5 h-5 text-white stroke-[3]" />
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-xs sm:text-sm">{t(lang, 'quizCodeCopiedTitle')}</p>
+                                    <p className="text-[11px] text-emerald-100 font-medium">{t(lang, 'quizCodeCopiedDesc')}</p>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={() => setCopiedConfigCode(false)}
+                                  className="text-emerald-100 hover:text-white p-1 font-black text-sm shrink-0"
+                                >
+                                  ✕
+                                </button>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      )}
+
+                      {/* Language Selection in Settings */}
+                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-4 h-4 text-indigo-600" />
+                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'language')}</h3>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {SUPPORTED_LANGUAGES.map((l) => (
+                            <button
+                              key={l.code}
+                              onClick={() => changeLanguage(l.code)}
+                              className={`p-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 border ${
+                                lang === l.code
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-black scale-105'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span className="text-lg leading-none">{l.flag}</span>
+                              <span>{t(lang, `lang_${l.code}` as any)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Stats Overview */}
+                      <div className="space-y-3 pt-2 border-t border-slate-100">
+                        <h3 className="font-black text-xs text-slate-400 uppercase tracking-widest">{t(lang, 'overviewDataHeading')}</h3>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="bg-amber-50 p-3.5 rounded-2xl border border-amber-100 text-center">
+                            <p className="text-[10px] font-black text-amber-600 uppercase">{t(lang, 'childrenQuestionsCategory')}</p>
+                            <p className="text-xl sm:text-2xl font-black text-amber-800">{quizConfig.barnQuestions.length}</p>
+                          </div>
+                          <div className="bg-pink-50 p-3.5 rounded-2xl border border-pink-100 text-center">
+                            <p className="text-[10px] font-black text-pink-600 uppercase">{t(lang, 'adultQuestionsCategory')}</p>
+                            <p className="text-xl sm:text-2xl font-black text-pink-800">{quizConfig.vuxenQuestions.length}</p>
+                          </div>
+                          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase">{t(lang, 'participantsTab')}</p>
+                            <p className="text-xl sm:text-2xl font-black text-slate-800">{participants.length}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Danger Zone */}
+                      {isAdmin && (
+                        <div className="pt-4 border-t border-slate-100 space-y-2">
+                          <button 
+                            onClick={() => setShowClearConfirm(true)}
+                            className="w-full py-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 hover:bg-rose-100 transition-all font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95"
+                          >
+                            <Trash2 className="w-4 h-4" /> {t(lang, 'clearAllDataBtn')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Settings Help Modal */}
+                  <AnimatePresence>
+                    {showSettingsHelp && (
+                      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+                        <motion.div 
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          onClick={() => setShowSettingsHelp(false)}
+                          className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
+                        />
+                        <motion.div 
+                          initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                          className="relative bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+                        >
+                          <div className="bg-indigo-600 p-8 text-white relative">
+                            <button 
+                              onClick={() => setShowSettingsHelp(false)}
+                              className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
+                            >
+                              <X className="w-5 h-5" />
+                            </button>
+                            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-4">
+                              <HelpCircle className="w-8 h-8" />
+                            </div>
+                            <h2 className="text-3xl font-black leading-tight">{t(lang, 'settingsHelpTitle')}</h2>
+                          </div>
+                          
+                          <div className="p-8 space-y-8 overflow-y-auto max-h-[60vh]">
+                            <div className="flex gap-4">
+                              <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 font-black">1</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep1')}</h3>
+                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep1Desc')}</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-4">
+                              <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0 font-black">2</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep2')}</h3>
+                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep2Desc')}</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-4">
+                              <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 font-black">3</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep3')}</h3>
+                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep3Desc')}</p>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-4">
+                              <div className="w-10 h-10 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center shrink-0 font-black">4</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep4')}</h3>
+                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep4Desc')}</p>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="p-6 bg-slate-50 border-t border-slate-100">
+                            <button 
+                              onClick={() => setShowSettingsHelp(false)}
+                              className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest transition-all"
+                            >
+                              {t(lang, 'confirm')}
+                            </button>
+                          </div>
+                        </motion.div>
+                      </div>
+                    )}
+                  </AnimatePresence>
                 </div>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Full-Screen Question Editor */}
+        <AnimatePresence>
+          {fullScreenEditingQuestionId && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[500] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 sm:p-6"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="w-full h-full sm:h-auto sm:max-h-[90vh] bg-slate-50 flex flex-col sm:rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden max-w-4xl mx-auto"
+              >
+                {(() => {
+                  const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                  const rawQ = questions.find(item => item.id === fullScreenEditingQuestionId);
+                  if (!rawQ) return null;
+                  const qIdx = questions.indexOf(rawQ);
+                  const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage);
+                  const q = { ...rawQ, text: trans.text, options: trans.options };
+
+                  return (
+                    <>
+                      {/* Editor Header */}
+                      <header className="p-5 sm:p-8 bg-slate-900 text-white flex items-center justify-between shrink-0">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-xl font-black">
+                            {qIdx + 1}
+                          </div>
+                          <div>
+                            <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight">{t(lang, 'editQuestionTitle')}</h2>
+                            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'categorySubheading', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}</p>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setFullScreenEditingQuestionId(null)}
+                          className="w-12 h-12 bg-white/10 hover:bg-white/20 rounded-2xl flex items-center justify-center transition-all active:scale-90"
+                        >
+                          <X className="w-6 h-6 stroke-[3]" />
+                        </button>
+                      </header>
+
+                      {/* Editor Content */}
+                      <div className="flex-1 overflow-y-auto p-5 sm:p-10 space-y-8 custom-scrollbar">
+                        {/* Question Text */}
+                        <div className="space-y-3">
+                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTextLabel')}</label>
+                          <textarea 
+                            className={`w-full p-5 sm:p-8 border-2 rounded-3xl text-lg sm:text-2xl outline-none font-bold transition-all ${
+                              isAdmin 
+                                ? 'bg-slate-50 border-slate-100 focus:border-indigo-500 focus:bg-white shadow-inner' 
+                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                            value={q.text}
+                            rows={3}
+                            placeholder={t(lang, 'writeQuestionPlaceholder')}
+                            readOnly={!isAdmin}
+                            onChange={(e) => updateQuestion(editingQuestionsCategory, q.id, { text: e.target.value })}
+                          />
+                        </div>
+
+                        {/* Question Type Switcher */}
+                        <div className="space-y-3">
+                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTypeLabel')}</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button 
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                if (q.type === 'points') {
+                                  updateQuestion(editingQuestionsCategory, q.id, { 
+                                    type: 'options',
+                                    options: q.options && q.options.length > 0 ? q.options : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
+                                    correctAnswers: q.correctAnswers && q.correctAnswers.length > 0 ? q.correctAnswers : [0]
+                                  });
+                                }
+                              }}
+                              className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
+                                (q.type || 'options') === 'options'
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <CheckSquare className="w-4 h-4" />
+                              <span>{t(lang, 'optionsQuestionType')}</span>
+                            </button>
+
+                            <button 
+                              type="button"
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                if ((q.type || 'options') !== 'points') {
+                                  updateQuestion(editingQuestionsCategory, q.id, { 
+                                    type: 'points',
+                                    maxPoints: q.maxPoints || 10
+                                  });
+                                }
+                              }}
+                              className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
+                                q.type === 'points'
+                                  ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-200'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              }`}
+                            >
+                              <Trophy className="w-4 h-4" />
+                              <span>{t(lang, 'pointsQuestionType')}</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Options or Points Configuration */}
+                        {q.type === 'points' ? (
+                          <div className="space-y-4 p-6 sm:p-8 bg-amber-50/80 border-2 border-amber-200 rounded-3xl">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-amber-500 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-sm">
+                                🎯
+                              </div>
+                              <div>
+                                <h4 className="font-black text-sm sm:text-base text-amber-950 uppercase tracking-wide">{t(lang, 'maxPointsTitle')}</h4>
+                                <p className="text-xs text-amber-800 font-medium">{t(lang, 'maxPointsDesc')}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 pt-2">
+                              <input 
+                                type="number"
+                                min="1"
+                                max="1000"
+                                disabled={!isAdmin}
+                                className="w-32 p-3.5 bg-white border-2 border-amber-300 rounded-2xl text-xl font-black text-amber-950 outline-none focus:border-amber-500 shadow-inner"
+                                value={q.maxPoints || 10}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value, 10);
+                                  updateQuestion(editingQuestionsCategory, q.id, {
+                                    maxPoints: isNaN(val) ? 1 : Math.max(1, val)
+                                  });
+                                }}
+                              />
+                              <span className="font-black text-sm text-amber-900 uppercase tracking-wider">{t(lang, 'pointsMaxLabel')}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Options & Correct Answer */
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'optionsAndCorrectAnswersLabel')}</label>
+                              <span className="text-[10px] font-bold text-slate-400">{t(lang, 'clickButtonToSetCorrectAnswer')}</span>
+                            </div>
+                            <div className="grid grid-cols-1 gap-4">
+                              {q.options.map((opt, oIdx) => (
+                                <div key={oIdx} className="flex gap-2 sm:gap-4 items-center">
+                                  <button 
+                                    onClick={() => {
+                                      if (!isAdmin) return;
+                                      let newCorrect = [...(q?.correctAnswers || [])];
+                                      if (newCorrect.includes(oIdx)) {
+                                        if (newCorrect.length > 1) {
+                                          newCorrect = newCorrect.filter(idx => idx !== oIdx);
+                                        }
+                                      } else {
+                                        newCorrect.push(oIdx);
+                                      }
+                                      updateQuestion(editingQuestionsCategory, q.id, { correctAnswers: newCorrect });
+                                    }}
+                                    disabled={!isAdmin}
+                                    className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg transition-all shrink-0 ${
+                                      (q?.correctAnswers || []).includes(oIdx) 
+                                        ? 'bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-100 scale-105' 
+                                        : 'bg-slate-100 border border-slate-200 text-slate-400 hover:bg-slate-200'
+                                    } ${!isAdmin ? 'opacity-80' : ''}`}
+                                    title={t(lang, 'clickToSetCorrect')}
+                                  >
+                                    {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                  </button>
+                                  
+                                  <div className="flex-1 relative flex items-center gap-2 sm:gap-3">
+                                    <div className="flex-1 relative">
+                                      <input 
+                                        type="text"
+                                        className={`w-full p-4 sm:p-5 border-2 rounded-2xl text-base sm:text-lg font-bold outline-none transition-all ${
+                                          isAdmin 
+                                            ? ((q?.correctAnswers || []).includes(oIdx) ? 'bg-emerald-50 border-emerald-200 focus:border-emerald-500' : 'bg-slate-50 border-slate-100 focus:border-indigo-500') 
+                                            : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                        }`}
+                                        value={opt}
+                                        placeholder={t(lang, 'optionPlaceholder', { num: (oIdx + 1).toString() })}
+                                        readOnly={!isAdmin}
+                                        onChange={(e) => {
+                                          if (!isAdmin) return;
+                                          const newOpts = [...q.options];
+                                          newOpts[oIdx] = e.target.value;
+                                          updateQuestion(editingQuestionsCategory, q.id, { options: newOpts });
+                                        }}
+                                      />
+                                      {(q?.correctAnswers || []).includes(oIdx) && (
+                                        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                                          <div className="bg-emerald-500 text-white p-1 rounded-full">
+                                            <Check className="w-3 h-3 stroke-[4]" />
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    
+                                    {isAdmin && q.options.length > 1 && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          const newOpts = q.options.filter((_, idx) => idx !== oIdx);
+                                          let newCorrect = (q?.correctAnswers || [])
+                                            .filter(idx => idx !== oIdx)
+                                            .map(idx => idx > oIdx ? idx - 1 : idx);
+                                          
+                                          if (newCorrect.length === 0) newCorrect = [0];
+                                          
+                                          updateQuestion(editingQuestionsCategory, q.id, { 
+                                            options: newOpts,
+                                            correctAnswers: newCorrect
+                                          });
+                                        }}
+                                        className="w-11 h-11 sm:w-12 sm:h-12 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200/80 rounded-2xl flex items-center justify-center transition-all shrink-0 active:scale-90 shadow-2xs"
+                                        title={t(lang, 'removeOption')}
+                                      >
+                                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                              
+                              {isAdmin && (
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    const newOpts = [...q.options, `Nytt alternativ ${q.options.length + 1}`];
+                                    updateQuestion(editingQuestionsCategory, q.id, { options: newOpts });
+                                  }}
+                                  className="w-full p-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-all font-bold text-sm flex items-center justify-center gap-2"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                  <span>{t(lang, 'addOption')}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Geotagging */}
+                        <div className="pt-8 mt-8 border-t border-slate-100 space-y-5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
+                                <MapPin className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <h4 className="font-black text-sm text-slate-800 uppercase tracking-widest">{t(lang, 'geotagTitle')}</h4>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'geotagDesc')}</p>
+                              </div>
+                            </div>
+                            {isAdmin && q.location && (
+                              <button 
+                                type="button"
+                                onClick={() => updateQuestion(editingQuestionsCategory, q.id, { location: undefined })}
+                                className="px-4 py-2 bg-rose-50 text-rose-600 text-[10px] font-black rounded-xl border border-rose-100 hover:bg-rose-100 transition-all uppercase tracking-widest"
+                              >
+                                {t(lang, 'removeGeotagBtn')}
+                              </button>
+                            )}
+                          </div>
+
+                          {isAdmin && (
+                            <div className="rounded-3xl overflow-hidden border-4 border-slate-50 shadow-lg">
+                              <AdminMapPicker 
+                                initialLocation={q.location}
+                                fallbackCenter={lastTaggedLocation || userLocation}
+                                onSelectLocation={(loc) => handleGeotagQuestion(editingQuestionsCategory, q.id, loc)}
+                                questionsWithLocations={
+                                  editingQuestionsCategory === 'barn'
+                                    ? quizConfig.barnQuestions.map((item, index) => ({ q: item, index, type: 'barn' as const }))
+                                    : quizConfig.vuxenQuestions.map((item, index) => ({ q: item, index, type: 'vuxen' as const }))
+                                }
+                                activeQuestionId={q.id}
+                              />
+                            </div>
+                          )}
+
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                            {isAdmin ? (
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  if (!navigator.geolocation) {
+                                    alert(t(lang, 'noGpsSupport'));
+                                    return;
+                                  }
+                                  navigator.geolocation.getCurrentPosition((pos) => {
+                                    handleGeotagQuestion(editingQuestionsCategory, q.id, {
+                                      lat: pos.coords.latitude,
+                                      lng: pos.coords.longitude
+                                    });
+                                  }, (err) => {
+                                    alert(t(lang, 'couldNotGetPosition') + ': ' + err.message);
+                                  });
+                                }}
+                                className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 transition-all active:scale-95 uppercase tracking-widest"
+                              >
+                                <Locate className="w-4 h-4" />
+                                <span>{t(lang, 'setCurrentPosition')}</span>
+                              </button>
+                            ) : (
+                              <div className="text-xs font-bold text-slate-400 bg-slate-50 px-4 py-2 rounded-xl">
+                                {q.location ? t(lang, 'geotaggedLabel') : t(lang, 'notGeotaggedLabel')}
+                              </div>
+                            )}
+
+                            {q.location && (
+                              <div className="px-4 py-2 bg-slate-900 text-white/90 text-[10px] font-mono rounded-xl shadow-inner">
+                                {q.location.lat.toFixed(6)}, {q.location.lng.toFixed(6)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Editor Footer */}
+                      <footer className="p-5 sm:p-8 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-4 shrink-0">
+                        <button 
+                          onClick={() => setFullScreenEditingQuestionId(null)}
+                          className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-sm uppercase shadow-xl shadow-indigo-200 transition-all active:scale-95"
+                        >
+                          {t(lang, 'doneAndSave')}
+                        </button>
+                      </footer>
+                    </>
+                  );
+                })()}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Global Import Modal */}
         <AnimatePresence>
@@ -1190,20 +3441,20 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-indigo-900/80 backdrop-blur-md"
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-indigo-900/80 backdrop-blur-md overflow-y-auto"
             >
               <motion.div 
                 initial={{ scale: 0.9, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.9, y: 20 }}
-                className="bg-white rounded-[3rem] p-8 max-w-xl w-full shadow-2xl space-y-6 relative"
+                className="bg-white rounded-[3rem] p-6 sm:p-8 max-w-xl w-full shadow-2xl space-y-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
                       <Upload className="text-blue-600 w-5 h-5" />
                     </div>
-                    <h2 className="text-2xl font-black text-slate-800">Importera Quiz</h2>
+                    <h2 className="text-2xl font-black text-slate-800">{t(lang, 'importQuizTitle')}</h2>
                   </div>
                   <button 
                     onClick={() => setShowConfigInput(false)}
@@ -1213,34 +3464,42 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Importera till:</p>
+                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">{t(lang, 'importTargetLabel')}</p>
                     <div className="flex gap-2">
+                      <button 
+                        onClick={() => setImportTarget('båda')}
+                        className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all ${
+                          importTarget === 'båda' ? 'bg-indigo-600 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                        }`}
+                      >
+                        {t(lang, 'bothCategoryCombo')}
+                      </button>
                       <button 
                         onClick={() => setImportTarget('barn')}
                         className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all ${
-                          importTarget === 'barn' ? 'bg-amber-400 text-white shadow-lg' : 'bg-slate-100 text-slate-400'
+                          importTarget === 'barn' ? 'bg-amber-400 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
                         }`}
                       >
-                        Barn 🧒
+                        {t(lang, 'kids')} 🧒
                       </button>
                       <button 
                         onClick={() => setImportTarget('vuxen')}
                         className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all ${
-                          importTarget === 'vuxen' ? 'bg-pink-400 text-white shadow-lg' : 'bg-slate-100 text-slate-400'
+                          importTarget === 'vuxen' ? 'bg-pink-400 text-white shadow-lg' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
                         }`}
                       >
-                        Vuxen 🧔
+                        {t(lang, 'adult')} 🧔
                       </button>
                     </div>
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Klistra in quiz-kod eller text:</p>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{t(lang, 'pasteCodeOrTextLabel')}</p>
                     <textarea 
-                      className="w-full h-64 p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 text-[10px] font-mono outline-none focus:border-indigo-500 custom-scrollbar"
-                      placeholder="Klistra in koden från Messenger eller din egen text..."
+                      className="w-full h-44 p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 text-xs font-mono outline-none focus:border-indigo-500 custom-scrollbar"
+                      placeholder={t(lang, 'pasteCodePlaceholder')}
                       value={configJsonInput}
                       onChange={(e) => setConfigJsonInput(e.target.value)}
                     />
@@ -1248,9 +3507,9 @@ export default function App() {
 
                   <button 
                     onClick={handleImportConfig}
-                    className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm uppercase shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all flex items-center justify-center gap-2"
                   >
-                    Läs in Quiz ✨
+                    <Upload className="w-4 h-4" /> {t(lang, 'loadQuizBtn')}
                   </button>
                 </div>
               </motion.div>
@@ -1258,19 +3517,349 @@ export default function App() {
           )}
         </AnimatePresence>
 
+        {/* Lock Notice Modal for Geofenced Questions */}
+        <AnimatePresence>
+          {lockNotice && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center space-y-5 border-4 border-amber-300"
+              >
+                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-3xl shadow-inner">
+                  🔒
+                </div>
+                
+                <div className="space-y-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
+                    Geotaggad station
+                  </span>
+                  <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
+                    Fråga {lockNotice.questionIndex + 1} är låst!
+                  </h3>
+                  <p className="text-xs sm:text-sm font-medium text-slate-600 leading-relaxed pt-1">
+                    {lockNotice.message}
+                  </p>
+                </div>
+
+                {lockNotice.distanceMeters !== null && (
+                  <div className="bg-amber-50 border border-amber-200/80 p-3.5 rounded-2xl text-xs font-bold text-amber-900 flex items-center justify-around">
+                    <div>
+                      <span className="block text-[9px] text-amber-700 font-black uppercase">Din distans</span>
+                      <span className="text-sm font-black text-amber-900">{formatDistance(lockNotice.distanceMeters)}</span>
+                    </div>
+                    <div className="text-amber-400 font-black text-lg">➔</div>
+                    <div>
+                      <span className="block text-[9px] text-amber-700 font-black uppercase">Krävs</span>
+                      <span className="text-sm font-black text-emerald-700">Inom 35 m</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2 pt-1">
+                  <button 
+                    onClick={() => {
+                      locateUser();
+                    }}
+                    disabled={isLocating}
+                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase shadow-md shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Locate className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
+                    <span>{isLocating ? 'Hämtar position...' : 'Uppdatera min GPS 📍'}</span>
+                  </button>
+                  <button 
+                    onClick={() => setLockNotice(null)}
+                    className="w-full py-3 text-slate-500 font-bold text-xs uppercase hover:text-slate-700 transition-colors"
+                  >
+                    Stäng
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Confirmation Modals */}
+        <AnimatePresence>
+          {(questionToDelete || participantToDelete || showResetConfirm || showClearConfirm || showBulkDeleteConfirm) && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl text-center space-y-6"
+              >
+                <div className="w-20 h-20 bg-rose-100 rounded-3xl flex items-center justify-center mx-auto">
+                  <Trash2 className="text-rose-500 w-10 h-10" />
+                </div>
+                
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black text-slate-800 leading-tight">Är du helt säker?</h3>
+                  <p className="text-slate-500 font-medium">
+                    {questionToDelete && "Denna fråga kommer att raderas permanent."}
+                    {participantToDelete && `Vill du verkligen ta bort deltagaren "${participantToDelete.name}"? Alla svar från personen raderas också.`}
+                    {showBulkDeleteConfirm && `Du håller på att radera ${selectedQuestionIds.length} markerade frågor permanent.`}
+                    {showResetConfirm && "Alla svar kommer att nollställas. Detta går inte att ångra."}
+                    {showClearConfirm && "Alla deltagare och deras svar kommer att raderas permanent."}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={() => {
+                      if (questionToDelete) confirmDeleteQuestion();
+                      if (participantToDelete) {
+                        removeParticipant(participantToDelete.id);
+                        setParticipantToDelete(null);
+                      }
+                      if (showBulkDeleteConfirm) confirmDeleteSelectedQuestions();
+                      if (showResetConfirm) confirmResetQuiz();
+                      if (showClearConfirm) {
+                        setParticipants([]);
+                        setAnswers([]);
+                        setShowClearConfirm(false);
+                      }
+                    }}
+                    className={`w-full py-4 text-white rounded-2xl font-black text-sm uppercase shadow-lg transition-all active:scale-95 ${
+                      showResetConfirm 
+                        ? 'bg-rose-600 shadow-rose-200 hover:bg-rose-700' 
+                        : 'bg-rose-500 shadow-rose-200 hover:bg-rose-600'
+                    }`}
+                  >
+                    {showResetConfirm ? 'Radera våra svar 🧨' : 'Ja, radera! 🧨'}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setQuestionToDelete(null);
+                      setParticipantToDelete(null);
+                      setShowBulkDeleteConfirm(false);
+                      setShowResetConfirm(false);
+                      setShowClearConfirm(false);
+                    }}
+                    className={`w-full py-3 rounded-2xl font-black text-xs uppercase transition-all active:scale-95 ${
+                      showResetConfirm 
+                        ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-100 hover:bg-emerald-600' 
+                        : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    {showResetConfirm ? 'Avbryt' : 'Nej, ångra mig'}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* CREATE QUESTION TYPE SELECTION MODAL */}
+        <AnimatePresence>
+          {showCreateQuestionModal && (
+            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0, y: 15 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 15 }}
+                className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100 space-y-6"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 bg-indigo-100 text-indigo-700 rounded-2xl flex items-center justify-center font-black">
+                      <Plus className="w-6 h-6 stroke-[3]" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">{t(lang, 'selectQuestionTypeModalTitle')}</h3>
+                      <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">{t(lang, 'categorySubheading', { category: showCreateQuestionModal === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}</p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={() => setShowCreateQuestionModal(null)}
+                    className="w-9 h-9 bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-xl flex items-center justify-center transition-all"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3.5">
+                  <button
+                    type="button"
+                    onClick={() => addNewQuestion(showCreateQuestionModal, 'options')}
+                    className="p-5 rounded-2xl border-2 border-slate-200 hover:border-indigo-500 bg-slate-50 hover:bg-indigo-50/50 text-left transition-all group flex items-start gap-4 shadow-2xs active:scale-[0.98]"
+                  >
+                    <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-md shadow-indigo-200 group-hover:scale-105 transition-all">
+                      <CheckSquare className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-black text-sm text-slate-800 group-hover:text-indigo-950 uppercase tracking-wide">{t(lang, 'optionsQuestionType')}</h4>
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-700">{t(lang, 'standardTag')}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                        {t(lang, 'optionsTypeDesc')}
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => addNewQuestion(showCreateQuestionModal, 'points')}
+                    className="p-5 rounded-2xl border-2 border-slate-200 hover:border-amber-500 bg-slate-50 hover:bg-amber-50/50 text-left transition-all group flex items-start gap-4 shadow-2xs active:scale-[0.98]"
+                  >
+                    <div className="w-12 h-12 bg-amber-500 text-white rounded-2xl flex items-center justify-center shrink-0 shadow-md shadow-amber-200 group-hover:scale-105 transition-all font-black text-xl">
+                      🎯
+                    </div>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-black text-sm text-slate-800 group-hover:text-amber-950 uppercase tracking-wide">{t(lang, 'pointsQuestionType')}</h4>
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">{t(lang, 'manualTag')}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                        {t(lang, 'pointsTypeDesc')}
+                      </p>
+                    </div>
+                  </button>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateQuestionModal(null)}
+                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-black uppercase transition-all"
+                  >
+                    {t(lang, 'cancel')}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Global Toast Notice for Copied Clipboard Code */}
+        <AnimatePresence>
+          {copiedConfigCode && (
+            <motion.div
+              initial={{ opacity: 0, y: -40, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -40, scale: 0.9 }}
+              className="fixed top-5 left-1/2 -translate-x-1/2 z-[300] max-w-md w-[90%] bg-emerald-600 text-white p-4 rounded-2xl shadow-2xl border border-emerald-400 flex items-center gap-3.5"
+            >
+              <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <Check className="w-5 h-5 text-white stroke-[3]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-xs sm:text-sm text-white leading-tight">{t(lang, 'quizCodeInClipboard')}</p>
+                <p className="text-[11px] text-emerald-100 font-medium truncate">{t(lang, 'readyToPasteMessage')}</p>
+              </div>
+              <button 
+                onClick={() => setCopiedConfigCode(false)}
+                className="text-white/80 hover:text-white p-1 text-sm font-bold shrink-0"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Footer Progress - Vibrant Palette */}
-        <footer className="mt-8 flex items-center gap-6 pb-4">
-          <div className="flex-1 h-4 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm border border-white/10">
+        <footer className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-center gap-4 sm:gap-6 pb-6 sm:pb-4">
+          <div className="flex-1 w-full h-3 sm:h-4 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm border border-white/10">
             <motion.div 
               initial={{ width: 0 }}
               animate={{ width: `${getProgress()}%` }}
               className="h-full bg-yellow-400 rounded-full shadow-[0_0_15px_rgba(250,204,21,0.5)]"
             />
           </div>
-          <div className="text-white font-black text-lg whitespace-nowrap tracking-tighter">
-            {Math.round(getProgress())}% KLART
+          <div className="text-white font-black text-sm sm:text-lg whitespace-nowrap tracking-tighter">
+            {Math.round(getProgress())}% {t(lang, 'completed')}
           </div>
         </footer>
+
+        {/* How It Works Modal */}
+        <AnimatePresence>
+          {showHowItWorks && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowHowItWorks(false)}
+                className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+              >
+                <div className="bg-indigo-600 p-8 text-white relative">
+                  <button 
+                    onClick={() => setShowHowItWorks(false)}
+                    className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-4">
+                    <HelpCircle className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-3xl font-black">{t(lang, 'howItWorksTitle')}</h2>
+                </div>
+
+                <div className="p-8 space-y-8 overflow-y-auto max-h-[60vh]">
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0 font-black">1</div>
+                    <div className="space-y-1">
+                      <h3 className="font-black text-lg text-slate-800">{t(lang, 'howItWorksStep1')}</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'howItWorksStep1Desc')}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 font-black">2</div>
+                    <div className="space-y-1">
+                      <h3 className="font-black text-lg text-slate-800">{t(lang, 'howItWorksStep2')}</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'howItWorksStep2Desc')}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center shrink-0 font-black">3</div>
+                    <div className="space-y-1">
+                      <h3 className="font-black text-lg text-slate-800">{t(lang, 'howItWorksStep3')}</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'howItWorksStep3Desc')}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 font-black">4</div>
+                    <div className="space-y-1">
+                      <h3 className="font-black text-lg text-slate-800">{t(lang, 'howItWorksStep4')}</h3>
+                      <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'howItWorksStep4Desc')}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-slate-50 border-t border-slate-100">
+                  <button 
+                    onClick={() => setShowHowItWorks(false)}
+                    className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest transition-all"
+                  >
+                    {t(lang, 'confirm')}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

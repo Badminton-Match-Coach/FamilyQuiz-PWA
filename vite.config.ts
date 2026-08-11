@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/FamilyQuiz-PWA/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

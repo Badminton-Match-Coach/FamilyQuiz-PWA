@@ -1,4 +1,4 @@
-const CACHE_NAME = 'familyquiz-pwa-v1';
+const CACHE_NAME = 'FamilyQuiz-PWA-v1';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest'];
 
 self.addEventListener('install', (event) => {

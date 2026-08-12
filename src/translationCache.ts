@@ -1,5 +1,6 @@
 import { Question } from './types';
 import { Language } from './i18n';
+import { translateQuestionsClient } from './geminiClient';
 
 const memoryCache = new Map<string, { text: string; options: string[] }>();
 
@@ -48,8 +49,17 @@ export function getCachedTranslation(q: Question, targetLang: Language): { text:
   if (origLang === targetLang) {
     return { text: q.text, options: q.options };
   }
+  if (q.translations && q.translations[targetLang]) {
+    return q.translations[targetLang];
+  }
   const key = `${q.id}_${origLang}_to_${targetLang}_${q.text}`;
   return memoryCache.get(key) || null;
+}
+
+export function registerQuestionTranslation(qId: string, origLang: string, origText: string, targetLang: string, trans: { text: string; options: string[] }) {
+  const cacheKey = `${qId}_${origLang}_to_${targetLang}_${origText}`;
+  memoryCache.set(cacheKey, trans);
+  saveCacheToStorage();
 }
 
 export async function requestQuestionTranslations(questions: Question[], targetLang: Language) {
@@ -69,21 +79,16 @@ export async function requestQuestionTranslations(questions: Question[], targetL
   if (origQuestionsToFetch.length === 0) return;
 
   try {
-    const response = await fetch('/api/translate-questions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetLanguage: targetLang,
-        questions: origQuestionsToFetch.map(q => ({
-          id: q.id,
-          text: q.text,
-          options: q.options || [],
-          originalLanguage: q.originalLanguage || 'sv'
-        }))
-      })
-    });
+    const data = await translateQuestionsClient(
+      origQuestionsToFetch.map(q => ({
+        id: q.id,
+        text: q.text,
+        options: q.options || [],
+        originalLanguage: q.originalLanguage || 'sv'
+      })),
+      targetLang
+    );
 
-    const data = await response.json();
     if (data.translations && Array.isArray(data.translations)) {
       for (const item of data.translations) {
         const origQ = origQuestionsToFetch.find(q => q.id === item.id);

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#3730a3" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#facc15" />
+      <stop offset="100%" stop-color="#eab308" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <!-- Outer Map Pin Circle -->
+  <circle cx="256" cy="230" r="150" fill="white" opacity="0.1" />
+
+  <!-- Map Station Pin Accent -->
+  <path d="M 256 90 C 180 90 120 150 120 226 C 120 310 230 410 248 426 C 252 430 260 430 264 426 C 282 410 392 310 392 226 C 392 150 332 90 256 90 Z" fill="url(#goldGrad)" filter="url(#shadow)" />
+
+  <!-- Inner Pin White Badge -->
+  <circle cx="256" cy="220" r="75" fill="#ffffff" />
+
+  <!-- Quiz Question Mark '?' -->
+  <text x="256" y="258" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="110" fill="#3730a3" text-anchor="middle">?</text>
+
+  <!-- Sparkle Accent -->
+  <path d="M 380 120 L 390 140 L 410 150 L 390 160 L 380 180 L 370 160 L 350 150 L 370 140 Z" fill="#fde047" />
+</svg>

@@ -1,5 +1,5 @@
 {
-  "name": "FamilyQuiz-PWA",
+  "name": "Family Quiz PWA",
   "description": "En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna.",
   "requestFramePermissions": [
     "geolocation"

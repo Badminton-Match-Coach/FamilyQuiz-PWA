@@ -1,1 +1,17 @@
 @import "tailwindcss";
+
+/* Ensure Leaflet maps never breach their container stacking context or GPU compositor */
+.leaflet-container {
+  z-index: 0 !important;
+  isolation: isolate !important;
+  contain: paint layout;
+}
+
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-control-container,
+.leaflet-marker-pane,
+.leaflet-tile-pane {
+  isolation: isolate;
+}

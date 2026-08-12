@@ -30,6 +30,7 @@ export interface Question {
   maxPoints?: number; // Optional max points for points questions
   location?: Location;
   originalLanguage?: Language; // Language code when created (e.g. 'sv', 'fr', 'en', 'es')
+  translations?: Record<string, { text: string; options: string[] }>;
 }
 
 export interface QuizConfig {

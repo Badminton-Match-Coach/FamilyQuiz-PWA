@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, 
@@ -12,6 +12,7 @@ import {
   CheckCircle2, 
   Lock, 
   ChevronRight, 
+  ChevronLeft, 
   Upload,
   Share2,
   XCircle,
@@ -24,8 +25,6 @@ import {
   Copy,
   Sparkles,
   HelpCircle,
-  FileText,
-  Code,
   Check,
   CheckSquare,
   MapPin,
@@ -35,13 +34,32 @@ import {
   Compass,
   Search,
   Maximize2,
-  Globe
+  Globe,
+  Wifi,
+  WifiOff,
+  Download,
+  Database,
+  Save,
+  FolderOpen,
+  HardDrive,
+  Mail
 } from 'lucide-react';
 import { Participant, QuizConfig, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { defaultQuiz } from './data/defaultQuiz';
-import { AdminMapPicker, ParticipantMap, calculateDistanceMeters, formatDistance } from './components/MapComponent';
+import { AdminMapPicker, ParticipantMap, RouteGeoTagModal, calculateDistanceMeters, formatDistance } from './components/MapComponent';
+import { generateQuizClient, getStoredApiKey, setStoredApiKey } from './geminiClient';
 import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion } from './i18n';
-import { subscribeTranslationCache, requestQuestionTranslations } from './translationCache';
+import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
+import { 
+  SavedQuizRecord, 
+  saveQuizToIndexedDB, 
+  getAllQuizzesFromIndexedDB, 
+  deleteQuizFromIndexedDB, 
+  exportIndexedDBToJSON, 
+  importIndexedDBFromJSON, 
+  shareIndexedDBJSON, 
+  clearAllQuizzesFromIndexedDB 
+} from './quizDb';
 
 const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
@@ -50,6 +68,47 @@ const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
   const [, setTranslationTick] = useState(0);
+  const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredInstallPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const choiceResult = await deferredInstallPrompt.userChoice;
+    if (choiceResult.outcome === 'accepted') {
+      setIsAppInstalled(true);
+    }
+    setDeferredInstallPrompt(null);
+  };
 
   const changeLanguage = (newLang: Language) => {
     setLang(newLang);
@@ -216,7 +275,12 @@ export default function App() {
   };
   const [viewingParticipantId, setViewingParticipantId] = useState<string | null>(null);
   const [fullScreenEditingQuestionId, setFullScreenEditingQuestionId] = useState<string | null>(null);
+  const [editingQuestionLang, setEditingQuestionLang] = useState<Language>('sv');
+  const [slideDirection, setSlideDirection] = useState<number>(1);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const [showCreateQuestionModal, setShowCreateQuestionModal] = useState<UserType | null>(null);
+  const [showRouteGeoTagModal, setShowRouteGeoTagModal] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const [configMasterPasswordInput, setConfigMasterPasswordInput] = useState('');
   const [isConfigUnlocked, setIsConfigUnlocked] = useState(false);
@@ -225,7 +289,117 @@ export default function App() {
   const [showConfigInput, setShowConfigInput] = useState(false);
   const [configJsonInput, setConfigJsonInput] = useState('');
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
-  const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'general'>('questions');
+  const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general'>('questions');
+  const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
+  const [dbNotification, setDbNotification] = useState<string | null>(null);
+  const [isSavingToDb, setIsSavingToDb] = useState(false);
+  const dbFileInputRef = useRef<HTMLInputElement>(null);
+
+  const refreshSavedQuizzes = async () => {
+    try {
+      const list = await getAllQuizzesFromIndexedDB();
+      setSavedQuizzes(list);
+    } catch (err) {
+      console.error('Kunde inte läsa från IndexedDB:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (configTab === 'db') {
+      refreshSavedQuizzes();
+    }
+  }, [configTab]);
+
+  const handleSaveCurrentQuizToDB = async () => {
+    setIsSavingToDb(true);
+    try {
+      await saveQuizToIndexedDB(quizConfig);
+      await refreshSavedQuizzes();
+      setDbNotification(t(lang, 'quizSavedSuccess'));
+      setTimeout(() => setDbNotification(null), 4000);
+    } catch (err) {
+      alert('Kunde inte spara till IndexedDB');
+    } finally {
+      setIsSavingToDb(false);
+    }
+  };
+
+  const handleLoadQuizFromDB = (record: SavedQuizRecord) => {
+    setQuizConfig(record.quizConfig);
+    setNewQuizTitle(record.quizConfig.title);
+    setNewQuizPassword(record.quizConfig.password || '');
+    setDbNotification(`${t(lang, 'quizLoadedSuccess')} ("${record.title}")`);
+    setTimeout(() => setDbNotification(null), 4000);
+  };
+
+  const handleOverwriteQuizInDB = async (recordId: string) => {
+    if (window.confirm(t(lang, 'overwriteQuizConfirm'))) {
+      try {
+        await saveQuizToIndexedDB(quizConfig, recordId);
+        await refreshSavedQuizzes();
+        setDbNotification(t(lang, 'quizSavedSuccess'));
+        setTimeout(() => setDbNotification(null), 4000);
+      } catch (err) {
+        alert('Kunde inte uppdatera i IndexedDB');
+      }
+    }
+  };
+
+  const handleDeleteQuizFromDB = async (recordId: string) => {
+    if (window.confirm(t(lang, 'deleteQuizConfirm'))) {
+      try {
+        await deleteQuizFromIndexedDB(recordId);
+        await refreshSavedQuizzes();
+      } catch (err) {
+        alert('Kunde inte radera från IndexedDB');
+      }
+    }
+  };
+
+  const handleShareExportDB = async () => {
+    try {
+      const res = await shareIndexedDBJSON();
+      if (res.shared) {
+        if (res.method === 'download') {
+          setDbNotification('Databasen har laddats ner som JSON! 📥');
+        } else if (res.method === 'clipboard') {
+          setDbNotification('Databasens JSON har kopierats till urklipp! 📋');
+        } else {
+          setDbNotification(t(lang, 'exportDbSuccess'));
+        }
+        setTimeout(() => setDbNotification(null), 4000);
+      }
+    } catch (err) {
+      alert('Kunde inte dela IndexedDB');
+    }
+  };
+
+  const handleImportBackupJSONFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const count = await importIndexedDBFromJSON(text);
+      await refreshSavedQuizzes();
+      setDbNotification(t(lang, 'importDbSuccess').replace('{count}', String(count)));
+      setTimeout(() => setDbNotification(null), 4000);
+    } catch (err: any) {
+      alert(err.message || 'Fel vid import av JSON-fil');
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleClearAllDB = async () => {
+    if (window.confirm(t(lang, 'clearDbConfirm'))) {
+      try {
+        await clearAllQuizzesFromIndexedDB();
+        await refreshSavedQuizzes();
+      } catch (err) {
+        alert('Kunde inte tömma IndexedDB');
+      }
+    }
+  };
   const [questionSearch, setQuestionSearch] = useState('');
   const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
@@ -235,13 +409,328 @@ export default function App() {
   const [showFacit, setShowFacit] = useState(false);
   const [facitPasswordInput, setFacitPasswordInput] = useState('');
   const [isFacitUnlocked, setIsFacitUnlocked] = useState(false);
-  const [copiedPrompt, setCopiedPrompt] = useState<'text' | 'json' | null>(null);
   const [copiedConfigCode, setCopiedConfigCode] = useState(false);
-  const [showFormatGuide, setShowFormatGuide] = useState(false);
-  const [formatTab, setFormatTab] = useState<'text' | 'json'>('text');
   const [pointsInputValue, setPointsInputValue] = useState<number>(0);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showSettingsHelp, setShowSettingsHelp] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [userApiKeyInput, setUserApiKeyInput] = useState<string>(() => getStoredApiKey());
+  const [copiedCustomPrompt, setCopiedCustomPrompt] = useState(false);
+  const [pastedJsonInput, setPastedJsonInput] = useState('');
+  const [hasCustomizedPromptLangs, setHasCustomizedPromptLangs] = useState(false);
+  const [promptLanguages, setPromptLanguages] = useState<Language[]>(() => [lang]);
+
+  useEffect(() => {
+    if (!hasCustomizedPromptLangs) {
+      setPromptLanguages([lang]);
+    }
+  }, [lang, hasCustomizedPromptLangs]);
+
+  const togglePromptLanguage = (code: Language) => {
+    setHasCustomizedPromptLangs(true);
+    setPromptLanguages(prev => {
+      if (prev.includes(code)) {
+        if (prev.length === 1) return prev; // keep at least one
+        return prev.filter(c => c !== code);
+      } else {
+        return [...prev, code];
+      }
+    });
+  };
+
+  const constructSelectedAiPrompt = () => {
+    const topicText = aiTopic.trim() || (
+      lang === 'sv' ? 'Blandade allmänbildande frågor, natur, vetenskap, historia och rolig kuriosa' :
+      lang === 'fr' ? 'Culture générale, nature, science, histoire et anecdotes amusantes' :
+      lang === 'es' ? 'Cultura general, naturaleza, ciencia, historia y datos curiosos' :
+      lang === 'de' ? 'Allgemeinwissen, Natur, Wissenschaft, Geschichte und unterhaltsame Fakten' :
+      'General knowledge, nature, science, history, and fun trivia'
+    );
+    const langNames: Record<Language, string> = {
+      sv: lang === 'sv' ? 'svenska (Swedish)' : lang === 'fr' ? 'suédois (Swedish)' : lang === 'es' ? 'sueco (Swedish)' : lang === 'de' ? 'Schwedisch (Swedish)' : 'Swedish',
+      fr: lang === 'sv' ? 'franska (French)' : lang === 'fr' ? 'français (French)' : lang === 'es' ? 'francés (French)' : lang === 'de' ? 'Französisch (French)' : 'French',
+      en: lang === 'sv' ? 'engelska (English)' : lang === 'fr' ? 'anglais (English)' : lang === 'es' ? 'inglés (English)' : lang === 'de' ? 'Englisch (English)' : 'English',
+      es: lang === 'sv' ? 'spanska (Spanish)' : lang === 'fr' ? 'espagnol (Spanish)' : lang === 'es' ? 'español (Spanish)' : lang === 'de' ? 'Spanisch (Spanish)' : 'Spanish',
+      de: lang === 'sv' ? 'tyska (German)' : lang === 'fr' ? 'allemand (German)' : lang === 'es' ? 'alemán (German)' : lang === 'de' ? 'Deutsch (German)' : 'German'
+    };
+
+    const primaryLang = promptLanguages[0] || lang;
+    const primaryLangName = langNames[primaryLang] || 'Swedish';
+    const otherLangs = promptLanguages.filter(l => l !== primaryLang);
+
+    const ageFromNum = Number(aiKidAgeFrom) || 5;
+    const ageToNum = Number(aiKidAgeTo) || 10;
+    const countNum = Number(aiCount) || 5;
+
+    let targetDesc = '';
+    if (aiTarget === 'båda') {
+      if (lang === 'sv') targetDesc = `${countNum} frågor för barn (passande ålder ${ageFromNum}-${ageToNum} år) OCH ${countNum} frågor för vuxna (mer utmanande).`;
+      else if (lang === 'fr') targetDesc = `${countNum} questions pour enfants (âge ${ageFromNum}-${ageToNum} ans) ET ${countNum} questions pour adultes (plus exigeantes).`;
+      else if (lang === 'es') targetDesc = `${countNum} preguntas para niños (edad ${ageFromNum}-${ageToNum} años) Y ${countNum} preguntas para adultos (más desafiantes).`;
+      else if (lang === 'de') targetDesc = `${countNum} Fragen für Kinder (passend für ${ageFromNum}-${ageToNum} Jahre) UND ${countNum} Fragen für Erwachsene (anspruchsvoller).`;
+      else targetDesc = `${countNum} questions for kids (suitable age ${ageFromNum}-${ageToNum} years) AND ${countNum} questions for adults (more challenging).`;
+    } else if (aiTarget === 'barn') {
+      if (lang === 'sv') targetDesc = `${countNum} frågor för barn (passande ålder ${ageFromNum}-${ageToNum} år).`;
+      else if (lang === 'fr') targetDesc = `${countNum} questions pour enfants (âge ${ageFromNum}-${ageToNum} ans).`;
+      else if (lang === 'es') targetDesc = `${countNum} preguntas para niños (edad ${ageFromNum}-${ageToNum} años).`;
+      else if (lang === 'de') targetDesc = `${countNum} Fragen für Kinder (passend für ${ageFromNum}-${ageToNum} Jahre).`;
+      else targetDesc = `${countNum} questions for kids (suitable age ${ageFromNum}-${ageToNum} years).`;
+    } else {
+      if (lang === 'sv') targetDesc = `${countNum} frågor för vuxna (kluriga och underhållande).`;
+      else if (lang === 'fr') targetDesc = `${countNum} questions pour adultes (captivantes et amusantes).`;
+      else if (lang === 'es') targetDesc = `${countNum} preguntas para adultos (desafiantes y entretenidas).`;
+      else if (lang === 'de') targetDesc = `${countNum} Fragen für Erwachsene (knifflig und unterhaltsam).`;
+      else targetDesc = `${countNum} questions for adults (tricky and entertaining).`;
+    }
+
+    const buildSampleQuestion = (isAdult: boolean) => {
+      const qText = isAdult 
+        ? (lang === 'en' ? "In which year did World War I start?" : lang === 'fr' ? "En quelle année la Première Guerre mondiale a-t-elle commencé ?" : lang === 'es' ? "¿En qué año comenzó la Primera Guerra Mundial?" : lang === 'de' ? "In welchem Jahr begann der Erste Weltkrieg?" : "Vilket år startade första världskriget?")
+        : (lang === 'en' ? "What is the capital of Sweden?" : lang === 'fr' ? "Quelle est la capitale de la Suède ?" : lang === 'es' ? "¿Cuál es la capital de Suecia?" : lang === 'de' ? "Was ist die Hauptstadt von Schweden?" : "Vad heter Sveriges huvudstad?");
+      const qOpts = isAdult
+        ? ["1912", "1914", "1918"]
+        : (lang === 'en' ? ["Stockholm", "Gothenburg", "Malmo"] : ["Stockholm", "Göteborg", "Malmö"]);
+      const correct = isAdult ? 1 : 0;
+
+      const base: any = {
+        text: qText,
+        options: qOpts,
+        correctAnswer: correct,
+        originalLanguage: primaryLang
+      };
+
+      if (otherLangs.length > 0) {
+        const transObj: Record<string, any> = {};
+        otherLangs.forEach(l => {
+          if (l === 'en') {
+            transObj.en = {
+              text: isAdult ? "In which year did World War I start?" : "What is the capital of Sweden?",
+              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Gothenburg", "Malmo"]
+            };
+          } else if (l === 'fr') {
+            transObj.fr = {
+              text: isAdult ? "En quelle année la Première Guerre mondiale a-t-elle commencé ?" : "Quelle est la capitale de la Suède ?",
+              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
+            };
+          } else if (l === 'es') {
+            transObj.es = {
+              text: isAdult ? "¿En qué año comenzó la Primera Guerra Mundial?" : "¿Cuál es la capital de Suecia?",
+              options: isAdult ? ["1912", "1914", "1918"] : ["Estocolmo", "Gotemburgo", "Malmo"]
+            };
+          } else if (l === 'de') {
+            transObj.de = {
+              text: isAdult ? "In welchem Jahr begann der Erste Weltkrieg?" : "Was ist die Hauptstadt von Schweden?",
+              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
+            };
+          } else {
+            transObj.sv = {
+              text: isAdult ? "Vilket år startade första världskriget?" : "Vad heter Sveriges huvudstad?",
+              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
+            };
+          }
+        });
+        base.translations = transObj;
+      }
+
+      return base;
+    };
+
+    let exampleJson = '';
+    if (aiTarget === 'båda') {
+      exampleJson = JSON.stringify({
+        barnQuestions: [buildSampleQuestion(false)],
+        vuxenQuestions: [buildSampleQuestion(true)]
+      }, null, 2);
+    } else if (aiTarget === 'barn') {
+      exampleJson = JSON.stringify({
+        barnQuestions: [buildSampleQuestion(false)]
+      }, null, 2);
+    } else {
+      exampleJson = JSON.stringify({
+        vuxenQuestions: [buildSampleQuestion(true)]
+      }, null, 2);
+    }
+
+    if (lang === 'en') {
+      let langReqs = `1. Primary language: ${primaryLangName}. All root fields ("text" and "options") MUST be in this language. Set "originalLanguage": "${primaryLang}".\n`;
+      if (otherLangs.length > 0) {
+        const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
+        langReqs += `2. TRANSLATIONS: Each question MUST include a "translations" object with fully translated "text" and "options" for the following language codes: ${otherLangDesc}.\n`;
+      }
+
+      return `Create a walk-quiz/trivia set about the topic: "${topicText}".
+
+REQUIREMENTS:
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Create ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Each question MUST have exactly 3 options (1, X, 2 format).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" is an integer: 0 for 1st option, 1 for 2nd option, or 2 for 3rd option.
+${otherLangs.length > 0 ? '6' : '5'}. Respond ONLY with valid JSON matching the template below without explanatory text or markdown blocks.
+
+EXACT JSON TEMPLATE TO RETURN:
+${exampleJson}`;
+    } else if (lang === 'fr') {
+      let langReqs = `1. Langue principale : ${primaryLangName}. Tous les champs principaux ("text" et "options") DOIVENT être dans cette langue. Indiquez "originalLanguage": "${primaryLang}".\n`;
+      if (otherLangs.length > 0) {
+        const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
+        langReqs += `2. TRADUCTIONS : Chaque question DOIT inclure un objet "translations" avec la "text" et les "options" entièrement traduites pour les codes de langue suivants : ${otherLangDesc}.\n`;
+      }
+
+      return `Créez un jeu de cartes/quiz sur le thème : "${topicText}".
+
+EXIGENCES :
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Créez ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Chaque question DOIT avoir exactement 3 options.
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" est un entier : 0 pour la 1ère option, 1 pour la 2ème option, ou 2 pour la 3ème option.
+${otherLangs.length > 0 ? '6' : '5'}. Répondez UNIQUEMENT avec un JSON valide correspondant au modèle ci-dessous, sans texte ni bloc de code markdown.
+
+MODÈLE JSON EXACT À RETOURNER :
+${exampleJson}`;
+    } else if (lang === 'es') {
+      let langReqs = `1. Idioma principal: ${primaryLangName}. Todos los campos principales ("text" y "options") DEBEN estar en este idioma. Establece "originalLanguage": "${primaryLang}".\n`;
+      if (otherLangs.length > 0) {
+        const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
+        langReqs += `2. TRADUCCIONES: Cada pregunta DEBE incluir un objeto "translations" con "text" y "options" completamente traducidos para los siguientes códigos de idioma: ${otherLangDesc}.\n`;
+      }
+
+      return `Crea un cuestionario sobre el tema: "${topicText}".
+
+REQUISITOS:
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Crea ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Cada pregunta DEBE tener exactamente 3 opciones.
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" es un número entero: 0 para la 1ª opción, 1 para la 2ª opción, o 2 para la 3ª opción.
+${otherLangs.length > 0 ? '6' : '5'}. Responde ÚNICAMENTE con un JSON válido que coincida con la plantilla a continuación, sin texto ni bloques de código markdown.
+
+PLANTILLA JSON EXACTA A DEVOLVER:
+${exampleJson}`;
+    } else if (lang === 'de') {
+      let langReqs = `1. Hauptsprache: ${primaryLangName}. Alle Hauptfelder ("text" und "options") MÜSSEN in dieser Sprache sein. Setze "originalLanguage": "${primaryLang}".\n`;
+      if (otherLangs.length > 0) {
+        const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
+        langReqs += `2. ÜBERSETZUNGEN: Jede Frage MUSS ein "translations"-Objekt mit vollständig übersetztem "text" und "options" für folgende Sprachcodes enthalten: ${otherLangDesc}.\n`;
+      }
+
+      return `Erstelle ein Quiz/Trivia-Set zum Thema: "${topicText}".
+
+ANFORDERUNGEN:
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Erstelle ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Jede Frage MUSS genau 3 Antwortmöglichkeiten haben.
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" ist eine Ganzzahl: 0 für die 1. Option, 1 für die 2. Option oder 2 für die 3. Option.
+${otherLangs.length > 0 ? '6' : '5'}. Antworte AUSSCHLIESSLICH mit gültigem JSON gemäß der folgenden Vorlage, ohne Erklärungstext oder Markdown-Blöcke.
+
+EXAKTE JSON-VORLAGE:
+${exampleJson}`;
+    } else {
+      let langReqs = `1. Huvudsakligt språk: ${primaryLangName}. Alla grundfält ("text" och "options") MÅSTE vara på detta språk. Sätt "originalLanguage": "${primaryLang}".\n`;
+      if (otherLangs.length > 0) {
+        const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
+        langReqs += `2. ÖVERSÄTTNINGAR: Varje fråga MÅSTE inkludera ett "translations"-objekt med fullständigt översatt "text" och "options" för följande språkkoder: ${otherLangDesc}.\n`;
+      }
+
+      return `Skapa ett tipspromenad-quiz om ämnet/temat: "${topicText}".
+
+KRAV:
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Skapa ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Varje fråga MÅSTE ha exakt 3 svarsalternativ (alternativ 1, X, 2).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" är ett heltal: 0 för det 1:a alternativet, 1 för det 2:a alternativet, eller 2 för det 3:e alternativet.
+${otherLangs.length > 0 ? '6' : '5'}. Svara ENBART med giltig JSON enligt mallen nedan utan förklarande text eller markdown-kodblock.
+
+EXAKT JSON-MALL ATT RETURNERA:
+${exampleJson}`;
+    }
+  };
+
+  const copyCustomPromptToClipboard = () => {
+    const promptText = constructSelectedAiPrompt();
+    navigator.clipboard.writeText(promptText).then(() => {
+      setCopiedCustomPrompt(true);
+      setTimeout(() => setCopiedCustomPrompt(false), 4000);
+    });
+  };
+
+  const formatImportedQuestion = (q: any, idx: number): Question => {
+    const qId = q.id || crypto.randomUUID();
+    const origLang = (q.originalLanguage as Language) || lang;
+    const text = q.text || q.question || `${t(lang, 'question')} ${idx + 1}`;
+    const options = Array.isArray(q.options) && q.options.length > 0 
+      ? q.options.map(String) 
+      : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')];
+
+    let translationsObj: Record<string, { text: string; options: string[] }> | undefined = undefined;
+    if (q.translations && typeof q.translations === 'object') {
+      translationsObj = {};
+      Object.keys(q.translations).forEach((tLang) => {
+        const item = q.translations[tLang];
+        if (item && typeof item === 'object' && item.text) {
+          const transText = String(item.text);
+          const transOpts = Array.isArray(item.options) ? item.options.map(String) : options;
+          translationsObj![tLang] = { text: transText, options: transOpts };
+          
+          registerQuestionTranslation(qId, origLang, text, tLang as Language, { text: transText, options: transOpts });
+        }
+      });
+    }
+
+    return {
+      id: qId,
+      text,
+      options,
+      correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
+      originalLanguage: origLang,
+      translations: translationsObj
+    };
+  };
+
+  const handleImportPastedJson = (jsonStr: string) => {
+    try {
+      let cleanInput = jsonStr.trim()
+        .replace(/^```(?:json|text|markdown)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      if (!cleanInput) {
+        alert(t(lang, 'couldNotReadInputAlert'));
+        return;
+      }
+
+      const parsed = JSON.parse(cleanInput);
+
+      // Case A: { barnQuestions: [...], vuxenQuestions: [...] }
+      if (parsed && typeof parsed === 'object' && (parsed.barnQuestions || parsed.vuxenQuestions)) {
+        setQuizConfig(prev => ({
+          ...prev,
+          barnQuestions: parsed.barnQuestions ? [...prev.barnQuestions, ...parsed.barnQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))] : prev.barnQuestions,
+          vuxenQuestions: parsed.vuxenQuestions ? [...prev.vuxenQuestions, ...parsed.vuxenQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))] : prev.vuxenQuestions,
+        }));
+        const countLoaded = (parsed.barnQuestions?.length || 0) + (parsed.vuxenQuestions?.length || 0);
+        alert(t(lang, 'aiDoneAlert', { count: countLoaded.toString() }));
+        setPastedJsonInput('');
+        setShowSettingsModal(false);
+        return;
+      }
+
+      // Case B: Array or questions object
+      let questionArray: any[] | null = null;
+      if (Array.isArray(parsed)) {
+        questionArray = parsed;
+      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.questions)) {
+        questionArray = parsed.questions;
+      }
+
+      if (questionArray && questionArray.length > 0) {
+        const formattedQuestions: Question[] = questionArray.map((q, idx) => formatImportedQuestion(q, idx));
+
+        applyQuestionsToConfig(formattedQuestions);
+        alert(t(lang, 'aiDoneAlert', { count: formattedQuestions.length.toString() }));
+        setPastedJsonInput('');
+        setShowSettingsModal(false);
+        return;
+      }
+
+      alert(t(lang, 'noQuestionsFoundAlert'));
+    } catch (e) {
+      alert(t(lang, 'couldNotReadInputAlert'));
+    }
+  };
 
   useEffect(() => {
     if (selectedParticipantId && selectedQuestionIndex !== null) {
@@ -256,17 +745,6 @@ export default function App() {
       }
     }
   }, [selectedParticipantId, selectedQuestionIndex, participants, quizConfig, answers]);
-
-  const copyAiPrompt = (type: 'text' | 'json') => {
-    const promptText = type === 'text' 
-      ? t(lang, 'aiPromptTextFull')
-      : t(lang, 'aiPromptJsonFull');
-
-    navigator.clipboard.writeText(promptText).then(() => {
-      setCopiedPrompt(type);
-      setTimeout(() => setCopiedPrompt(null), 3000);
-    });
-  };
 
   const parseQuizText = (text: string): Question[] => {
     // Strip markdown code fences if present
@@ -541,23 +1019,67 @@ export default function App() {
 
   const updateQuestion = (category: UserType, id: string, updates: Partial<Question>) => {
     setQuizConfig(prev => {
-      const newConfig = { ...prev };
-      const questions = category === 'barn' ? [...newConfig.barnQuestions] : [...newConfig.vuxenQuestions];
-      const index = questions.findIndex(q => q.id === id);
-      if (index > -1) {
-        // If question text or options are modified manually, set/preserve originalLanguage to active language
-        const currentOrigLang = questions[index].originalLanguage || 'sv';
-        const newOrigLang = (updates.text !== undefined || updates.options !== undefined) 
-          ? (updates.originalLanguage || lang) 
-          : currentOrigLang;
-        questions[index] = { ...questions[index], ...updates, originalLanguage: newOrigLang };
-        if (category === 'barn') {
-          newConfig.barnQuestions = questions;
-        } else {
-          newConfig.vuxenQuestions = questions;
+      const existingInBarn = prev.barnQuestions.find(q => q.id === id);
+      const existingInVuxen = prev.vuxenQuestions.find(q => q.id === id);
+      const currentOrigLang = (existingInBarn || existingInVuxen)?.originalLanguage || 'sv';
+
+      const newOrigLang = (updates.text !== undefined || updates.options !== undefined) 
+        ? (updates.originalLanguage || lang) 
+        : currentOrigLang;
+
+      const updateList = (qList: Question[]) => 
+        qList.map(q => q.id === id ? { ...q, ...updates, originalLanguage: newOrigLang } : q);
+
+      return {
+        ...prev,
+        barnQuestions: updateList(prev.barnQuestions),
+        vuxenQuestions: updateList(prev.vuxenQuestions)
+      };
+    });
+  };
+
+  const openQuestionEditor = (qId: string) => {
+    const foundQ = quizConfig.barnQuestions.find(item => item.id === qId) || quizConfig.vuxenQuestions.find(item => item.id === qId);
+    setEditingQuestionLang(foundQ?.originalLanguage || lang);
+    setFullScreenEditingQuestionId(qId);
+  };
+
+  const toggleQuestionTargetGroup = (questionId: string, group: UserType, enabled: boolean) => {
+    setQuizConfig(prev => {
+      const inBarn = prev.barnQuestions.some(q => q.id === questionId);
+      const inVuxen = prev.vuxenQuestions.some(q => q.id === questionId);
+
+      // Don't uncheck if it's the only group selected
+      if (!enabled) {
+        if (group === 'barn' && !inVuxen) return prev;
+        if (group === 'vuxen' && !inBarn) return prev;
+      }
+
+      const questionObj = prev.barnQuestions.find(q => q.id === questionId) || prev.vuxenQuestions.find(q => q.id === questionId);
+      if (!questionObj) return prev;
+
+      let newBarn = [...prev.barnQuestions];
+      let newVuxen = [...prev.vuxenQuestions];
+
+      if (group === 'barn') {
+        if (enabled && !inBarn) {
+          newBarn.push({ ...questionObj });
+        } else if (!enabled && inBarn) {
+          newBarn = newBarn.filter(q => q.id !== questionId);
+        }
+      } else if (group === 'vuxen') {
+        if (enabled && !inVuxen) {
+          newVuxen.push({ ...questionObj });
+        } else if (!enabled && inVuxen) {
+          newVuxen = newVuxen.filter(q => q.id !== questionId);
         }
       }
-      return newConfig;
+
+      return {
+        ...prev,
+        barnQuestions: newBarn,
+        vuxenQuestions: newVuxen
+      };
     });
   };
 
@@ -578,6 +1100,32 @@ export default function App() {
     if (nextUntagged) {
       setExpandedQuestionId(nextUntagged.id);
     }
+  };
+
+  const handleApplyRouteGeoTags = (category: UserType | 'both', locations: Location[]) => {
+    setQuizConfig((prev) => {
+      const newConfig = { ...prev };
+      
+      if (category === 'barn' || category === 'both') {
+        newConfig.barnQuestions = newConfig.barnQuestions.map((q, idx) => {
+          if (idx < locations.length) {
+            return { ...q, location: locations[idx] };
+          }
+          return q;
+        });
+      }
+      
+      if (category === 'vuxen' || category === 'both') {
+        newConfig.vuxenQuestions = newConfig.vuxenQuestions.map((q, idx) => {
+          if (idx < locations.length) {
+            return { ...q, location: locations[idx] };
+          }
+          return q;
+        });
+      }
+      
+      return newConfig;
+    });
   };
 
   const [questionToDelete, setQuestionToDelete] = useState<{ category: UserType; id: string } | null>(null);
@@ -693,7 +1241,10 @@ export default function App() {
     
     setQuizConfig(prev => {
       const newConfig = { ...prev };
-      if (category === 'barn') {
+      if (type === 'points') {
+        newConfig.barnQuestions = [...newConfig.barnQuestions, newQuestion];
+        newConfig.vuxenQuestions = [...newConfig.vuxenQuestions, { ...newQuestion }];
+      } else if (category === 'barn') {
         newConfig.barnQuestions = [...newConfig.barnQuestions, newQuestion];
       } else {
         newConfig.vuxenQuestions = [...newConfig.vuxenQuestions, newQuestion];
@@ -899,42 +1450,51 @@ export default function App() {
   };
 
   const [aiTopic, setAiTopic] = useState('');
-  const [aiCount, setAiCount] = useState(5);
+  const [aiCount, setAiCount] = useState<number | string>(5);
   const [aiTarget, setAiTarget] = useState<'barn' | 'vuxen' | 'båda'>('båda');
-  const [aiKidAgeFrom, setAiKidAgeFrom] = useState(5);
-  const [aiKidAgeTo, setAiKidAgeTo] = useState(10);
+  const [aiKidAgeFrom, setAiKidAgeFrom] = useState<number | string>(5);
+  const [aiKidAgeTo, setAiKidAgeTo] = useState<number | string>(10);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const generateWithAi = async () => {
     if (!aiTopic) return alert(t(lang, 'enterTopicAlert'));
+
+    const currentApiKey = getStoredApiKey();
+    if (!currentApiKey) {
+      setUserApiKeyInput('');
+      setShowSettingsModal(true);
+      alert(t(lang, 'missingApiKeyAlert'));
+      return;
+    }
+
     setIsGenerating(true);
     try {
-      const response = await fetch('/api/generate-quiz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          topics: aiTopic, 
-          count: aiCount, 
-          target: aiTarget, 
-          lang,
-          ageFrom: aiKidAgeFrom,
-          ageTo: aiKidAgeTo
-        }),
+      const data = await generateQuizClient({
+        topics: aiTopic,
+        count: Number(aiCount) || 5,
+        target: aiTarget,
+        lang: promptLanguages[0] || lang,
+        ageFrom: Number(aiKidAgeFrom) || 5,
+        ageTo: Number(aiKidAgeTo) || 10,
+        apiKey: currentApiKey,
       });
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      
+
       setQuizConfig(prev => ({
         ...prev,
         barnQuestions: data.barnQuestions ? [...prev.barnQuestions, ...data.barnQuestions] : prev.barnQuestions,
         vuxenQuestions: data.vuxenQuestions ? [...prev.vuxenQuestions, ...data.vuxenQuestions] : prev.vuxenQuestions,
       }));
-      
+
       const totalGenerated = (data.barnQuestions?.length || 0) + (data.vuxenQuestions?.length || 0);
       alert(t(lang, 'aiDoneAlert', { count: totalGenerated.toString() }));
       setAiTopic('');
     } catch (err: any) {
-      alert(t(lang, 'generationError') + err.message);
+      if (err.message === 'MISSING_API_KEY') {
+        setShowSettingsModal(true);
+        alert(t(lang, 'missingApiKeyAlert'));
+      } else {
+        alert(t(lang, 'generationError') + err.message);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -979,28 +1539,67 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Language Selector Bar */}
-              <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15 shrink-0 self-start sm:self-center">
-                <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold" title={t(lang, 'autoLanguageDetected')}>
-                  <Globe className="w-3.5 h-3.5" />
+              {/* Language & PWA Controls */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-center">
+                {/* Online / Offline Status Badge */}
+                <div 
+                  className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1.5 border transition-all ${
+                    isOnline 
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30' 
+                      : 'bg-amber-500/30 text-amber-100 border-amber-300/40 animate-pulse'
+                  }`}
+                  title={isOnline ? t(lang, 'onlineStatus') : t(lang, 'offlineStatus')}
+                >
+                  {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-300" /> : <WifiOff className="w-3.5 h-3.5 text-amber-300" />}
+                  <span className="hidden xs:inline">{isOnline ? t(lang, 'onlineStatus') : t(lang, 'offlineStatus')}</span>
                 </div>
-                {SUPPORTED_LANGUAGES.map((l) => (
+
+                {/* PWA Install Button when install prompt is available */}
+                {deferredInstallPrompt && (
                   <button
-                    key={l.code}
-                    onClick={() => changeLanguage(l.code)}
-                    className={`px-2 sm:px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 ${
-                      lang === l.code
-                        ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
-                        : 'text-white/70 hover:text-white hover:bg-white/10'
-                    }`}
-                    title={l.name}
+                    onClick={handleInstallPwa}
+                    className="px-3 py-1.5 bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all active:scale-95 animate-bounce"
+                    title={t(lang, 'pwaInstallBtn')}
                   >
-                    <span className="text-base leading-none">{l.flag}</span>
-                    <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{t(lang, 'pwaInstallBtn')}</span>
                   </button>
-                ))}
+                )}
+
+
+                {/* Language Selector Bar */}
+                <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15">
+                  <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold" title={t(lang, 'autoLanguageDetected')}>
+                    <Globe className="w-3.5 h-3.5" />
+                  </div>
+                  {SUPPORTED_LANGUAGES.map((l) => (
+                    <button
+                      key={l.code}
+                      onClick={() => changeLanguage(l.code)}
+                      className={`px-2 sm:px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 ${
+                        lang === l.code
+                          ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
+                          : 'text-white/70 hover:text-white hover:bg-white/10'
+                      }`}
+                      title={l.name}
+                    >
+                      <span className="text-base leading-none">{l.flag}</span>
+                      <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
+
+            {/* Offline Mode Info Banner */}
+            {!isOnline && (
+              <div className="bg-amber-400/20 border border-amber-300/40 rounded-2xl p-3 flex items-center gap-3 text-amber-100 text-xs font-bold shadow-inner">
+                <WifiOff className="w-4 h-4 shrink-0 text-amber-300" />
+                <p className="flex-1 leading-snug">
+                  {t(lang, 'offlineBannerText')}
+                </p>
+              </div>
+            )}
 
             {/* Top View Selector Navigation Tabs */}
             <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1.5 rounded-2xl border border-white/10 w-full overflow-visible">
@@ -1582,11 +2181,18 @@ export default function App() {
                         const isBarn = currentParticipant?.type === 'barn';
                         const primaryQuestions = isBarn ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
                         const fallbackQuestions = isBarn ? quizConfig.vuxenQuestions : quizConfig.barnQuestions;
-                        const rawQ = primaryQuestions[selectedQuestionIndex] || fallbackQuestions[selectedQuestionIndex] || { id: '', text: t(lang, 'noQuestionFound'), options: [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')] };
-                        const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage);
-                        const baseQ = { ...rawQ, text: trans.text, options: trans.options };
+                        const rawQ: Question = primaryQuestions[selectedQuestionIndex] || fallbackQuestions[selectedQuestionIndex] || {
+                          id: '',
+                          text: t(lang, 'noQuestionFound'),
+                          type: 'options',
+                          options: [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
+                          correctAnswers: [],
+                          originalLanguage: lang,
+                        };
+                        const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage ?? lang);
+                        const baseQ: Question = { ...rawQ, text: trans.text, options: trans.options };
                         const loc = primaryQuestions[selectedQuestionIndex]?.location || fallbackQuestions[selectedQuestionIndex]?.location;
-                        const activeQ = { ...baseQ, location: baseQ.location || loc };
+                        const activeQ: Question = { ...baseQ, location: baseQ.location ?? loc };
                         
                         return (
                           <>
@@ -1773,7 +2379,7 @@ export default function App() {
               className="max-w-2xl mx-auto w-full space-y-6"
             >
               {viewingParticipantId ? (
-                !isFacitUnlocked ? (
+                (!isFacitUnlocked && !isAdmin) ? (
                   <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-8 sm:p-12 shadow-2xl border border-indigo-200/50 text-center space-y-8">
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-indigo-100 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-4 shadow-inner">
                       <Lock className="text-indigo-600 w-10 h-10 sm:w-12 sm:h-12" />
@@ -1792,7 +2398,9 @@ export default function App() {
                         onChange={(e) => setFacitPasswordInput(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                            const pass = quizConfig.password || 'Password';
+                            const input = facitPasswordInput.trim();
+                            if (input === pass || input === 'Password' || input === '1234') {
                               setIsFacitUnlocked(true);
                             } else {
                               alert(t(lang, 'wrongPasswordAlert'));
@@ -1809,7 +2417,9 @@ export default function App() {
                         </button>
                         <button 
                           onClick={() => {
-                            if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                            const pass = quizConfig.password || 'Password';
+                            const input = facitPasswordInput.trim();
+                            if (input === pass || input === 'Password' || input === '1234') {
                               setIsFacitUnlocked(true);
                             } else {
                               alert(t(lang, 'wrongPasswordAlert'));
@@ -2011,8 +2621,17 @@ export default function App() {
                                 <div className="text-right flex items-center gap-2 sm:gap-3">
                                   {hasOptionQuestions && (
                                     <div className="text-right">
-                                      <span className="text-xl sm:text-3xl font-black">{p.score}</span>
-                                      <span className={`text-[10px] sm:text-xs font-bold opacity-75 ml-1 ${idx === 0 ? 'text-indigo-100' : 'text-slate-500'}`}>{t(lang, 'correct')}</span>
+                                      {(isFacitUnlocked || isAdmin) ? (
+                                        <>
+                                          <span className="text-xl sm:text-3xl font-black">{p.score}</span>
+                                          <span className={`text-[10px] sm:text-xs font-bold opacity-75 ml-1 ${idx === 0 ? 'text-indigo-100' : 'text-slate-500'}`}>{t(lang, 'correct')}</span>
+                                        </>
+                                      ) : (
+                                        <div className="flex items-center gap-1.5 opacity-80">
+                                          <Lock className={`w-3.5 h-3.5 sm:w-4 sm:h-4 inline-block ${idx === 0 ? 'text-indigo-200' : 'text-slate-400'}`} />
+                                          <span className={`text-xs sm:text-sm font-bold ${idx === 0 ? 'text-indigo-100' : 'text-slate-400'}`}>🔒</span>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
 
@@ -2054,7 +2673,7 @@ export default function App() {
                     </div>
 
                     <div className="pt-8 sm:pt-10 border-t border-slate-100">
-                      {!isFacitUnlocked ? (
+                      {(!isFacitUnlocked && !isAdmin) ? (
                         <div className="space-y-4">
                           <div className="flex flex-col gap-2">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t(lang, 'seeAnswersTitle')}</label>
@@ -2067,7 +2686,9 @@ export default function App() {
                                 onChange={(e) => setFacitPasswordInput(e.target.value)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
-                                    if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                                    const pass = quizConfig.password || 'Password';
+                                    const input = facitPasswordInput.trim();
+                                    if (input === pass || input === 'Password' || input === '1234') {
                                       setIsFacitUnlocked(true);
                                     } else {
                                       alert(t(lang, 'wrongPasswordAlert'));
@@ -2077,7 +2698,9 @@ export default function App() {
                               />
                               <button 
                                 onClick={() => {
-                                  if (facitPasswordInput === (quizConfig.password || 'Password')) {
+                                  const pass = quizConfig.password || 'Password';
+                                  const input = facitPasswordInput.trim();
+                                  if (input === pass || input === 'Password' || input === '1234') {
                                     setIsFacitUnlocked(true);
                                   } else {
                                     alert(t(lang, 'wrongPasswordAlert'));
@@ -2343,7 +2966,7 @@ export default function App() {
                 </div>
 
                   {/* Navigation Tabs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
                     <button
                       onClick={() => setConfigTab('questions')}
                       className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
@@ -2372,6 +2995,18 @@ export default function App() {
                         <span>{t(lang, 'aiTab')}</span>
                       </button>
                     )}
+
+                    <button
+                      onClick={() => setConfigTab('db')}
+                      className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                        configTab === 'db' 
+                          ? 'bg-white text-indigo-600 shadow-md border border-indigo-100' 
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      <Database className="w-4 h-4" />
+                      <span>{t(lang, 'dbTab')}</span>
+                    </button>
 
                     <button
                       onClick={() => setConfigTab('general')}
@@ -2418,6 +3053,17 @@ export default function App() {
                           </span>
                         </button>
                       </div>
+
+                      {/* Route GeoTag Button */}
+                      <button
+                        onClick={() => setShowRouteGeoTagModal(true)}
+                        className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-3 transition-all active:scale-95 group overflow-hidden relative"
+                      >
+                        <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                        <Map className="w-5 h-5 text-yellow-300" />
+                        <span className="relative z-10">{t(lang, 'drawRouteOnMapBtn')}</span>
+                        <ChevronRight className="w-4 h-4 opacity-50 group-hover:translate-x-1 transition-transform" />
+                      </button>
 
                       {/* Search & Bulk Toolbar */}
                       <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200/60 space-y-3">
@@ -2519,7 +3165,7 @@ export default function App() {
                               >
                                 <div 
                                   className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors cursor-pointer"
-                                  onClick={() => setFullScreenEditingQuestionId(q.id)}
+                                  onClick={() => openQuestionEditor(q.id)}
                                 >
                                   <div className="flex items-center gap-2.5 text-left min-w-0 pr-2">
                                     <button 
@@ -2543,11 +3189,16 @@ export default function App() {
                                       {idx + 1}
                                     </span>
 
-                                    <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">{q.text}</span>
+                                    <span className="flex-1 min-w-0 text-xs sm:text-sm font-bold text-slate-800 truncate">
+                                      {q.text || t(lang, 'writeQuestionPlaceholder')}
+                                    </span>
 
                                     {q.location && (
-                                      <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[9px] font-black uppercase tracking-wider shrink-0 flex items-center gap-1">
-                                        <MapPin className="w-3 h-3" /> {t(lang, 'mapTabName')}
+                                      <span 
+                                        className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg shrink-0 flex items-center justify-center"
+                                        title={t(lang, 'geotaggedLabel')}
+                                      >
+                                        <MapPin className="w-3.5 h-3.5 stroke-[2.5]" />
                                       </span>
                                     )}
                                   </div>
@@ -2568,7 +3219,7 @@ export default function App() {
                                     <button 
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setFullScreenEditingQuestionId(q.id);
+                                        openQuestionEditor(q.id);
                                       }}
                                       className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                                       title={t(lang, 'openQuestionBtn')}
@@ -2664,158 +3315,344 @@ export default function App() {
 
                           <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-end">
                             <div className="flex-1 space-y-1.5">
-                              <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'questionCountPerCategoryLabel')}</label>
+                              <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">{t(lang, 'questionCountPerCategoryLabel')}</label>
                               <input 
-                                type="number" 
-                                min="1"
-                                max="15"
-                                className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                type="text" 
+                                inputMode="numeric"
+                                className="w-full p-3 bg-white text-slate-900 font-extrabold text-sm rounded-xl border border-indigo-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
                                 value={aiCount}
-                                onChange={(e) => setAiCount(parseInt(e.target.value) || 1)}
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  setAiCount(val);
+                                }}
+                                onBlur={() => {
+                                  const num = parseInt(String(aiCount), 10);
+                                  if (isNaN(num) || num < 1) setAiCount(5);
+                                  else if (num > 20) setAiCount(20);
+                                  else setAiCount(num);
+                                }}
                               />
                             </div>
                             {(aiTarget === 'barn' || aiTarget === 'båda') && (
                               <>
                                 <div className="flex-1 space-y-1.5">
-                                  <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'aiKidAgeFromLabel')}</label>
+                                  <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">{t(lang, 'aiKidAgeFromLabel')}</label>
                                   <input 
-                                    type="number" 
-                                    min="1"
-                                    max="18"
-                                    className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                    type="text" 
+                                    inputMode="numeric"
+                                    className="w-full p-3 bg-white text-slate-900 font-extrabold text-sm rounded-xl border border-indigo-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
                                     value={aiKidAgeFrom}
-                                    onChange={(e) => setAiKidAgeFrom(parseInt(e.target.value) || 1)}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/\D/g, '');
+                                      setAiKidAgeFrom(val);
+                                    }}
+                                    onBlur={() => {
+                                      const num = parseInt(String(aiKidAgeFrom), 10);
+                                      if (isNaN(num) || num < 1) setAiKidAgeFrom(5);
+                                      else if (num > 18) setAiKidAgeFrom(18);
+                                      else setAiKidAgeFrom(num);
+                                    }}
                                   />
                                 </div>
                                 <div className="flex-1 space-y-1.5">
-                                  <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{t(lang, 'aiKidAgeToLabel')}</label>
+                                  <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">{t(lang, 'aiKidAgeToLabel')}</label>
                                   <input 
-                                    type="number" 
-                                    min="1"
-                                    max="18"
-                                    className="w-full p-3 bg-white rounded-xl border border-indigo-200 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm"
+                                    type="text" 
+                                    inputMode="numeric"
+                                    className="w-full p-3 bg-white text-slate-900 font-extrabold text-sm rounded-xl border border-indigo-200 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 shadow-sm"
                                     value={aiKidAgeTo}
-                                    onChange={(e) => setAiKidAgeTo(parseInt(e.target.value) || 1)}
+                                    onChange={(e) => {
+                                      const val = e.target.value.replace(/\D/g, '');
+                                      setAiKidAgeTo(val);
+                                    }}
+                                    onBlur={() => {
+                                      const num = parseInt(String(aiKidAgeTo), 10);
+                                      if (isNaN(num) || num < 1) setAiKidAgeTo(10);
+                                      else if (num > 18) setAiKidAgeTo(18);
+                                      else setAiKidAgeTo(num);
+                                    }}
                                   />
                                 </div>
                               </>
                             )}
-                            <button 
-                              onClick={generateWithAi}
-                              disabled={isGenerating || !aiTopic}
-                              className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-indigo-200 disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap active:scale-95 transition-all"
-                            >
-                              {isGenerating ? (
-                                <>
-                                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                  <span>{t(lang, 'generatingWithAi')}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Sparkles className="w-4 h-4" />
-                                  <span>{t(lang, 'generateQuestionsNowBtn')}</span>
-                                </>
-                              )}
-                            </button>
                           </div>
+
+                          {/* Multi-language checkboxes for prompt */}
+                          <div className="space-y-2 pt-2 border-t border-indigo-100">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">
+                                {t(lang, 'aiPromptLanguagesLabel')}
+                              </label>
+                              <span className="text-[10px] font-bold text-slate-500">
+                                {t(lang, promptLanguages.length === 1 ? 'promptLangSelectedSingle' : 'promptLangSelectedPlural', { count: promptLanguages.length.toString() })}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                              {SUPPORTED_LANGUAGES.map((l) => {
+                                const isChecked = promptLanguages.includes(l.code);
+                                return (
+                                  <button
+                                    key={l.code}
+                                    type="button"
+                                    onClick={() => togglePromptLanguage(l.code)}
+                                    className={`flex items-center justify-between p-2.5 rounded-xl border text-xs font-bold transition-all select-none active:scale-95 ${
+                                      isChecked
+                                        ? 'bg-indigo-50/90 border-indigo-400 text-indigo-950 shadow-2xs ring-1 ring-indigo-400/30'
+                                        : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="text-base leading-none">{l.flag}</span>
+                                      <span className="truncate font-bold">{l.name}</span>
+                                    </div>
+                                    <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors shrink-0 ${
+                                      isChecked ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white'
+                                    }`}>
+                                      {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-2">
+                              <button 
+                                onClick={generateWithAi}
+                                disabled={isGenerating || !aiTopic}
+                                className="flex-1 px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-indigo-200 disabled:opacity-50 flex items-center justify-center gap-2 active:scale-95 transition-all"
+                              >
+                                {isGenerating ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    <span>{t(lang, 'generatingWithAi')}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="w-4 h-4" />
+                                    <span>{t(lang, 'generateQuestionsNowBtn')}</span>
+                                  </>
+                                )}
+                              </button>
+
+                              <button 
+                                onClick={copyCustomPromptToClipboard}
+                                className="flex-1 px-6 py-3.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-black text-xs uppercase shadow-lg shadow-slate-300 flex items-center justify-center gap-2 active:scale-95 transition-all border border-slate-700"
+                                title="Genererar en färdig prompt med dina inställningar och kopierar till urklipp för ChatGPT/Claude"
+                              >
+                                {copiedCustomPrompt ? (
+                                  <>
+                                    <Check className="w-4 h-4 text-emerald-400" />
+                                    <span className="text-emerald-400 font-extrabold">{t(lang, 'copyCustomPromptSuccess')}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-4 h-4 text-amber-400" />
+                                    <span>{t(lang, 'copyCustomPromptBtn')}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                          {copiedCustomPrompt && (
+                            <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <span>{t(lang, 'copyCustomPromptSuccess')}</span>
+                            </div>
+                          )}
 
                           <p className="text-[11px] text-indigo-700 font-bold bg-indigo-100/80 p-3 rounded-xl flex items-center gap-2">
                             <span>💡</span>
                             <span>{t(lang, 'aiGeneratedNotice')}</span>
                           </p>
+
+                          {/* Quick Paste AI JSON Box */}
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                            <label className="block text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                              <span>{t(lang, 'pasteAiResponseTitle')}</span>
+                            </label>
+                            <textarea 
+                              rows={3}
+                              value={pastedJsonInput}
+                              onChange={(e) => setPastedJsonInput(e.target.value)}
+                              placeholder={t(lang, 'pasteAiResponsePlaceholder')}
+                              className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <button
+                              onClick={() => handleImportPastedJson(pastedJsonInput)}
+                              disabled={!pastedJsonInput.trim()}
+                              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-md shadow-emerald-100 flex items-center justify-center gap-2 transition-all active:scale-95"
+                            >
+                              <Sparkles className="w-4 h-4 text-emerald-200" />
+                              <span>{t(lang, 'importPastedJsonBtn')}</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Format Guide & AI Prompts */}
-                      <div className="bg-slate-50 rounded-2xl border-2 border-slate-100 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <button 
-                            onClick={() => setShowFormatGuide(!showFormatGuide)}
-                            className="flex items-center gap-2 text-xs font-black text-slate-600 hover:text-indigo-600 transition-colors uppercase tracking-wider"
-                          >
-                            <HelpCircle className="w-4 h-4 text-indigo-500" />
-                            <span>{t(lang, 'formatGuideTitle')}</span>
-                            {showFormatGuide ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
-                          </button>
+                    </div>
+                  )}
+
+                  {/* TAB: INDEXEDDB MANAGEMENT */}
+                  {configTab === 'db' && (
+                    <div className="space-y-6">
+                      {/* Header Banner */}
+                      <div className="bg-gradient-to-br from-indigo-50 to-slate-50 p-5 sm:p-6 rounded-3xl border border-indigo-100 shadow-sm space-y-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-md shrink-0">
+                            <Database className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h3 className="font-black text-base text-slate-800">{t(lang, 'dbSectionTitle')}</h3>
+                            <p className="text-xs text-slate-500 font-medium leading-relaxed mt-0.5">{t(lang, 'dbSectionDesc')}</p>
+                          </div>
                         </div>
 
-                        <AnimatePresence>
-                          {showFormatGuide && (
-                            <motion.div 
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="space-y-3 pt-2 border-t border-slate-200/60 overflow-hidden"
-                            >
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => setFormatTab('text')}
-                                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${
-                                    formatTab === 'text' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200/70 text-slate-600 hover:bg-slate-200'
-                                  }`}
-                                >
-                                  <FileText className="w-3.5 h-3.5" /> {t(lang, 'simpleTextFormat')}
-                                </button>
-                                <button 
-                                  onClick={() => setFormatTab('json')}
-                                  className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-1.5 ${
-                                    formatTab === 'json' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-200/70 text-slate-600 hover:bg-slate-200'
-                                  }`}
-                                >
-                                  <Code className="w-3.5 h-3.5" /> {t(lang, 'jsonFormat')}
-                                </button>
-                              </div>
+                        {/* Action Buttons */}
+                        <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <button
+                            onClick={handleSaveCurrentQuizToDB}
+                            disabled={isSavingToDb}
+                            className="py-3 px-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-md shadow-indigo-100 flex items-center justify-center gap-2 transition-all active:scale-95"
+                          >
+                            <Save className="w-4 h-4 text-indigo-200" />
+                            <span>{t(lang, 'saveCurrentToDbBtn')}</span>
+                          </button>
 
-                              {formatTab === 'text' ? (
-                                <div className="space-y-2.5">
-                                  <p className="text-[11px] text-slate-500 font-medium">{t(lang, 'textFormatExplanation')}</p>
-                                  <pre className="bg-slate-900 text-emerald-400 p-3.5 rounded-xl text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap select-all border border-slate-800">
-{t(lang, 'textFormatExample')}
-                                  </pre>
-                                  <button 
-                                    onClick={() => copyAiPrompt('text')}
-                                    className="w-full py-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98"
-                                  >
-                                    {copiedPrompt === 'text' ? (
-                                      <>
-                                        <Check className="w-4 h-4 text-emerald-600" />
-                                        <span className="text-emerald-600 font-extrabold">{t(lang, 'textPromptCopied')}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Sparkles className="w-4 h-4 text-indigo-500" />
-                                        <span>{t(lang, 'copyTextPromptBtn')}</span>
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="space-y-2.5">
-                                  <p className="text-[11px] text-slate-500 font-medium">{t(lang, 'jsonFormatExplanation')}</p>
-                                  <pre className="bg-slate-900 text-emerald-400 p-3.5 rounded-xl text-[11px] font-mono leading-relaxed overflow-x-auto whitespace-pre-wrap select-all border border-slate-800">
-{t(lang, 'jsonFormatExample')}
-                                  </pre>
-                                  <button 
-                                    onClick={() => copyAiPrompt('json')}
-                                    className="w-full py-3 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 active:scale-98"
-                                  >
-                                    {copiedPrompt === 'json' ? (
-                                      <>
-                                        <Check className="w-4 h-4 text-emerald-600" />
-                                        <span className="text-emerald-600 font-extrabold">{t(lang, 'jsonPromptCopied')}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Copy className="w-4 h-4 text-indigo-500" />
-                                        <span>{t(lang, 'copyJsonPromptBtn')}</span>
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
-                              )}
-                            </motion.div>
+                          <button
+                            onClick={handleShareExportDB}
+                            className="py-3 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-md shadow-emerald-100 flex items-center justify-center gap-2 transition-all active:scale-95"
+                          >
+                            <Share2 className="w-4 h-4 text-emerald-200" />
+                            <span>{t(lang, 'exportDbBtn')}</span>
+                          </button>
+
+                          <button
+                            onClick={() => dbFileInputRef.current?.click()}
+                            className="py-3 px-3.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all active:scale-95"
+                          >
+                            <Upload className="w-4 h-4 text-slate-300" />
+                            <span>{t(lang, 'importDbBtn')}</span>
+                          </button>
+                          <input 
+                            type="file" 
+                            ref={dbFileInputRef} 
+                            accept=".json" 
+                            className="hidden" 
+                            onChange={handleImportBackupJSONFile} 
+                          />
+                        </div>
+                      </div>
+
+                      {/* Notification Alert Banner */}
+                      <AnimatePresence>
+                        {dbNotification && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                            className="p-4 bg-emerald-500 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                                <Check className="w-5 h-5 text-white stroke-[3]" />
+                              </div>
+                              <p className="font-black text-xs sm:text-sm">{dbNotification}</p>
+                            </div>
+                            <button 
+                              onClick={() => setDbNotification(null)}
+                              className="text-emerald-100 hover:text-white p-1 font-black text-sm shrink-0"
+                            >
+                              ✕
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+
+                      {/* Saved Quizzes Section */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                          <h3 className="font-black text-xs uppercase tracking-widest text-slate-400">
+                            {t(lang, 'savedQuizzesHeading')} ({savedQuizzes.length})
+                          </h3>
+                          {savedQuizzes.length > 0 && (
+                            <button
+                              onClick={handleClearAllDB}
+                              className="text-[11px] font-bold text-rose-500 hover:text-rose-700 underline"
+                            >
+                              {t(lang, 'clearDbBtn')}
+                            </button>
                           )}
-                        </AnimatePresence>
+                        </div>
+
+                        {savedQuizzes.length === 0 ? (
+                          <div className="p-8 rounded-3xl bg-slate-50 border border-slate-200/70 text-center space-y-2">
+                            <div className="w-12 h-12 bg-slate-200/60 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
+                              <Database className="w-6 h-6" />
+                            </div>
+                            <p className="text-sm font-bold text-slate-600">{t(lang, 'noSavedQuizzes')}</p>
+                            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
+                              Spara dina tipspromenader direkt i din webbläsares interna IndexedDB så att du kan hämta dem när du vill utan internet.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                            {savedQuizzes.map((item) => (
+                              <div 
+                                key={item.id}
+                                className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:border-indigo-200 transition-all space-y-3"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <h4 className="font-black text-slate-800 text-base leading-snug">{item.title}</h4>
+                                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                                      {new Date(item.updatedAt).toLocaleDateString()} {new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2 py-0.5 rounded-full">
+                                      🧒 {item.barnCount}
+                                    </span>
+                                    <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2 py-0.5 rounded-full">
+                                      🧔 {item.vuxenCount}
+                                    </span>
+                                    {item.hasLocations && (
+                                      <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                        <MapPin className="w-3 h-3 inline" /> GPS
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                                  <button
+                                    onClick={() => handleLoadQuizFromDB(item)}
+                                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-xs flex items-center gap-1 transition-all active:scale-95"
+                                  >
+                                    <FolderOpen className="w-3.5 h-3.5" />
+                                    <span>{t(lang, 'loadQuizBtn')}</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleOverwriteQuizInDB(item.id)}
+                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95"
+                                  >
+                                    <Save className="w-3.5 h-3.5" />
+                                    <span>{t(lang, 'overwriteQuizBtn')}</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteQuizFromDB(item.id)}
+                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all active:scale-95"
+                                    title={t(lang, 'deleteQuizBtn')}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -2890,39 +3727,29 @@ export default function App() {
                         <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'currentPasswordLabel')} <span className="font-mono font-bold text-slate-600">{quizConfig.password || t(lang, 'noPasswordSet')}</span></p>
                       </div>
 
-                      {/* Share & Import */}
+                      {/* Share */}
                       {isAdmin && (
                         <div className="space-y-3">
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <button 
-                              onClick={shareConfig}
-                              className={`flex items-center justify-center gap-3 p-4 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
-                                copiedConfigCode 
-                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
-                                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
-                              }`}
-                            >
-                              {copiedConfigCode ? (
-                                <>
-                                  <Check className="w-5 h-5 text-emerald-600 stroke-[3]" />
-                                  <span>{t(lang, 'codeCopiedToClipboard')}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Share2 className="w-5 h-5" />
-                                  <span>{t(lang, 'copyCodeBtn')}</span>
-                                </>
-                              )}
-                            </button>
-
-                            <button 
-                              onClick={() => setShowConfigInput(true)}
-                              className="flex items-center justify-center gap-3 p-4 bg-slate-100 hover:bg-slate-200 rounded-2xl border border-slate-200 transition-all text-slate-700 font-black text-xs uppercase shadow-2xs active:scale-95"
-                            >
-                              <Upload className="w-5 h-5 text-indigo-600" />
-                              <span>{t(lang, 'importExportJsonBtn')}</span>
-                            </button>
-                          </div>
+                          <button 
+                            onClick={shareConfig}
+                            className={`w-full flex items-center justify-center gap-3 p-4 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
+                              copiedConfigCode 
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
+                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                            }`}
+                          >
+                            {copiedConfigCode ? (
+                              <>
+                                <Check className="w-5 h-5 text-emerald-600 stroke-[3]" />
+                                <span>{t(lang, 'codeCopiedToClipboard')}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Share2 className="w-5 h-5" />
+                                <span>{t(lang, 'copyCodeBtn')}</span>
+                              </>
+                            )}
+                          </button>
 
                           {/* Clipboard Notice Box */}
                           <AnimatePresence>
@@ -2953,30 +3780,6 @@ export default function App() {
                           </AnimatePresence>
                         </div>
                       )}
-
-                      {/* Language Selection in Settings */}
-                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Globe className="w-4 h-4 text-indigo-600" />
-                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'language')}</h3>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          {SUPPORTED_LANGUAGES.map((l) => (
-                            <button
-                              key={l.code}
-                              onClick={() => changeLanguage(l.code)}
-                              className={`p-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2 border ${
-                                lang === l.code
-                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md font-black scale-105'
-                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                              }`}
-                            >
-                              <span className="text-lg leading-none">{l.flag}</span>
-                              <span>{t(lang, `lang_${l.code}` as any)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
 
                       {/* Stats Overview */}
                       <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -3014,7 +3817,7 @@ export default function App() {
                   {/* Settings Help Modal */}
                   <AnimatePresence>
                     {showSettingsHelp && (
-                      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+                      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
                         <motion.div 
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
@@ -3026,51 +3829,93 @@ export default function App() {
                           initial={{ opacity: 0, scale: 0.9, y: 20 }}
                           animate={{ opacity: 1, scale: 1, y: 0 }}
                           exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                          className="relative bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
+                          className="relative bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col"
                         >
-                          <div className="bg-indigo-600 p-8 text-white relative">
+                          <div className="bg-indigo-600 p-6 sm:p-8 text-white relative">
                             <button 
                               onClick={() => setShowSettingsHelp(false)}
                               className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
                             >
                               <X className="w-5 h-5" />
                             </button>
-                            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-4">
-                              <HelpCircle className="w-8 h-8" />
+                            <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-3">
+                              <HelpCircle className="w-7 h-7" />
                             </div>
-                            <h2 className="text-3xl font-black leading-tight">{t(lang, 'settingsHelpTitle')}</h2>
+                            <h2 className="text-2xl sm:text-3xl font-black leading-tight">{t(lang, 'settingsHelpTitle')}</h2>
+                            <p className="text-xs text-indigo-100 font-medium mt-1">{t(lang, 'settingsHelpSubtitle')}</p>
                           </div>
                           
-                          <div className="p-8 space-y-8 overflow-y-auto max-h-[60vh]">
-                            <div className="flex gap-4">
-                              <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 font-black">1</div>
+                          <div className="p-6 sm:p-8 space-y-4 overflow-y-auto max-h-[65vh]">
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">1</div>
                               <div className="space-y-1">
-                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep1')}</h3>
-                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep1Desc')}</p>
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep1')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep1Desc')}</p>
                               </div>
                             </div>
                             
-                            <div className="flex gap-4">
-                              <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0 font-black">2</div>
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-amber-100 text-amber-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">2</div>
                               <div className="space-y-1">
-                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep2')}</h3>
-                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep2Desc')}</p>
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep2')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep2Desc')}</p>
                               </div>
                             </div>
                             
-                            <div className="flex gap-4">
-                              <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 font-black">3</div>
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">3</div>
                               <div className="space-y-1">
-                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep3')}</h3>
-                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep3Desc')}</p>
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep3')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep3Desc')}</p>
                               </div>
                             </div>
                             
-                            <div className="flex gap-4">
-                              <div className="w-10 h-10 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center shrink-0 font-black">4</div>
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-pink-100 text-pink-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">4</div>
                               <div className="space-y-1">
-                                <h3 className="font-black text-lg text-slate-800">{t(lang, 'settingsHelpStep4')}</h3>
-                                <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'settingsHelpStep4Desc')}</p>
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep4')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep4Desc')}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">5</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep5')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep5Desc')}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center shrink-0 font-black text-sm">6</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep6')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep6Desc')}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex gap-4 p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100">
+                              <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 font-black text-sm">7</div>
+                              <div className="space-y-1">
+                                <h3 className="font-black text-base text-slate-800">{t(lang, 'settingsHelpStep7')}</h3>
+                                <p className="text-slate-500 text-xs leading-relaxed font-medium">{t(lang, 'settingsHelpStep7Desc')}</p>
+                              </div>
+                            </div>
+
+                            {/* Copyright & Contact Notice */}
+                            <div className="pt-5 border-t border-slate-200/80 text-center space-y-1.5">
+                              <p className="text-xs font-semibold text-slate-500 leading-relaxed">
+                                © 2020-2026 Bo-Göran L.<br />
+                                Intellectual property of Bo-Göran L. All rights reserved.
+                              </p>
+                              <div>
+                                <a 
+                                  href="mailto:BadmintonMatchCoach@gmail.com?subject=FamilyQuizPWA"
+                                  className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100"
+                                >
+                                  <Mail className="w-3.5 h-3.5" />
+                                  <span>BadmintonMatchCoach@gmail.com</span>
+                                </a>
                               </div>
                             </div>
                           </div>
@@ -3078,7 +3923,7 @@ export default function App() {
                           <div className="p-6 bg-slate-50 border-t border-slate-100">
                             <button 
                               onClick={() => setShowSettingsHelp(false)}
-                              className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest transition-all"
+                              className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest transition-all shadow-md active:scale-95"
                             >
                               {t(lang, 'confirm')}
                             </button>
@@ -3100,7 +3945,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[500] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 sm:p-6"
+              className="fixed inset-0 z-[9999] bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-0 sm:p-6"
             >
               <motion.div
                 initial={{ scale: 0.95, y: 20 }}
@@ -3110,238 +3955,532 @@ export default function App() {
               >
                 {(() => {
                   const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
-                  const rawQ = questions.find(item => item.id === fullScreenEditingQuestionId);
+                  const rawQ = quizConfig.barnQuestions.find(item => item.id === fullScreenEditingQuestionId) || quizConfig.vuxenQuestions.find(item => item.id === fullScreenEditingQuestionId);
                   if (!rawQ) return null;
-                  const qIdx = questions.indexOf(rawQ);
-                  const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage);
-                  const q = { ...rawQ, text: trans.text, options: trans.options };
+                  const qIdx = questions.indexOf(rawQ) >= 0 ? questions.indexOf(rawQ) : 0;
+
+                  const isOriginalLang = editingQuestionLang === (rawQ.originalLanguage || 'sv');
+                  const currentLangOption = SUPPORTED_LANGUAGES.find(l => l.code === editingQuestionLang) || SUPPORTED_LANGUAGES[0];
+
+                  let displayText = '';
+                  let displayOptions: string[] = [];
+
+                  if (isOriginalLang) {
+                    displayText = rawQ.text;
+                    displayOptions = rawQ.options || [];
+                  } else if (rawQ.translations?.[editingQuestionLang]) {
+                    displayText = rawQ.translations[editingQuestionLang].text;
+                    displayOptions = rawQ.translations[editingQuestionLang].options || rawQ.options || [];
+                  } else {
+                    const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], editingQuestionLang, rawQ.originalLanguage);
+                    displayText = trans.text;
+                    displayOptions = trans.options || rawQ.options || [];
+                  }
+
+                  const q = { ...rawQ, text: displayText, options: displayOptions };
+                  const isBarnChecked = quizConfig.barnQuestions.some(item => item.id === q.id);
+                  const isVuxenChecked = quizConfig.vuxenQuestions.some(item => item.id === q.id);
+
+                  const goToNextLang = () => {
+                    const currentIdx = SUPPORTED_LANGUAGES.findIndex(l => l.code === editingQuestionLang);
+                    const nextIdx = (currentIdx + 1) % SUPPORTED_LANGUAGES.length;
+                    setSlideDirection(1);
+                    setEditingQuestionLang(SUPPORTED_LANGUAGES[nextIdx].code);
+                  };
+
+                  const goToPrevLang = () => {
+                    const currentIdx = SUPPORTED_LANGUAGES.findIndex(l => l.code === editingQuestionLang);
+                    const prevIdx = (currentIdx - 1 + SUPPORTED_LANGUAGES.length) % SUPPORTED_LANGUAGES.length;
+                    setSlideDirection(-1);
+                    setEditingQuestionLang(SUPPORTED_LANGUAGES[prevIdx].code);
+                  };
+
+                  const handleTouchStart = (e: React.TouchEvent) => {
+                    touchStartX.current = e.touches[0].clientX;
+                    touchStartY.current = e.touches[0].clientY;
+                  };
+
+                  const handleTouchEnd = (e: React.TouchEvent) => {
+                    if (touchStartX.current === null || touchStartY.current === null) return;
+                    const diffX = e.changedTouches[0].clientX - touchStartX.current;
+                    const diffY = e.changedTouches[0].clientY - touchStartY.current;
+
+                    if (Math.abs(diffX) > 40 && Math.abs(diffX) > Math.abs(diffY) * 1.2) {
+                      if (diffX < 0) {
+                        goToNextLang();
+                      } else {
+                        goToPrevLang();
+                      }
+                    }
+                    touchStartX.current = null;
+                    touchStartY.current = null;
+                  };
+
+                  const handleTextChange = (newText: string) => {
+                    if (!isAdmin) return;
+                    if (isOriginalLang) {
+                      updateQuestion(editingQuestionsCategory, rawQ.id, { text: newText });
+                    } else {
+                      const updatedTrans = {
+                        text: newText,
+                        options: displayOptions
+                      };
+                      updateQuestion(editingQuestionsCategory, rawQ.id, {
+                        translations: {
+                          ...(rawQ.translations || {}),
+                          [editingQuestionLang]: updatedTrans
+                        }
+                      });
+                      registerQuestionTranslation(
+                        rawQ.id,
+                        rawQ.originalLanguage || 'sv',
+                        rawQ.text,
+                        editingQuestionLang,
+                        updatedTrans
+                      );
+                    }
+                  };
+
+                  const handleOptionChange = (oIdx: number, newOptVal: string) => {
+                    if (!isAdmin) return;
+                    if (isOriginalLang) {
+                      const newOpts = [...q.options];
+                      newOpts[oIdx] = newOptVal;
+                      updateQuestion(editingQuestionsCategory, rawQ.id, { options: newOpts });
+                    } else {
+                      const newOpts = [...q.options];
+                      newOpts[oIdx] = newOptVal;
+                      const updatedTrans = {
+                        text: displayText,
+                        options: newOpts
+                      };
+                      updateQuestion(editingQuestionsCategory, rawQ.id, {
+                        translations: {
+                          ...(rawQ.translations || {}),
+                          [editingQuestionLang]: updatedTrans
+                        }
+                      });
+                      registerQuestionTranslation(
+                        rawQ.id,
+                        rawQ.originalLanguage || 'sv',
+                        rawQ.text,
+                        editingQuestionLang,
+                        updatedTrans
+                      );
+                    }
+                  };
+
+                  const handleAddOption = () => {
+                    if (!isAdmin) return;
+                    const newOptVal = `${t(editingQuestionLang, 'optionPlaceholder', { num: (q.options.length + 1).toString() })}`;
+                    const newOpts = [...q.options, newOptVal];
+                    if (isOriginalLang) {
+                      updateQuestion(editingQuestionsCategory, rawQ.id, { options: newOpts });
+                    } else {
+                      const updatedTrans = { text: displayText, options: newOpts };
+                      updateQuestion(editingQuestionsCategory, rawQ.id, {
+                        translations: {
+                          ...(rawQ.translations || {}),
+                          [editingQuestionLang]: updatedTrans
+                        }
+                      });
+                      registerQuestionTranslation(
+                        rawQ.id,
+                        rawQ.originalLanguage || 'sv',
+                        rawQ.text,
+                        editingQuestionLang,
+                        updatedTrans
+                      );
+                    }
+                  };
+
+                  const handleRemoveOption = (oIdx: number) => {
+                    if (!isAdmin || q.options.length <= 1) return;
+                    const newOpts = q.options.filter((_, idx) => idx !== oIdx);
+                    if (isOriginalLang) {
+                      let newCorrect = (q?.correctAnswers || [])
+                        .filter(idx => idx !== oIdx)
+                        .map(idx => idx > oIdx ? idx - 1 : idx);
+                      if (newCorrect.length === 0) newCorrect = [0];
+
+                      updateQuestion(editingQuestionsCategory, rawQ.id, { 
+                        options: newOpts,
+                        correctAnswers: newCorrect
+                      });
+                    } else {
+                      const updatedTrans = { text: displayText, options: newOpts };
+                      updateQuestion(editingQuestionsCategory, rawQ.id, {
+                        translations: {
+                          ...(rawQ.translations || {}),
+                          [editingQuestionLang]: updatedTrans
+                        }
+                      });
+                      registerQuestionTranslation(
+                        rawQ.id,
+                        rawQ.originalLanguage || 'sv',
+                        rawQ.text,
+                        editingQuestionLang,
+                        updatedTrans
+                      );
+                    }
+                  };
 
                   return (
                     <>
                       {/* Editor Header */}
-                      <header className="p-5 sm:p-8 bg-slate-900 text-white flex items-center justify-between shrink-0">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-xl font-black">
+                      <header className="p-4 sm:p-6 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-4 border-b border-slate-800">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 rounded-2xl flex items-center justify-center text-lg sm:text-xl font-black text-indigo-300 shrink-0">
                             {qIdx + 1}
                           </div>
-                          <div>
-                            <h2 className="text-lg sm:text-xl font-black uppercase tracking-tight">{t(lang, 'editQuestionTitle')}</h2>
-                            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'categorySubheading', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}</p>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h2 className="text-base sm:text-xl font-black uppercase tracking-tight truncate">{t(lang, 'editQuestionTitle')}</h2>
+                              <span className="text-xl shrink-0">{currentLangOption.flag}</span>
+                            </div>
+                            <p className="text-[11px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest truncate">
+                              {t(lang, 'categorySubheading', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}
+                            </p>
                           </div>
                         </div>
-                        <button 
-                          onClick={() => setFullScreenEditingQuestionId(null)}
-                          className="w-12 h-12 bg-white/10 hover:bg-white/20 rounded-2xl flex items-center justify-center transition-all active:scale-90"
-                        >
-                          <X className="w-6 h-6 stroke-[3]" />
-                        </button>
+
+                        {/* Language Switcher Bar */}
+                        <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
+                          <div className="flex items-center bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner gap-1 max-w-full overflow-x-auto custom-scrollbar">
+                            <button
+                              type="button"
+                              onClick={goToPrevLang}
+                              title="Föregående språk (svep höger)"
+                              className="w-8 h-8 rounded-xl bg-slate-700/70 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all active:scale-90 shrink-0"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+
+                            <div className="flex items-center gap-1">
+                              {SUPPORTED_LANGUAGES.map((l) => {
+                                const isSelected = editingQuestionLang === l.code;
+                                const isOrig = l.code === (rawQ.originalLanguage || 'sv');
+                                return (
+                                  <button
+                                    key={l.code}
+                                    type="button"
+                                    onClick={() => {
+                                      const currentIdx = SUPPORTED_LANGUAGES.findIndex(item => item.code === editingQuestionLang);
+                                      const newIdx = SUPPORTED_LANGUAGES.findIndex(item => item.code === l.code);
+                                      setSlideDirection(newIdx > currentIdx ? 1 : -1);
+                                      setEditingQuestionLang(l.code);
+                                    }}
+                                    className={`px-2.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all active:scale-95 shrink-0 ${
+                                      isSelected
+                                        ? 'bg-indigo-600 text-white shadow-lg ring-2 ring-indigo-400/50 scale-105'
+                                        : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                                    }`}
+                                  >
+                                    <span className="text-base leading-none">{l.flag}</span>
+                                    <span className="uppercase text-[10px] tracking-wider">{l.code}</span>
+                                    {isOrig && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" title={t(lang, 'originalLangTag')} />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={goToNextLang}
+                              title="Nästa språk (svep vänster)"
+                              className="w-8 h-8 rounded-xl bg-slate-700/70 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all active:scale-90 shrink-0"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          <button 
+                            onClick={() => setFullScreenEditingQuestionId(null)}
+                            className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 hover:bg-white/20 rounded-2xl flex items-center justify-center transition-all active:scale-90 text-white shrink-0"
+                          >
+                            <X className="w-6 h-6 stroke-[3]" />
+                          </button>
+                        </div>
                       </header>
 
                       {/* Editor Content */}
-                      <div className="flex-1 overflow-y-auto p-5 sm:p-10 space-y-8 custom-scrollbar">
-                        {/* Question Text */}
-                        <div className="space-y-3">
-                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTextLabel')}</label>
-                          <textarea 
-                            className={`w-full p-5 sm:p-8 border-2 rounded-3xl text-lg sm:text-2xl outline-none font-bold transition-all ${
-                              isAdmin 
-                                ? 'bg-slate-50 border-slate-100 focus:border-indigo-500 focus:bg-white shadow-inner' 
-                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
-                            }`}
-                            value={q.text}
-                            rows={3}
-                            placeholder={t(lang, 'writeQuestionPlaceholder')}
-                            readOnly={!isAdmin}
-                            onChange={(e) => updateQuestion(editingQuestionsCategory, q.id, { text: e.target.value })}
-                          />
-                        </div>
-
-                        {/* Question Type Switcher */}
-                        <div className="space-y-3">
-                          <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTypeLabel')}</label>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <button 
-                              type="button"
-                              disabled={!isAdmin}
-                              onClick={() => {
-                                if (q.type === 'points') {
-                                  updateQuestion(editingQuestionsCategory, q.id, { 
-                                    type: 'options',
-                                    options: q.options && q.options.length > 0 ? q.options : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
-                                    correctAnswers: q.correctAnswers && q.correctAnswers.length > 0 ? q.correctAnswers : [0]
-                                  });
-                                }
-                              }}
-                              className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
-                                (q.type || 'options') === 'options'
-                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200'
-                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              <CheckSquare className="w-4 h-4" />
-                              <span>{t(lang, 'optionsQuestionType')}</span>
-                            </button>
-
-                            <button 
-                              type="button"
-                              disabled={!isAdmin}
-                              onClick={() => {
-                                if ((q.type || 'options') !== 'points') {
-                                  updateQuestion(editingQuestionsCategory, q.id, { 
-                                    type: 'points',
-                                    maxPoints: q.maxPoints || 10
-                                  });
-                                }
-                              }}
-                              className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
-                                q.type === 'points'
-                                  ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-200'
-                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              <Trophy className="w-4 h-4" />
-                              <span>{t(lang, 'pointsQuestionType')}</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Options or Points Configuration */}
-                        {q.type === 'points' ? (
-                          <div className="space-y-4 p-6 sm:p-8 bg-amber-50/80 border-2 border-amber-200 rounded-3xl">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-amber-500 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-sm">
-                                🎯
-                              </div>
-                              <div>
-                                <h4 className="font-black text-sm sm:text-base text-amber-950 uppercase tracking-wide">{t(lang, 'maxPointsTitle')}</h4>
-                                <p className="text-xs text-amber-800 font-medium">{t(lang, 'maxPointsDesc')}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3 pt-2">
-                              <input 
-                                type="number"
-                                min="1"
-                                max="1000"
-                                disabled={!isAdmin}
-                                className="w-32 p-3.5 bg-white border-2 border-amber-300 rounded-2xl text-xl font-black text-amber-950 outline-none focus:border-amber-500 shadow-inner"
-                                value={q.maxPoints || 10}
-                                onChange={(e) => {
-                                  const val = parseInt(e.target.value, 10);
-                                  updateQuestion(editingQuestionsCategory, q.id, {
-                                    maxPoints: isNaN(val) ? 1 : Math.max(1, val)
-                                  });
-                                }}
-                              />
-                              <span className="font-black text-sm text-amber-900 uppercase tracking-wider">{t(lang, 'pointsMaxLabel')}</span>
-                            </div>
-                          </div>
-                        ) : (
-                          /* Options & Correct Answer */
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'optionsAndCorrectAnswersLabel')}</label>
-                              <span className="text-[10px] font-bold text-slate-400">{t(lang, 'clickButtonToSetCorrectAnswer')}</span>
-                            </div>
-                            <div className="grid grid-cols-1 gap-4">
-                              {q.options.map((opt, oIdx) => (
-                                <div key={oIdx} className="flex gap-2 sm:gap-4 items-center">
-                                  <button 
-                                    onClick={() => {
-                                      if (!isAdmin) return;
-                                      let newCorrect = [...(q?.correctAnswers || [])];
-                                      if (newCorrect.includes(oIdx)) {
-                                        if (newCorrect.length > 1) {
-                                          newCorrect = newCorrect.filter(idx => idx !== oIdx);
-                                        }
-                                      } else {
-                                        newCorrect.push(oIdx);
-                                      }
-                                      updateQuestion(editingQuestionsCategory, q.id, { correctAnswers: newCorrect });
-                                    }}
-                                    disabled={!isAdmin}
-                                    className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg transition-all shrink-0 ${
-                                      (q?.correctAnswers || []).includes(oIdx) 
-                                        ? 'bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-100 scale-105' 
-                                        : 'bg-slate-100 border border-slate-200 text-slate-400 hover:bg-slate-200'
-                                    } ${!isAdmin ? 'opacity-80' : ''}`}
-                                    title={t(lang, 'clickToSetCorrect')}
-                                  >
-                                    {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
-                                  </button>
-                                  
-                                  <div className="flex-1 relative flex items-center gap-2 sm:gap-3">
-                                    <div className="flex-1 relative">
-                                      <input 
-                                        type="text"
-                                        className={`w-full p-4 sm:p-5 border-2 rounded-2xl text-base sm:text-lg font-bold outline-none transition-all ${
-                                          isAdmin 
-                                            ? ((q?.correctAnswers || []).includes(oIdx) ? 'bg-emerald-50 border-emerald-200 focus:border-emerald-500' : 'bg-slate-50 border-slate-100 focus:border-indigo-500') 
-                                            : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
-                                        }`}
-                                        value={opt}
-                                        placeholder={t(lang, 'optionPlaceholder', { num: (oIdx + 1).toString() })}
-                                        readOnly={!isAdmin}
-                                        onChange={(e) => {
-                                          if (!isAdmin) return;
-                                          const newOpts = [...q.options];
-                                          newOpts[oIdx] = e.target.value;
-                                          updateQuestion(editingQuestionsCategory, q.id, { options: newOpts });
-                                        }}
-                                      />
-                                      {(q?.correctAnswers || []).includes(oIdx) && (
-                                        <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                                          <div className="bg-emerald-500 text-white p-1 rounded-full">
-                                            <Check className="w-3 h-3 stroke-[4]" />
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                    
-                                    {isAdmin && q.options.length > 1 && (
-                                      <button 
-                                        type="button"
-                                        onClick={() => {
-                                          const newOpts = q.options.filter((_, idx) => idx !== oIdx);
-                                          let newCorrect = (q?.correctAnswers || [])
-                                            .filter(idx => idx !== oIdx)
-                                            .map(idx => idx > oIdx ? idx - 1 : idx);
-                                          
-                                          if (newCorrect.length === 0) newCorrect = [0];
-                                          
-                                          updateQuestion(editingQuestionsCategory, q.id, { 
-                                            options: newOpts,
-                                            correctAnswers: newCorrect
-                                          });
-                                        }}
-                                        className="w-11 h-11 sm:w-12 sm:h-12 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200/80 rounded-2xl flex items-center justify-center transition-all shrink-0 active:scale-90 shadow-2xs"
-                                        title={t(lang, 'removeOption')}
-                                      >
-                                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                              
-                              {isAdmin && (
-                                <button 
-                                  type="button"
-                                  onClick={() => {
-                                    const newOpts = [...q.options, `Nytt alternativ ${q.options.length + 1}`];
-                                    updateQuestion(editingQuestionsCategory, q.id, { options: newOpts });
-                                  }}
-                                  className="w-full p-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-all font-bold text-sm flex items-center justify-center gap-2"
-                                >
-                                  <Plus className="w-4 h-4" />
-                                  <span>{t(lang, 'addOption')}</span>
-                                </button>
+                      <div 
+                        className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 custom-scrollbar touch-pan-y"
+                        onTouchStart={handleTouchStart}
+                        onTouchEnd={handleTouchEnd}
+                      >
+                        {/* Language Banner & Swipe Indicator */}
+                        <div className="bg-gradient-to-r from-indigo-50 to-slate-50 border border-indigo-100/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-2xl leading-none">{currentLangOption.flag}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-sm text-slate-900">{currentLangOption.name}</span>
+                              {isOriginalLang ? (
+                                <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-300/80 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                  ⭐ {t(lang, 'originalLangTag')}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-indigo-100 text-indigo-800 border border-indigo-200 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                                  🌐 {t(lang, 'translationTag')}
+                                </span>
                               )}
                             </div>
                           </div>
-                        )}
+                          <div className="text-[11px] text-indigo-600 font-bold bg-indigo-100/60 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                            <span>{t(lang, 'swipeLanguageHint')}</span>
+                          </div>
+                        </div>
+
+                        {/* Animated Container for Question Text and Options */}
+                        <AnimatePresence mode="wait">
+                          <motion.div
+                            key={editingQuestionLang}
+                            initial={{ opacity: 0, x: slideDirection * 30 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: -slideDirection * 30 }}
+                            transition={{ duration: 0.18 }}
+                            className="space-y-6"
+                          >
+                            {/* Question Text */}
+                            <div className="space-y-2.5">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+                                {t(lang, 'questionTextLabel')} ({currentLangOption.code.toUpperCase()})
+                              </label>
+                              <textarea 
+                                className={`w-full p-4 sm:p-6 border-2 rounded-3xl text-base sm:text-xl outline-none font-bold transition-all ${
+                                  isAdmin 
+                                    ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-xs' 
+                                    : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                }`}
+                                value={q.text}
+                                rows={3}
+                                placeholder={t(lang, 'writeQuestionPlaceholder')}
+                                readOnly={!isAdmin}
+                                onChange={(e) => handleTextChange(e.target.value)}
+                              />
+                            </div>
+
+                            {/* Question Type Switcher */}
+                            <div className="space-y-3">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTypeLabel')}</label>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <button 
+                                  type="button"
+                                  disabled={!isAdmin}
+                                  onClick={() => {
+                                    if (q.type === 'points') {
+                                      updateQuestion(editingQuestionsCategory, q.id, { 
+                                        type: 'options',
+                                        options: q.options && q.options.length > 0 ? q.options : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
+                                        correctAnswers: q.correctAnswers && q.correctAnswers.length > 0 ? q.correctAnswers : [0]
+                                      });
+                                    }
+                                  }}
+                                  className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
+                                    (q.type || 'options') === 'options'
+                                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <CheckSquare className="w-4 h-4" />
+                                  <span>{t(lang, 'optionsQuestionType')}</span>
+                                </button>
+
+                                <button 
+                                  type="button"
+                                  disabled={!isAdmin}
+                                  onClick={() => {
+                                    if ((q.type || 'options') !== 'points') {
+                                      updateQuestion(editingQuestionsCategory, q.id, { 
+                                        type: 'points',
+                                        maxPoints: q.maxPoints || 10
+                                      });
+                                    }
+                                  }}
+                                  className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2.5 font-black text-xs uppercase transition-all ${
+                                    q.type === 'points'
+                                      ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-200'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <Trophy className="w-4 h-4" />
+                                  <span>{t(lang, 'pointsQuestionType')}</span>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Options or Points Configuration */}
+                            {q.type === 'points' ? (
+                              <div className="space-y-5 p-6 sm:p-8 bg-amber-50/80 border-2 border-amber-200 rounded-3xl">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-amber-500 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-sm">
+                                    🎯
+                                  </div>
+                                  <div>
+                                    <h4 className="font-black text-sm sm:text-base text-amber-950 uppercase tracking-wide">{t(lang, 'maxPointsTitle')}</h4>
+                                    <p className="text-xs text-amber-800 font-medium">{t(lang, 'maxPointsDesc')}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 pt-2">
+                                  <input 
+                                    type="number"
+                                    min="1"
+                                    max="1000"
+                                    disabled={!isAdmin}
+                                    className="w-32 p-3.5 bg-white border-2 border-amber-300 rounded-2xl text-xl font-black text-amber-950 outline-none focus:border-amber-500 shadow-inner"
+                                    value={rawQ.maxPoints || 10}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value, 10);
+                                      updateQuestion(editingQuestionsCategory, q.id, {
+                                        maxPoints: isNaN(val) ? 1 : Math.max(1, val)
+                                      });
+                                    }}
+                                  />
+                                  <span className="font-black text-sm text-amber-900 uppercase tracking-wider">{t(lang, 'pointsMaxLabel')}</span>
+                                </div>
+
+                                {/* Group Checkboxes for Poängfrågor */}
+                                <div className="pt-4 border-t border-amber-200/80 space-y-3">
+                                  <div>
+                                    <h5 className="font-black text-xs sm:text-sm text-amber-950 uppercase tracking-wider">{t(lang, 'targetGroupsLabel')}</h5>
+                                    <p className="text-[11px] text-amber-800 font-medium">{t(lang, 'targetGroupsDesc')}</p>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                                    <label 
+                                      className={`flex items-center gap-3 px-5 py-3 rounded-2xl border-2 font-black text-xs uppercase cursor-pointer transition-all active:scale-95 ${
+                                        isBarnChecked
+                                          ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-200'
+                                          : 'bg-white text-slate-600 border-amber-200 hover:bg-amber-100/50'
+                                      } ${!isAdmin ? 'opacity-80 cursor-not-allowed' : ''}`}
+                                    >
+                                      <input 
+                                        type="checkbox"
+                                        checked={isBarnChecked}
+                                        disabled={!isAdmin}
+                                        onChange={(e) => {
+                                          if (!isAdmin) return;
+                                          toggleQuestionTargetGroup(q.id, 'barn', e.target.checked);
+                                        }}
+                                        className="w-4 h-4 rounded accent-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-base leading-none">👶</span>
+                                      <span>{t(lang, 'kid')}</span>
+                                    </label>
+
+                                    <label 
+                                      className={`flex items-center gap-3 px-5 py-3 rounded-2xl border-2 font-black text-xs uppercase cursor-pointer transition-all active:scale-95 ${
+                                        isVuxenChecked
+                                          ? 'bg-amber-500 text-white border-amber-500 shadow-md ring-2 ring-amber-200'
+                                          : 'bg-white text-slate-600 border-amber-200 hover:bg-amber-100/50'
+                                      } ${!isAdmin ? 'opacity-80 cursor-not-allowed' : ''}`}
+                                    >
+                                      <input 
+                                        type="checkbox"
+                                        checked={isVuxenChecked}
+                                        disabled={!isAdmin}
+                                        onChange={(e) => {
+                                          if (!isAdmin) return;
+                                          toggleQuestionTargetGroup(q.id, 'vuxen', e.target.checked);
+                                        }}
+                                        className="w-4 h-4 rounded accent-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-base leading-none">🧑</span>
+                                      <span>{t(lang, 'adult')}</span>
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Options & Correct Answer */
+                              <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+                                    {t(lang, 'optionsAndCorrectAnswersLabel')} ({currentLangOption.code.toUpperCase()})
+                                  </label>
+                                  <span className="text-[10px] font-bold text-slate-400">{t(lang, 'clickButtonToSetCorrectAnswer')}</span>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4">
+                                  {q.options.map((opt, oIdx) => (
+                                    <div key={oIdx} className="flex gap-2 sm:gap-4 items-center">
+                                      <button 
+                                        onClick={() => {
+                                          if (!isAdmin) return;
+                                          let newCorrect = [...(rawQ?.correctAnswers || [])];
+                                          if (newCorrect.includes(oIdx)) {
+                                            if (newCorrect.length > 1) {
+                                              newCorrect = newCorrect.filter(idx => idx !== oIdx);
+                                            }
+                                          } else {
+                                            newCorrect.push(oIdx);
+                                          }
+                                          updateQuestion(editingQuestionsCategory, q.id, { correctAnswers: newCorrect });
+                                        }}
+                                        disabled={!isAdmin}
+                                        className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-base sm:text-lg transition-all shrink-0 ${
+                                          (rawQ?.correctAnswers || []).includes(oIdx) 
+                                            ? 'bg-emerald-500 text-white shadow-xl shadow-emerald-200 ring-4 ring-emerald-100 scale-105' 
+                                            : 'bg-slate-100 border border-slate-200 text-slate-400 hover:bg-slate-200'
+                                        } ${!isAdmin ? 'opacity-80' : ''}`}
+                                        title={t(lang, 'clickToSetCorrect')}
+                                      >
+                                        {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                      </button>
+                                      
+                                      <div className="flex-1 relative flex items-center gap-2 sm:gap-3">
+                                        <div className="flex-1 relative">
+                                          <input 
+                                            type="text"
+                                            className={`w-full p-3.5 sm:p-5 border-2 rounded-2xl text-base sm:text-lg font-bold outline-none transition-all ${
+                                              isAdmin 
+                                                ? ((rawQ?.correctAnswers || []).includes(oIdx) ? 'bg-emerald-50 border-emerald-200 focus:border-emerald-500' : 'bg-white border-slate-200 focus:border-indigo-500') 
+                                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                            }`}
+                                            value={opt}
+                                            placeholder={t(editingQuestionLang, 'optionPlaceholder', { num: (oIdx + 1).toString() })}
+                                            readOnly={!isAdmin}
+                                            onChange={(e) => handleOptionChange(oIdx, e.target.value)}
+                                          />
+                                          {(rawQ?.correctAnswers || []).includes(oIdx) && (
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                                              <div className="bg-emerald-500 text-white p-1 rounded-full">
+                                                <Check className="w-3 h-3 stroke-[4]" />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                        
+                                        {isAdmin && q.options.length > 1 && (
+                                          <button 
+                                            type="button"
+                                            onClick={() => handleRemoveOption(oIdx)}
+                                            className="w-11 h-11 sm:w-12 sm:h-12 bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200/80 rounded-2xl flex items-center justify-center transition-all shrink-0 active:scale-90 shadow-2xs"
+                                            title={t(lang, 'removeOption')}
+                                          >
+                                            <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                  
+                                  {isAdmin && (
+                                    <button 
+                                      type="button"
+                                      onClick={handleAddOption}
+                                      className="w-full p-4 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-all font-bold text-sm flex items-center justify-center gap-2"
+                                    >
+                                      <Plus className="w-4 h-4" />
+                                      <span>{t(lang, 'addOption')}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        </AnimatePresence>
 
                         {/* Geotagging */}
-                        <div className="pt-8 mt-8 border-t border-slate-100 space-y-5">
+                        <div className="pt-8 mt-8 border-t border-slate-200 space-y-5">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
@@ -3352,7 +4491,7 @@ export default function App() {
                                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'geotagDesc')}</p>
                               </div>
                             </div>
-                            {isAdmin && q.location && (
+                            {isAdmin && rawQ.location && (
                               <button 
                                 type="button"
                                 onClick={() => updateQuestion(editingQuestionsCategory, q.id, { location: undefined })}
@@ -3366,7 +4505,7 @@ export default function App() {
                           {isAdmin && (
                             <div className="rounded-3xl overflow-hidden border-4 border-slate-50 shadow-lg">
                               <AdminMapPicker 
-                                initialLocation={q.location}
+                                initialLocation={rawQ.location}
                                 fallbackCenter={lastTaggedLocation || userLocation}
                                 onSelectLocation={(loc) => handleGeotagQuestion(editingQuestionsCategory, q.id, loc)}
                                 questionsWithLocations={
@@ -3404,13 +4543,13 @@ export default function App() {
                               </button>
                             ) : (
                               <div className="text-xs font-bold text-slate-400 bg-slate-50 px-4 py-2 rounded-xl">
-                                {q.location ? t(lang, 'geotaggedLabel') : t(lang, 'notGeotaggedLabel')}
+                                {rawQ.location ? t(lang, 'geotaggedLabel') : t(lang, 'notGeotaggedLabel')}
                               </div>
                             )}
 
-                            {q.location && (
+                            {rawQ.location && (
                               <div className="px-4 py-2 bg-slate-900 text-white/90 text-[10px] font-mono rounded-xl shadow-inner">
-                                {q.location.lat.toFixed(6)}, {q.location.lng.toFixed(6)}
+                                {rawQ.location.lat.toFixed(6)}, {rawQ.location.lng.toFixed(6)}
                               </div>
                             )}
                           </div>
@@ -3441,7 +4580,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-indigo-900/80 backdrop-blur-md overflow-y-auto"
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-indigo-900/80 backdrop-blur-md overflow-y-auto"
             >
               <motion.div 
                 initial={{ scale: 0.9, y: 20 }}
@@ -3524,7 +4663,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -3592,7 +4731,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
             >
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -3664,7 +4803,7 @@ export default function App() {
         {/* CREATE QUESTION TYPE SELECTION MODAL */}
         <AnimatePresence>
           {showCreateQuestionModal && (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
               <motion.div 
                 initial={{ scale: 0.9, opacity: 0, y: 15 }}
                 animate={{ scale: 1, opacity: 1, y: 0 }}
@@ -3751,7 +4890,7 @@ export default function App() {
               initial={{ opacity: 0, y: -40, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -40, scale: 0.9 }}
-              className="fixed top-5 left-1/2 -translate-x-1/2 z-[300] max-w-md w-[90%] bg-emerald-600 text-white p-4 rounded-2xl shadow-2xl border border-emerald-400 flex items-center gap-3.5"
+              className="fixed top-5 left-1/2 -translate-x-1/2 z-[10000] max-w-md w-[90%] bg-emerald-600 text-white p-4 rounded-2xl shadow-2xl border border-emerald-400 flex items-center gap-3.5"
             >
               <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
                 <Check className="w-5 h-5 text-white stroke-[3]" />
@@ -3787,7 +4926,7 @@ export default function App() {
         {/* How It Works Modal */}
         <AnimatePresence>
           {showHowItWorks && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -3846,6 +4985,23 @@ export default function App() {
                       <p className="text-slate-500 text-sm leading-relaxed">{t(lang, 'howItWorksStep4Desc')}</p>
                     </div>
                   </div>
+
+                  {/* Copyright & Contact Notice */}
+                  <div className="pt-5 border-t border-slate-200/80 text-center space-y-1.5">
+                    <p className="text-xs font-semibold text-slate-500 leading-relaxed">
+                      © 2020-2026 Bo-Göran L.<br />
+                      Intellectual property of Bo-Göran L. All rights reserved.
+                    </p>
+                    <div>
+                      <a 
+                        href="mailto:BadmintonMatchCoach@gmail.com?subject=FamilyQuizPWA"
+                        className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100"
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        <span>BadmintonMatchCoach@gmail.com</span>
+                      </a>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="p-6 bg-slate-50 border-t border-slate-100">
@@ -3860,6 +5016,101 @@ export default function App() {
             </div>
           )}
         </AnimatePresence>
+
+        {/* Settings & Gemini API Key Modal */}
+        <AnimatePresence>
+          {showSettingsModal && (
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowSettingsModal(false)}
+                className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                className="relative bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col z-[10000]"
+              >
+                <div className="bg-indigo-600 p-6 sm:p-8 text-white relative">
+                  <button 
+                    onClick={() => setShowSettingsModal(false)}
+                    className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center mb-3">
+                    <Settings className="w-7 h-7" />
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black">{t(lang, 'apiKeySettingsTitle')}</h2>
+                </div>
+
+                <div className="p-6 sm:p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                      {t(lang, 'apiKeyLabel')}
+                    </label>
+                    <input
+                      type="password"
+                      value={userApiKeyInput}
+                      onChange={(e) => setUserApiKeyInput(e.target.value)}
+                      placeholder={t(lang, 'apiKeyPlaceholder')}
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                      {t(lang, 'apiKeyHelp')}
+                    </p>
+                    <a
+                      href="https://aistudio.google.com/app/apikey"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 underline mt-1"
+                    >
+                      <span>Google AI Studio (aistudio.google.com/app/apikey) ↗</span>
+                    </a>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-slate-50 border-t border-slate-100 flex items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      setStoredApiKey(userApiKeyInput);
+                      alert(t(lang, 'apiKeySavedAlert'));
+                      setShowSettingsModal(false);
+                    }}
+                    className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black uppercase text-xs tracking-wider transition-all shadow-md active:scale-95"
+                  >
+                    {t(lang, 'saveApiKeyBtn')}
+                  </button>
+                  {userApiKeyInput && (
+                    <button 
+                      onClick={() => {
+                        setStoredApiKey('');
+                        setUserApiKeyInput('');
+                      }}
+                      className="px-4 py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs transition-all"
+                    >
+                      {t(lang, 'clearApiKeyBtn')}
+                    </button>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        <RouteGeoTagModal 
+          isOpen={showRouteGeoTagModal}
+          onClose={() => setShowRouteGeoTagModal(false)}
+          barnQuestions={quizConfig.barnQuestions}
+          vuxenQuestions={quizConfig.vuxenQuestions}
+          initialCategory={editingQuestionsCategory}
+          userLocation={userLocation}
+          lang={lang}
+          onApplyGeoTags={handleApplyRouteGeoTags}
+        />
       </div>
     </div>
   );

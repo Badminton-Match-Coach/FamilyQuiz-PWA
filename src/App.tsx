@@ -1517,15 +1517,31 @@ ${exampleJson}`;
 
   return (
     <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-3 sm:p-4 md:p-8 flex flex-col">
-      <div className="max-w-5xl mx-auto w-full flex flex-col flex-1">
+      <div className="fixed inset-x-0 top-0 z-[200] bg-slate-950/85 backdrop-blur-sm border-b border-white/10 shadow-md">
+        <a
+          href="https://badminton-match-coach.github.io/FamilyQuiz-PWA/"
+          target="_blank"
+          rel="noreferrer"
+          className="block max-w-5xl mx-auto px-2 py-1.5 text-center text-[8px] sm:text-[10px] font-black tracking-[0.08em] text-indigo-100 hover:text-white transition-colors truncate"
+          title="https://badminton-match-coach.github.io/FamilyQuiz-PWA/"
+        >
+          https://Badminton-Match-Coach.github.io/FamilyQuiz-PWA/
+        </a>
+      </div>
+
+      <div className="max-w-5xl mx-auto w-full flex flex-col flex-1 pt-7 sm:pt-9">
         
         {/* Clean Header with Unified View Navigation Bar */}
         <header className="flex flex-col gap-4 mb-6 sm:mb-8 bg-white/10 p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] backdrop-blur-md border border-white/20 shadow-xl">
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3.5 w-full">
               <div className="flex items-center gap-3.5 min-w-0">
-                <div className="w-11 h-11 sm:w-12 sm:h-12 bg-yellow-400 rounded-2xl flex items-center justify-center shadow-lg transform -rotate-2 shrink-0">
-                  <span className="text-xl sm:text-2xl font-black text-indigo-950">?</span>
+                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl overflow-hidden shadow-lg transform -rotate-2 shrink-0">
+                  <img
+                    src="./assets/images/pwa_app_icon_1786455738129.jpg"
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                 </div>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">

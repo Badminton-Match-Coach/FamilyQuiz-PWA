@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Relative URLs allow the build to work on GitHub Pages project sites.
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

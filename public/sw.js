@@ -1,12 +1,11 @@
 const CACHE_NAME = 'family-quiz-pwa-v2';
+const APP_SCOPE = self.registration.scope;
 
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest',
-  '/icon.svg',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
+  new URL('./', APP_SCOPE).toString(),
+  new URL('./index.html', APP_SCOPE).toString(),
+  new URL('./manifest.webmanifest', APP_SCOPE).toString(),
+  new URL('./icon.svg', APP_SCOPE).toString()
 ];
 
 // Install Event - cache core shell
@@ -67,7 +66,8 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => {
-        return caches.match('/index.html') || caches.match('/');
+        return caches.match(new URL('./index.html', APP_SCOPE).toString()) ||
+          caches.match(new URL('./', APP_SCOPE).toString());
       })
     );
     return;

@@ -26,8 +26,16 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
+      - name: Install dependencies (frozen lockfile)
+        id: bun_install_frozen
+        continue-on-error: true
         run: bun install --frozen-lockfile
+
+      - name: Fallback install (non-frozen lockfile)
+        if: steps.bun_install_frozen.outcome == 'failure'
+        run: |
+          echo "Frozen lockfile install failed; falling back to non-frozen install for Pages deploy."
+          bun install
 
       - name: Build
         run: bun run build

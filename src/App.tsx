@@ -1536,13 +1536,11 @@ ${exampleJson}`;
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3.5 w-full">
               <div className="flex items-center gap-3.5 min-w-0">
-                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl overflow-hidden shadow-lg transform -rotate-2 shrink-0">
-                  <img
-                    src="./assets/images/pwa_app_icon_1786455738129.jpg"
-                    alt=""
-                    className="w-full h-full object-cover"
-                  />
-                </div>
+                <img 
+                  src="./icon.jpg" 
+                  alt="App Icon" 
+                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl object-cover shadow-lg transform -rotate-2 shrink-0 border border-white/20"
+                />
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
                     {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}

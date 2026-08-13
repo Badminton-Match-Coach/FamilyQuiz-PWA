@@ -410,6 +410,7 @@ export default function App() {
   const [facitPasswordInput, setFacitPasswordInput] = useState('');
   const [isFacitUnlocked, setIsFacitUnlocked] = useState(false);
   const [copiedConfigCode, setCopiedConfigCode] = useState(false);
+  const [copiedAppUrlCode, setCopiedAppUrlCode] = useState(false);
   const [pointsInputValue, setPointsInputValue] = useState<number>(0);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showSettingsHelp, setShowSettingsHelp] = useState(false);
@@ -1506,6 +1507,14 @@ ${exampleJson}`;
     navigator.clipboard.writeText(encrypted).then(() => {
       setCopiedConfigCode(true);
       setTimeout(() => setCopiedConfigCode(false), 6000);
+    });
+  };
+
+  const shareAppUrl = () => {
+    const appUrl = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+    navigator.clipboard.writeText(appUrl).then(() => {
+      setCopiedAppUrlCode(true);
+      setTimeout(() => setCopiedAppUrlCode(false), 6000);
     });
   };
 
@@ -3744,28 +3753,51 @@ ${exampleJson}`;
                       {/* Share */}
                       {isAdmin && (
                         <div className="space-y-3">
-                          <button 
-                            onClick={shareConfig}
-                            className={`w-full flex items-center justify-center gap-3 p-4 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
-                              copiedConfigCode 
-                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
-                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
-                            }`}
-                          >
-                            {copiedConfigCode ? (
-                              <>
-                                <Check className="w-5 h-5 text-emerald-600 stroke-[3]" />
-                                <span>{t(lang, 'codeCopiedToClipboard')}</span>
-                              </>
-                            ) : (
-                              <>
-                                <Share2 className="w-5 h-5" />
-                                <span>{t(lang, 'copyCodeBtn')}</span>
-                              </>
-                            )}
-                          </button>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <button 
+                              onClick={shareConfig}
+                              className={`flex items-center justify-center gap-2.5 p-3.5 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
+                                copiedConfigCode 
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
+                                  : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
+                              }`}
+                            >
+                              {copiedConfigCode ? (
+                                <>
+                                  <Check className="w-4 h-4 text-emerald-600 stroke-[3]" />
+                                  <span>{t(lang, 'codeCopiedToClipboard')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Share2 className="w-4 h-4" />
+                                  <span>{t(lang, 'copyCodeBtn')}</span>
+                                </>
+                              )}
+                            </button>
 
-                          {/* Clipboard Notice Box */}
+                            <button 
+                              onClick={shareAppUrl}
+                              className={`flex items-center justify-center gap-2.5 p-3.5 rounded-2xl border transition-all font-black text-xs uppercase shadow-2xs active:scale-95 ${
+                                copiedAppUrlCode 
+                                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
+                                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              {copiedAppUrlCode ? (
+                                <>
+                                  <Check className="w-4 h-4 text-emerald-600 stroke-[3]" />
+                                  <span>{t(lang, 'copiedNotice')}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Share2 className="w-4 h-4" />
+                                  <span>{t(lang, 'copyAppUrlBtn')}</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* Clipboard Notice Box for Quiz Code */}
                           <AnimatePresence>
                             {copiedConfigCode && (
                               <motion.div 
@@ -3786,6 +3818,34 @@ ${exampleJson}`;
                                 <button 
                                   onClick={() => setCopiedConfigCode(false)}
                                   className="text-emerald-100 hover:text-white p-1 font-black text-sm shrink-0"
+                                >
+                                  ✕
+                                </button>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+
+                          {/* Clipboard Notice Box for App URL */}
+                          <AnimatePresence>
+                            {copiedAppUrlCode && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -8, scale: 0.98 }}
+                                className="p-4 bg-amber-500 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                                    <Check className="w-5 h-5 text-white stroke-[3]" />
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-xs sm:text-sm">{t(lang, 'appUrlCopiedTitle')}</p>
+                                    <p className="text-[11px] text-amber-100 font-medium">{t(lang, 'appUrlCopiedDesc')}</p>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={() => setCopiedAppUrlCode(false)}
+                                  className="text-amber-100 hover:text-white p-1 font-black text-sm shrink-0"
                                 >
                                   ✕
                                 </button>
@@ -4897,7 +4957,7 @@ ${exampleJson}`;
           )}
         </AnimatePresence>
 
-        {/* Global Toast Notice for Copied Clipboard Code */}
+        {/* Global Toast Notice for Copied Clipboard Code / App URL */}
         <AnimatePresence>
           {copiedConfigCode && (
             <motion.div
@@ -4915,6 +4975,29 @@ ${exampleJson}`;
               </div>
               <button 
                 onClick={() => setCopiedConfigCode(false)}
+                className="text-white/80 hover:text-white p-1 text-sm font-bold shrink-0"
+              >
+                ✕
+              </button>
+            </motion.div>
+          )}
+
+          {copiedAppUrlCode && (
+            <motion.div
+              initial={{ opacity: 0, y: -40, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -40, scale: 0.9 }}
+              className="fixed top-5 left-1/2 -translate-x-1/2 z-[10000] max-w-md w-[90%] bg-amber-600 text-white p-4 rounded-2xl shadow-2xl border border-amber-400 flex items-center gap-3.5"
+            >
+              <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
+                <Check className="w-5 h-5 text-white stroke-[3]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-xs sm:text-sm text-white leading-tight">{t(lang, 'appUrlCopiedTitle')}</p>
+                <p className="text-[11px] text-amber-100 font-medium truncate">{t(lang, 'appUrlCopiedDesc')}</p>
+              </div>
+              <button 
+                onClick={() => setCopiedAppUrlCode(false)}
                 className="text-white/80 hover:text-white p-1 text-sm font-bold shrink-0"
               >
                 ✕

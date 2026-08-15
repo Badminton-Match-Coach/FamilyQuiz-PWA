@@ -17,7 +17,7 @@ export interface SavedQuizRecord {
 }
 
 const DB_NAME = 'FamilyQuizIndexedDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'quizzes';
 const LOCALSTORAGE_MIRROR_KEY = 'family_quiz_db_mirror';
 
@@ -155,11 +155,10 @@ export async function saveQuizToIndexedDB(
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const putReq = store.put(record);
-
-      putReq.onsuccess = () => resolve();
-      putReq.onerror = () => reject(putReq.error);
+      store.put(record);
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
   } catch (err) {
     console.warn('IndexedDB write failed, persisted to localStorage fallback instead:', err);
@@ -182,9 +181,13 @@ export async function getAllQuizzesFromIndexedDB(): Promise<SavedQuizRecord[]> {
       const store = tx.objectStore(STORE_NAME);
       const request = store.getAll();
 
-      request.onsuccess = () => resolve(request.result || []);
+      request.onsuccess = () => {
+        const records = request.result || [];
+        tx.oncomplete = () => resolve(records);
+      };
       request.onerror = () => reject(request.error);
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
     idbSuccess = true;
   } catch (err) {
@@ -233,9 +236,13 @@ export async function getQuizFromIndexedDB(id: string): Promise<SavedQuizRecord 
       const store = tx.objectStore(STORE_NAME);
       const request = store.get(id);
 
-      request.onsuccess = () => resolve(request.result || null);
+      request.onsuccess = () => {
+        const result = request.result || null;
+        tx.oncomplete = () => resolve(result);
+      };
       request.onerror = () => reject(request.error);
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
     if (result) return result;
   } catch (err) {
@@ -259,11 +266,10 @@ export async function deleteQuizFromIndexedDB(id: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const request = store.delete(id);
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      store.delete(id);
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
   } catch (err) {
     console.warn('IndexedDB delete failed, deleted from mirror:', err);
@@ -281,11 +287,10 @@ export async function clearAllQuizzesFromIndexedDB(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const request = store.clear();
-
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
+      store.clear();
+      tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     });
   } catch (err) {
     console.warn('IndexedDB clear failed:', err);

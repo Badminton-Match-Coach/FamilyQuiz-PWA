@@ -150,11 +150,20 @@ export function generateQuizDirectUrl(config: QuizConfig): string {
 export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
   try {
     let cleanCode = code.trim();
-    if (cleanCode.startsWith('#')) cleanCode = cleanCode.substring(1);
-    if (cleanCode.startsWith('z=')) cleanCode = cleanCode.substring(2);
-    if (cleanCode.startsWith('q=')) cleanCode = cleanCode.substring(2);
+    if (cleanCode.startsWith('#')) cleanCode = cleanCode.substring(1).trim();
+    if (cleanCode.toLowerCase().startsWith('quiz=')) cleanCode = cleanCode.substring(5).trim();
+    if (cleanCode.toLowerCase().startsWith('z=')) cleanCode = cleanCode.substring(2).trim();
+    if (cleanCode.toLowerCase().startsWith('q=')) cleanCode = cleanCode.substring(2).trim();
 
-    const decompressedJson = LZString.decompressFromEncodedURIComponent(cleanCode);
+    let decompressedJson = LZString.decompressFromEncodedURIComponent(cleanCode);
+    if (!decompressedJson) {
+      try {
+        const urlDecoded = decodeURIComponent(cleanCode);
+        decompressedJson = LZString.decompressFromEncodedURIComponent(urlDecoded);
+      } catch {
+        // ignore
+      }
+    }
     if (!decompressedJson) return null;
 
     const min: MinifiedQuizConfig = JSON.parse(decompressedJson);

@@ -1099,15 +1099,27 @@ ${exampleJson}`;
         .replace(/\s*```$/i, '')
         .trim();
 
-      // Check for compressed URL format or code (e.g. ?quiz=..., #quiz=..., or raw compressed string)
+      // Check for compressed URL format or code (e.g. ?quiz=..., #quiz=..., #z=..., ?z=..., or raw compressed string)
       let compressedCode = '';
       if (cleanInput.includes('quiz=')) {
-        const match = cleanInput.match(/[?#&]quiz=([^&#\s]+)/);
+        const match = cleanInput.match(/[?#&]quiz=([^&#\s]+)/i);
         if (match && match[1]) {
           compressedCode = decodeURIComponent(match[1]);
         }
-      } else if (cleanInput.startsWith('z=') || cleanInput.startsWith('Z=')) {
-        compressedCode = cleanInput;
+      } else if (cleanInput.includes('z=')) {
+        const match = cleanInput.match(/[?#&]?z=([^&#\s]+)/i);
+        if (match && match[1]) {
+          compressedCode = match[1];
+        } else if (cleanInput.toLowerCase().startsWith('z=')) {
+          compressedCode = cleanInput;
+        }
+      } else if (cleanInput.includes('q=')) {
+        const match = cleanInput.match(/[?#&]?q=([^&#\s]+)/i);
+        if (match && match[1]) {
+          compressedCode = match[1];
+        }
+      } else if (cleanInput.startsWith('#z=') || cleanInput.startsWith('#Z=')) {
+        compressedCode = cleanInput.slice(1);
       }
 
       if (compressedCode) {
@@ -1396,35 +1408,68 @@ ${exampleJson}`;
   useEffect(() => {
     fetchQuizLibrary();
     
-    // Check URL query parameters or URL hash for compressed quiz: ?quiz=... or #quiz=...
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashStr = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    const hashParams = new URLSearchParams(hashStr);
-
-    const compressedParam = searchParams.get('quiz') || hashParams.get('quiz');
-    if (compressedParam) {
+    // Check URL query parameters or URL hash for compressed quiz: ?quiz=..., #quiz=..., ?z=..., #z=..., #q=...
+    const checkAndLoadUrlQuiz = () => {
       try {
-        const decompressed = decompressQuizFromUrlCode(compressedParam);
-        if (decompressed) {
-          setQuizConfig(decompressed);
-          localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(decompressed));
-          // Clean the URL to avoid reloading on refresh while keeping clean UX
-          if (window.history && window.history.replaceState) {
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState(null, '', cleanUrl);
+        const searchParams = new URLSearchParams(window.location.search);
+        const rawHash = window.location.hash || '';
+        const hashStr = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
+        const hashParams = new URLSearchParams(hashStr);
+
+        let compressedCandidate = 
+          searchParams.get('quiz') || 
+          searchParams.get('z') || 
+          searchParams.get('q') || 
+          hashParams.get('quiz') || 
+          hashParams.get('z') || 
+          hashParams.get('q');
+
+        // If not parsed as standard searchParam key-value, check if raw hash is z=..., q=..., quiz=... or a direct hash payload
+        if (!compressedCandidate && hashStr) {
+          const lowerHash = hashStr.toLowerCase();
+          if (lowerHash.startsWith('z=') || lowerHash.startsWith('q=') || lowerHash.startsWith('quiz=')) {
+            compressedCandidate = hashStr;
+          } else if (hashStr.length > 10 && !hashStr.includes('/') && !hashStr.includes('&')) {
+            compressedCandidate = hashStr;
           }
-          return;
+        }
+
+        if (compressedCandidate) {
+          const decompressed = decompressQuizFromUrlCode(compressedCandidate);
+          if (decompressed) {
+            setQuizConfig(decompressed);
+            localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(decompressed));
+            // Clean the URL to avoid reloading on refresh while keeping clean UX
+            if (window.history && window.history.replaceState) {
+              const cleanUrl = window.location.origin + window.location.pathname;
+              window.history.replaceState(null, '', cleanUrl);
+            }
+            return true;
+          }
+        }
+
+        // URL Parameter auto-load: ?quizFile=filename.txt
+        const quizFile = searchParams.get('quizFile');
+        if (quizFile) {
+          loadLibraryQuiz(quizFile);
+          return true;
         }
       } catch (err) {
-        console.error('Failed to load quiz from URL parameters:', err);
+        console.error('Failed to load quiz from URL parameters/hash:', err);
       }
-    }
+      return false;
+    };
 
-    // URL Parameter auto-load: ?quizFile=filename.txt
-    const quizFile = searchParams.get('quizFile');
-    if (quizFile) {
-      loadLibraryQuiz(quizFile);
-    }
+    checkAndLoadUrlQuiz();
+
+    // Listen to hashchange in case user opens or pastes direct #z= link while app is already open
+    const handleHashChange = () => {
+      checkAndLoadUrlQuiz();
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+    };
   }, []);
 
   // Clear selected question IDs when switching active editing category

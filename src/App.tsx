@@ -1732,11 +1732,25 @@ ${exampleJson}`;
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3.5 w-full">
               <div className="flex items-center gap-3.5 min-w-0">
-                <img 
-                  src="./icon.jpg" 
-                  alt="App Icon" 
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl object-cover shadow-lg transform -rotate-2 shrink-0 border border-white/20"
-                />
+                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center">
+                  <img 
+                    src="./icon.svg" 
+                    alt="FamilyQuiz Icon" 
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      if (!target.dataset.triedFallback) {
+                        target.dataset.triedFallback = '1';
+                        target.src = './icon.png';
+                      } else if (target.dataset.triedFallback === '1') {
+                        target.dataset.triedFallback = '2';
+                        target.src = '/icon.svg';
+                      } else {
+                        target.style.display = 'none';
+                      }
+                    }}
+                  />
+                </div>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
                     {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}

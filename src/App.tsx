@@ -1366,7 +1366,7 @@ ${exampleJson}`;
     try {
       setIsLibraryLoading(true);
       setLibraryError(null);
-      const res = await fetch('/quizzes/manifest.json');
+      const res = await fetch(`${import.meta.env.BASE_URL}quizzes/manifest.json`);
       if (res.ok) {
         const data = await res.json();
         setQuizLibrary(data);
@@ -1383,7 +1383,7 @@ ${exampleJson}`;
 
   const loadLibraryQuiz = async (filename: string) => {
     try {
-      const res = await fetch(`/quizzes/${filename}`);
+      const res = await fetch(`${import.meta.env.BASE_URL}quizzes/${filename}`);
       if (!res.ok) throw new Error('File not found');
       const content = await res.text();
       processImportConfig(content);

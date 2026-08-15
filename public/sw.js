@@ -1,4 +1,4 @@
-const CACHE_NAME = 'family-quiz-pwa-v3';
+const CACHE_NAME = 'family-quiz-pwa-v4';
 const APP_SCOPE = self.registration.scope;
 
 const STATIC_ASSETS = [

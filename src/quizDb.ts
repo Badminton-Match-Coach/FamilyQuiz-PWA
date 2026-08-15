@@ -19,34 +19,103 @@ export interface SavedQuizRecord {
 const DB_NAME = 'FamilyQuizIndexedDB';
 const DB_VERSION = 1;
 const STORE_NAME = 'quizzes';
+const LOCALSTORAGE_MIRROR_KEY = 'family_quiz_db_mirror';
+
+// Cached DB connection to prevent Safari connection leaks
+let cachedDB: IDBDatabase | null = null;
+
+function isIndexedDBAvailable(): boolean {
+  try {
+    return typeof window !== 'undefined' && 'indexedDB' in window && window.indexedDB !== null;
+  } catch {
+    return false;
+  }
+}
+
+// LocalStorage helpers for seamless fallback and mirror syncing
+function getLocalStorageMirror(): SavedQuizRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCALSTORAGE_MIRROR_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalStorageMirror(records: SavedQuizRecord[]): void {
+  try {
+    localStorage.setItem(LOCALSTORAGE_MIRROR_KEY, JSON.stringify(records));
+  } catch (err) {
+    console.warn('Could not save to localStorage mirror:', err);
+  }
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    if (!isIndexedDBAvailable()) {
+      return reject(new Error('IndexedDB is not available'));
+    }
 
-    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-        store.createIndex('title', 'title', { unique: false });
-        store.createIndex('updatedAt', 'updatedAt', { unique: false });
+    if (cachedDB) {
+      try {
+        // Test if still usable
+        if (cachedDB.objectStoreNames.contains(STORE_NAME)) {
+          return resolve(cachedDB);
+        }
+      } catch {
+        cachedDB = null;
       }
-    };
+    }
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    try {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          store.createIndex('title', 'title', { unique: false });
+          store.createIndex('updatedAt', 'updatedAt', { unique: false });
+        }
+      };
+
+      request.onsuccess = () => {
+        const db = request.result;
+        cachedDB = db;
+        db.onversionchange = () => {
+          db.close();
+          cachedDB = null;
+        };
+        db.onclose = () => {
+          cachedDB = null;
+        };
+        resolve(db);
+      };
+
+      request.onerror = () => {
+        cachedDB = null;
+        reject(request.error || new Error('Failed to open IndexedDB'));
+      };
+
+      request.onblocked = () => {
+        console.warn('IndexedDB open blocked by another tab or connection.');
+      };
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
 /**
- * Save or update a quiz in IndexedDB
+ * Save or update a quiz in IndexedDB (with synced localStorage fallback)
  */
 export async function saveQuizToIndexedDB(
   quizConfig: QuizConfig,
   existingId?: string,
   customTitle?: string
 ): Promise<SavedQuizRecord> {
-  const db = await openDB();
   const id = existingId || `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const title = customTitle?.trim() || quizConfig.title?.trim() || 'Min Tipspromenad';
   const now = Date.now();
@@ -57,10 +126,15 @@ export async function saveQuizToIndexedDB(
     (q) => !!q.location
   );
 
+  // Check existing created date from mirror first to avoid transaction chaining issues
+  const mirror = getLocalStorageMirror();
+  const existingRecord = mirror.find((m) => m.id === id);
+  const createdAt = existingRecord?.createdAt || now;
+
   const record: SavedQuizRecord = {
     id,
     title,
-    createdAt: now,
+    createdAt,
     updatedAt: now,
     barnCount,
     vuxenCount,
@@ -71,90 +145,151 @@ export async function saveQuizToIndexedDB(
     },
   };
 
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
+  // 1. Always update localStorage mirror first so data is never lost on mobile
+  const updatedMirror = [record, ...mirror.filter((m) => m.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
+  saveLocalStorageMirror(updatedMirror);
 
-    // Check if updating existing
-    const getReq = store.get(id);
-    getReq.onsuccess = () => {
-      if (getReq.result && getReq.result.createdAt) {
-        record.createdAt = getReq.result.createdAt;
-      }
+  // 2. Persist to IndexedDB
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
       const putReq = store.put(record);
-      putReq.onsuccess = () => resolve(record);
+
+      putReq.onsuccess = () => resolve();
       putReq.onerror = () => reject(putReq.error);
-    };
-    getReq.onerror = () => {
-      const putReq = store.put(record);
-      putReq.onsuccess = () => resolve(record);
-      putReq.onerror = () => reject(putReq.error);
-    };
-  });
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB write failed, persisted to localStorage fallback instead:', err);
+  }
+
+  return record;
 }
 
 /**
- * Get all saved quizzes from IndexedDB
+ * Get all saved quizzes from IndexedDB (with synced localStorage fallback)
  */
 export async function getAllQuizzesFromIndexedDB(): Promise<SavedQuizRecord[]> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.getAll();
+  let idbRecords: SavedQuizRecord[] = [];
+  let idbSuccess = false;
 
-    request.onsuccess = () => {
-      const records: SavedQuizRecord[] = request.result || [];
-      records.sort((a, b) => b.updatedAt - a.updatedAt);
-      resolve(records);
-    };
-    request.onerror = () => reject(request.error);
-  });
+  try {
+    const db = await openDB();
+    idbRecords = await new Promise<SavedQuizRecord[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+      tx.onerror = () => reject(tx.error);
+    });
+    idbSuccess = true;
+  } catch (err) {
+    console.warn('IndexedDB read failed, trying localStorage mirror fallback:', err);
+  }
+
+  const mirror = getLocalStorageMirror();
+
+  if (idbSuccess && idbRecords.length > 0) {
+    // IndexedDB is the source of truth, update mirror
+    idbRecords.sort((a, b) => b.updatedAt - a.updatedAt);
+    saveLocalStorageMirror(idbRecords);
+    return idbRecords;
+  }
+
+  // If IndexedDB returned empty or failed, but localStorage has records, restore them
+  if (mirror.length > 0) {
+    if (idbSuccess) {
+      // Background restore to IndexedDB
+      try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        for (const item of mirror) {
+          store.put(item);
+        }
+      } catch (err) {
+        console.warn('Failed background restore to IndexedDB:', err);
+      }
+    }
+    mirror.sort((a, b) => b.updatedAt - a.updatedAt);
+    return mirror;
+  }
+
+  return idbRecords;
 }
 
 /**
  * Get a single quiz by ID from IndexedDB
  */
 export async function getQuizFromIndexedDB(id: string): Promise<SavedQuizRecord | null> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.get(id);
+  try {
+    const db = await openDB();
+    const result = await new Promise<SavedQuizRecord | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(id);
 
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error);
-  });
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+      tx.onerror = () => reject(tx.error);
+    });
+    if (result) return result;
+  } catch (err) {
+    console.warn('IndexedDB get error, checking mirror:', err);
+  }
+
+  const mirror = getLocalStorageMirror();
+  return mirror.find((m) => m.id === id) || null;
 }
 
 /**
  * Delete a quiz from IndexedDB by ID
  */
 export async function deleteQuizFromIndexedDB(id: string): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.delete(id);
+  // Update mirror first
+  const mirror = getLocalStorageMirror().filter((m) => m.id !== id);
+  saveLocalStorageMirror(mirror);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.delete(id);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB delete failed, deleted from mirror:', err);
+  }
 }
 
 /**
  * Clear all records from IndexedDB quizzes store
  */
 export async function clearAllQuizzesFromIndexedDB(): Promise<void> {
-  const db = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    const request = store.clear();
+  saveLocalStorageMirror([]);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
-  });
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.warn('IndexedDB clear failed:', err);
+  }
 }
 
 /**
@@ -230,14 +365,21 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
   const filename = `family_quiz_db_backup_${new Date().toISOString().slice(0, 10)}.json`;
 
   const blob = new Blob([jsonText], { type: 'application/json' });
-  const file = new File([blob], filename, { type: 'application/json' });
+  
+  // Test File constructor support safely
+  let file: File | null = null;
+  try {
+    file = new File([blob], filename, { type: 'application/json' });
+  } catch {
+    file = null;
+  }
 
-  // Try Web Share API with file support first
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+  // Try Web Share API with file support first (Mobile Safari iOS 15+, Chrome Android)
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({
-        title: 'Family Quiz IndexedDB Export',
-        text: 'Här är säkerhetskopian av alla sparade quiz i IndexedDB!',
+        title: 'Family Quiz Backup',
+        text: 'Säkerhetskopia av sparade tipspromenader',
         files: [file],
       });
       return { shared: true, method: 'native' };
@@ -245,7 +387,7 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
       if (err.name === 'AbortError') {
         return { shared: false, method: 'native' };
       }
-      // Fall through if share fails
+      // Fall through
     }
   }
 
@@ -253,7 +395,7 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
   if (navigator.share) {
     try {
       await navigator.share({
-        title: 'Family Quiz IndexedDB Export',
+        title: 'Family Quiz Backup',
         text: jsonText,
       });
       return { shared: true, method: 'native' };
@@ -277,7 +419,11 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
     return { shared: true, method: 'download' };
   } catch {
     // Ultimate fallback: copy to clipboard
-    await navigator.clipboard.writeText(jsonText);
-    return { shared: true, method: 'clipboard' };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(jsonText);
+      return { shared: true, method: 'clipboard' };
+    }
+    return { shared: false, method: 'clipboard' };
   }
 }
+

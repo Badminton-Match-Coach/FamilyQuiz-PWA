@@ -307,6 +307,10 @@ export default function App() {
   };
 
   useEffect(() => {
+    refreshSavedQuizzes();
+  }, []);
+
+  useEffect(() => {
     if (configTab === 'db') {
       refreshSavedQuizzes();
     }
@@ -381,7 +385,17 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const text = await file.text();
+      let text = '';
+      if (typeof file.text === 'function') {
+        text = await file.text();
+      } else {
+        text = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Kunde inte läsa filen'));
+          reader.readAsText(file);
+        });
+      }
       const count = await importIndexedDBFromJSON(text);
       await refreshSavedQuizzes();
       setDbNotification(t(lang, 'importDbSuccess').replace('{count}', String(count)));

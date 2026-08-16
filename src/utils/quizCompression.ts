@@ -135,12 +135,13 @@ export function compressQuizToUrlCode(config: QuizConfig): string {
 /**
  * Generates the full clickable direct-open URL for a quiz.
  */
-export function generateQuizDirectUrl(config: QuizConfig): string {
+export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?: boolean }): string {
   const code = compressQuizToUrlCode(config);
   const baseUrl = typeof window !== 'undefined' 
     ? `${window.location.origin}${window.location.pathname}` 
     : 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
-  return `${baseUrl}#${code}`;
+  const suffix = options?.lockMode ? '&lock=1' : '';
+  return `${baseUrl}#${code}${suffix}`;
 }
 
 /**

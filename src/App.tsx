@@ -42,11 +42,23 @@ import {
   Save,
   FolderOpen,
   HardDrive,
-  Mail
+  Mail,
+  ArrowUpDown
 } from 'lucide-react';
 import { Participant, QuizConfig, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { defaultQuiz } from './data/defaultQuiz';
-import { AdminMapPicker, ParticipantMap, RouteGeoTagModal, calculateDistanceMeters, formatDistance } from './components/MapComponent';
+import { 
+  AdminMapPicker, 
+  ParticipantMap, 
+  RouteGeoTagModal, 
+  CompassDirectionBadge, 
+  MiniStationMap, 
+  TrailProgressBar, 
+  calculateDistanceMeters, 
+  formatDistance, 
+  calculateWalkingTimeMinutes,
+  calculatePathDistance 
+} from './components/MapComponent';
 import { generateQuizClient, getStoredApiKey, setStoredApiKey, validateTextAnswerWithGemini } from './geminiClient';
 import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion } from './i18n';
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
@@ -66,6 +78,7 @@ import {
 const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
 const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
+const STORAGE_KEY_WALKED_PATH = 'family_quiz_walked_path';
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
@@ -200,40 +213,6 @@ export default function App() {
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
-
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-
-    // Request immediate location
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      () => {},
-      { enableHighAccuracy: true, timeout: 5000 }
-    );
-
-    // Continuous GPS tracking for participants on the walk
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        setUserLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-      },
-      (err) => {
-        console.warn('Geolocation watch error:', err);
-      },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
-    );
-
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, []);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [lockNotice, setLockNotice] = useState<{
@@ -283,6 +262,7 @@ export default function App() {
   const [showCreateQuestionModal, setShowCreateQuestionModal] = useState<UserType | 'båda' | null>(null);
   const [createModalCategory, setCreateModalCategory] = useState<'barn' | 'vuxen' | 'båda'>('barn');
   const [showRouteGeoTagModal, setShowRouteGeoTagModal] = useState(false);
+  const [showQuestionMiniMap, setShowQuestionMiniMap] = useState(true);
   const [passwordInput, setPasswordInput] = useState('');
   const [configMasterPasswordInput, setConfigMasterPasswordInput] = useState('');
   const [isConfigUnlocked, setIsConfigUnlocked] = useState(false);
@@ -293,9 +273,25 @@ export default function App() {
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
+  const [dbSortBy, setDbSortBy] = useState<'date-desc' | 'date-asc' | 'name-asc'>('date-desc');
   const [dbNotification, setDbNotification] = useState<string | null>(null);
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const dbFileInputRef = useRef<HTMLInputElement>(null);
+
+  const sortedSavedQuizzes = useMemo(() => {
+    return [...savedQuizzes].sort((a, b) => {
+      if (dbSortBy === 'date-desc') {
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      }
+      if (dbSortBy === 'date-asc') {
+        return (a.updatedAt || 0) - (b.updatedAt || 0);
+      }
+      if (dbSortBy === 'name-asc') {
+        return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base', numeric: true });
+      }
+      return 0;
+    });
+  }, [savedQuizzes, dbSortBy]);
 
   const refreshSavedQuizzes = async () => {
     try {
@@ -366,6 +362,8 @@ export default function App() {
     if (closeModal) {
       setShowConfigInput(false);
       setAnswers([]);
+      setWalkedPath([]);
+      localStorage.removeItem(STORAGE_KEY_WALKED_PATH);
       setParticipants([]);
       setView('setup');
       alert(`${t(lang, 'quizLoadedSuccess')}\n"${record.title}"`);
@@ -464,6 +462,117 @@ export default function App() {
   const [copiedAppUrlCode, setCopiedAppUrlCode] = useState(false);
   const [copiedDirectUrlCode, setCopiedDirectUrlCode] = useState(false);
   const [directUrlLength, setDirectUrlLength] = useState<number | null>(null);
+  const [directLinkLockMode, setDirectLinkLockMode] = useState<boolean>(true);
+  const [isQuizModeLocked, setIsQuizModeLocked] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const rawHash = window.location.hash || '';
+      const hashStr = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
+      const hashParams = new URLSearchParams(hashStr);
+
+      const isLockedInUrl = 
+        searchParams.get('lock') === '1' ||
+        searchParams.get('mode') === 'quiz' ||
+        searchParams.get('mode') === 'player' ||
+        hashParams.get('lock') === '1' ||
+        hashParams.get('mode') === 'quiz' ||
+        hashParams.get('mode') === 'player' ||
+        rawHash.includes('lock=1') ||
+        rawHash.includes('mode=quiz');
+
+      if (isLockedInUrl) {
+        localStorage.setItem('family_quiz_lock_mode', 'true');
+        return true;
+      }
+      return localStorage.getItem('family_quiz_lock_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Tracked walked path (breadcrumbs) with local persistence
+  const [walkedPath, setWalkedPath] = useState<Location[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_WALKED_PATH);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_WALKED_PATH, JSON.stringify(walkedPath));
+  }, [walkedPath]);
+
+  const hasAnyGeotag = useMemo(() => {
+    return [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions].some(q => !!q.location);
+  }, [quizConfig.barnQuestions, quizConfig.vuxenQuestions]);
+
+  const isFacitUnlockedRef = useRef(isFacitUnlocked);
+  useEffect(() => {
+    isFacitUnlockedRef.current = isFacitUnlocked;
+  }, [isFacitUnlocked]);
+
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  const hasAnyGeotagRef = useRef(hasAnyGeotag);
+  useEffect(() => {
+    hasAnyGeotagRef.current = hasAnyGeotag;
+  }, [hasAnyGeotag]);
+
+  // GPS Tracking & Live Breadcrumb recording
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    const handlePos = (pos: GeolocationPosition) => {
+      const newLoc: Location = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+      };
+      setUserLocation(newLoc);
+
+      // Record breadcrumb point if quiz has geotag info, facit has not been unlocked yet, and user is in quiz or results
+      if (hasAnyGeotagRef.current && !isFacitUnlockedRef.current && (viewRef.current === 'quiz' || viewRef.current === 'results')) {
+        setWalkedPath(prev => {
+          if (prev.length === 0) return [newLoc];
+          const last = prev[prev.length - 1];
+          const dist = calculateDistanceMeters(last.lat, last.lng, newLoc.lat, newLoc.lng);
+          // Only append if user walked at least 3 meters to avoid stationary GPS jitter
+          if (dist >= 3) {
+            return [...prev, newLoc];
+          }
+          return prev;
+        });
+      }
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      handlePos,
+      () => {},
+      { enableHighAccuracy: true, timeout: 5000 }
+    );
+
+    const watchId = navigator.geolocation.watchPosition(
+      handlePos,
+      (err) => {
+        console.warn('Geolocation watch error:', err);
+      },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
+
   const [pointsInputValue, setPointsInputValue] = useState<number>(0);
   const [textInputValue, setTextInputValue] = useState<string>('');
   const [editorTestWord, setEditorTestWord] = useState<string>('');
@@ -1274,6 +1383,8 @@ ${exampleJson}`;
 
   const confirmResetQuiz = () => {
     setAnswers([]);
+    setWalkedPath([]);
+    localStorage.removeItem(STORAGE_KEY_WALKED_PATH);
     setSelectedQuestionIndex(null);
     setView('setup');
     setIsPasswordCorrect(false);
@@ -1459,6 +1570,21 @@ ${exampleJson}`;
           hashParams.get('quiz') || 
           hashParams.get('z') || 
           hashParams.get('q');
+
+        const isLockedInUrl = 
+          searchParams.get('lock') === '1' ||
+          searchParams.get('mode') === 'quiz' ||
+          searchParams.get('mode') === 'player' ||
+          hashParams.get('lock') === '1' ||
+          hashParams.get('mode') === 'quiz' ||
+          hashParams.get('mode') === 'player' ||
+          rawHash.includes('lock=1') ||
+          rawHash.includes('mode=quiz');
+
+        if (isLockedInUrl) {
+          setIsQuizModeLocked(true);
+          localStorage.setItem('family_quiz_lock_mode', 'true');
+        }
 
         // If not parsed as standard searchParam key-value, check if raw hash is z=..., q=..., quiz=... or a direct hash payload
         if (!compressedCandidate && hashStr) {
@@ -1784,8 +1910,32 @@ ${exampleJson}`;
     });
   };
 
+  const getQuizAnswerProgress = () => {
+    if (participants.length === 0) {
+      return { totalRequired: 0, answeredCount: 0, isAllAnswered: false };
+    }
+
+    let totalRequired = 0;
+    let answeredCount = 0;
+
+    for (const p of participants) {
+      const questionsForP = p.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+      totalRequired += questionsForP.length;
+
+      for (const q of questionsForP) {
+        const isAnswered = answers.some(a => a.participantId === p.id && a.questionId === q.id);
+        if (isAnswered) {
+          answeredCount += 1;
+        }
+      }
+    }
+
+    const isAllAnswered = totalRequired > 0 && answeredCount >= totalRequired;
+    return { totalRequired, answeredCount, isAllAnswered };
+  };
+
   const shareDirectQuizUrl = () => {
-    const directUrl = generateQuizDirectUrl(quizConfig);
+    const directUrl = generateQuizDirectUrl(quizConfig, { lockMode: directLinkLockMode });
     setDirectUrlLength(directUrl.length);
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(directUrl).then(() => {
@@ -1961,29 +2111,33 @@ ${exampleJson}`;
                 <span>{t(lang, 'resultsTab')}</span>
               </button>
 
-              <button
-                onClick={() => setView('config')}
-                className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
-                  view === 'config' 
-                    ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
-                    : 'text-white/80 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Settings className="w-3.5 h-3.5" />
-                <span>{t(lang, 'edit')}</span>
-              </button>
+              {(!isQuizModeLocked || isFacitUnlocked || isAdmin) && (
+                <button
+                  onClick={() => setView('config')}
+                  className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                    view === 'config' 
+                      ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
+                      : 'text-white/80 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span>{t(lang, 'edit')}</span>
+                </button>
+              )}
 
-              <button 
-                onClick={() => {
-                  setShowConfigInput(true);
-                  setConfigTab('library');
-                }}
-                className="flex-1 px-3 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0"
-                title="Importera färdigt quiz"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>{t(lang, 'import')}</span>
-              </button>
+              {(!isQuizModeLocked || isFacitUnlocked || isAdmin) && (
+                <button 
+                  onClick={() => {
+                    setShowConfigInput(true);
+                    setConfigTab('library');
+                  }}
+                  className="flex-1 px-3 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0"
+                  title="Importera färdigt quiz"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{t(lang, 'import')}</span>
+                </button>
+              )}
             </div>
           </div>
         </header>
@@ -2202,6 +2356,27 @@ ${exampleJson}`;
                         </div>
                       </div>
 
+                      {/* Trail Progress Bar */}
+                      {totalQuestions > 0 && (
+                        <TrailProgressBar
+                          questions={Array.from({ length: totalQuestions }).map((_, idx) => {
+                            const bQ = quizConfig.barnQuestions[idx];
+                            const vQ = quizConfig.vuxenQuestions[idx];
+                            const location = bQ?.location || vQ?.location;
+                            const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
+                            const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
+                            return {
+                              index: idx,
+                              isAnswered: isFullyAnswered,
+                              hasLocation: !!location,
+                            };
+                          })}
+                          activeIndex={selectedQuestionIndex}
+                          onSelectQuestion={handleSelectQuestionIndex}
+                          lang={lang}
+                        />
+                      )}
+
                       {/* Interactive Map */}
                       {hasAnyGeotag && (
                         <div className="bg-white rounded-[2rem] sm:rounded-[2.5rem] p-4 sm:p-6 shadow-2xl border border-indigo-200/50 space-y-3">
@@ -2238,6 +2413,13 @@ ${exampleJson}`;
                             userLocation={userLocation}
                             unlockDistance={quizConfig.geotagUnlockDistance || 20}
                             onSelectQuestion={handleSelectQuestionIndex}
+                            lang={lang}
+                            walkedPath={walkedPath}
+                            isLiveTracking={hasAnyGeotag && !isFacitUnlocked && walkedPath.length > 0}
+                            onClearWalkedPath={() => {
+                              setWalkedPath([]);
+                              localStorage.removeItem(STORAGE_KEY_WALKED_PATH);
+                            }}
                           />
                         </div>
                       )}
@@ -2355,17 +2537,16 @@ ${exampleJson}`;
                             </div>
 
                             {/* Distance / Location info */}
-                            <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between text-xs font-semibold">
+                            <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between text-xs font-semibold gap-2">
                               {location ? (
-                                <div className={`flex items-center gap-1 font-mono text-[11px] ${
-                                  isUnlocked ? 'text-emerald-700 font-bold' : 'text-amber-700'
-                                }`}>
-                                  <span>📍</span>
-                                  <span>
-                                    {dist !== null 
-                                      ? `${formatDistance(dist)} ${dist <= unlockDistance ? t(lang, 'withinRange') : t(lang, 'lockedDistance')}`
-                                      : t(lang, 'requiresGPS')}
-                                  </span>
+                                <div className="flex items-center gap-1.5">
+                                  <CompassDirectionBadge 
+                                    userLocation={userLocation}
+                                    targetLocation={location}
+                                    unlockDistance={unlockDistance}
+                                    lang={lang}
+                                    compact
+                                  />
                                 </div>
                               ) : (
                                 <span className="text-[11px] text-slate-400 font-normal">
@@ -2540,32 +2721,63 @@ ${exampleJson}`;
                               </h3>
 
                               {activeQ.location && (
-                                <div className="mt-4 p-3.5 bg-indigo-50/90 border-2 border-indigo-200/80 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-indigo-950 shadow-sm">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-                                      <MapPin className="w-5 h-5" />
+                                <div className="mt-4 space-y-3">
+                                  <div className="p-3.5 bg-indigo-50/90 border-2 border-indigo-200/80 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-indigo-950 shadow-sm">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm">
+                                        <MapPin className="w-5 h-5" />
+                                      </div>
+                                      <div>
+                                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{t(lang, 'geotaggedStations')}</p>
+                                        <div className="pt-0.5">
+                                          <CompassDirectionBadge 
+                                            userLocation={userLocation}
+                                            targetLocation={activeQ.location}
+                                            unlockDistance={quizConfig.geotagUnlockDistance || 20}
+                                            lang={lang}
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{t(lang, 'geotaggedStations')}</p>
-                                      {userLocation ? (
-                                        <p className="text-xs sm:text-sm font-bold text-slate-700">
-                                          {t(lang, 'distanceToQuestion')}: <span className="text-indigo-600 font-black">{formatDistance(calculateDistanceMeters(userLocation.lat, userLocation.lng, activeQ.location.lat, activeQ.location.lng))}</span> 📍
-                                        </p>
-                                      ) : (
-                                        <p className="text-xs text-slate-600 font-medium">{t(lang, 'requiresGPS')}</p>
-                                      )}
+                                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowQuestionMiniMap(prev => !prev)}
+                                        className="text-xs font-black bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                                      >
+                                        <Compass className="w-3.5 h-3.5 text-indigo-600" />
+                                        <span>{showQuestionMiniMap ? t(lang, 'hideMiniMap') : t(lang, 'showMiniMap')}</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedQuestionIndex(null);
+                                          setSelectedParticipantId(null);
+                                        }}
+                                        className="text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                                      >
+                                        <Map className="w-3.5 h-3.5" />
+                                        <span>{t(lang, 'allQuestionsAndMap')}</span>
+                                      </button>
                                     </div>
                                   </div>
-                                  <button
-                                    onClick={() => {
-                                      setSelectedQuestionIndex(null);
-                                      setSelectedParticipantId(null);
-                                    }}
-                                    className="text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all shrink-0 self-end sm:self-auto"
-                                  >
-                                    <Map className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'allQuestionsAndMap')}</span>
-                                  </button>
+
+                                  {showQuestionMiniMap && (
+                                    <MiniStationMap
+                                      userLocation={userLocation}
+                                      targetLocation={activeQ.location}
+                                      unlockDistance={quizConfig.geotagUnlockDistance || 20}
+                                      stationNumber={selectedQuestionIndex + 1}
+                                      isAnswered={participants.length > 0 && participants.every(p => answers.some(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex))}
+                                      questionType={activeQ.type}
+                                      lang={lang}
+                                      walkedPath={walkedPath}
+                                      onExpand={() => {
+                                        setSelectedQuestionIndex(null);
+                                        setSelectedParticipantId(null);
+                                      }}
+                                    />
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2736,6 +2948,33 @@ ${exampleJson}`;
                         );
                       })()}
                       
+                      {/* Station Navigation (Prev / Next) */}
+                      {totalQuestions > 1 && (
+                        <div className="flex items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100">
+                          <button
+                            type="button"
+                            disabled={selectedQuestionIndex <= 0}
+                            onClick={() => handleSelectQuestionIndex(selectedQuestionIndex - 1)}
+                            className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                            <span>{t(lang, 'prevStation')}</span>
+                          </button>
+                          <span className="text-xs font-black text-slate-400">
+                            {selectedQuestionIndex + 1} / {totalQuestions}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={selectedQuestionIndex >= totalQuestions - 1}
+                            onClick={() => handleSelectQuestionIndex(selectedQuestionIndex + 1)}
+                            className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 disabled:opacity-30 disabled:pointer-events-none text-indigo-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                          >
+                            <span>{t(lang, 'nextStation')}</span>
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+
                       <button 
                         onClick={() => setSelectedParticipantId(null)}
                         className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
@@ -2767,48 +3006,84 @@ ${exampleJson}`;
                       <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] sm:text-xs">{t(lang, 'enterPasswordToSeeResults')}</p>
                     </div>
                     
-                    <div className="flex flex-col gap-3 max-w-xs mx-auto">
-                      <input 
-                        type="password"
-                        placeholder={t(lang, 'enterQuizPassword')}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center text-lg font-black tracking-widest outline-none focus:border-indigo-500 transition-all shadow-sm"
-                        value={facitPasswordInput}
-                        onChange={(e) => setFacitPasswordInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            const pass = quizConfig.password || 'Password';
-                            const input = facitPasswordInput.trim();
-                            if (input === pass || input === 'Password' || input === '1234') {
-                              setIsFacitUnlocked(true);
-                            } else {
-                              alert(t(lang, 'wrongPasswordAlert'));
-                            }
-                          }
-                        }}
-                      />
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => setViewingParticipantId(null)}
-                          className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest transition-all"
-                        >
-                          {t(lang, 'back')}
-                        </button>
-                        <button 
-                          onClick={() => {
-                            const pass = quizConfig.password || 'Password';
-                            const input = facitPasswordInput.trim();
-                            if (input === pass || input === 'Password' || input === '1234') {
-                              setIsFacitUnlocked(true);
-                            } else {
-                              alert(t(lang, 'wrongPasswordAlert'));
-                            }
-                          }}
-                          className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-indigo-100"
-                        >
-                          {t(lang, 'unlockResultsBtn')}
-                        </button>
-                      </div>
-                    </div>
+                    {(() => {
+                      const { totalRequired, answeredCount, isAllAnswered } = getQuizAnswerProgress();
+                      const isFacitLockedByProgress = isQuizModeLocked && !isAllAnswered;
+
+                      return (
+                        <div className="flex flex-col gap-3 max-w-xs mx-auto">
+                          {isFacitLockedByProgress && (
+                            <div className="p-3.5 bg-slate-100 border border-slate-200/80 rounded-2xl text-slate-600 text-xs font-bold flex items-center gap-2.5 text-left">
+                              <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                              <span className="leading-snug">
+                                {t(lang, 'facitLockedUntilAllAnswered')
+                                  .replace('{answered}', answeredCount.toString())
+                                  .replace('{total}', totalRequired.toString())}
+                              </span>
+                            </div>
+                          )}
+
+                          <input 
+                            type="password"
+                            disabled={isFacitLockedByProgress}
+                            placeholder={isFacitLockedByProgress ? t(lang, 'resultsLocked') : t(lang, 'enterQuizPassword')}
+                            className={`w-full p-4 border rounded-2xl text-center text-lg font-black tracking-widest outline-none transition-all shadow-sm ${
+                              isFacitLockedByProgress 
+                                ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed placeholder:text-slate-300' 
+                                : 'bg-slate-50 border-slate-200 focus:border-indigo-500 text-slate-800'
+                            }`}
+                            value={facitPasswordInput}
+                            onChange={(e) => setFacitPasswordInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                if (isFacitLockedByProgress) {
+                                  alert(t(lang, 'allQuestionsMustBeAnsweredAlert'));
+                                  return;
+                                }
+                                const pass = quizConfig.password || 'Password';
+                                const input = facitPasswordInput.trim();
+                                if (input === pass || input === 'Password' || input === '1234') {
+                                  setIsFacitUnlocked(true);
+                                } else {
+                                  alert(t(lang, 'wrongPasswordAlert'));
+                                }
+                              }
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => setViewingParticipantId(null)}
+                              className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest transition-all hover:bg-slate-200"
+                            >
+                              {t(lang, 'back')}
+                            </button>
+                            <button 
+                              disabled={isFacitLockedByProgress}
+                              onClick={() => {
+                                if (isFacitLockedByProgress) {
+                                  alert(t(lang, 'allQuestionsMustBeAnsweredAlert'));
+                                  return;
+                                }
+                                const pass = quizConfig.password || 'Password';
+                                const input = facitPasswordInput.trim();
+                                if (input === pass || input === 'Password' || input === '1234') {
+                                  setIsFacitUnlocked(true);
+                                } else {
+                                  alert(t(lang, 'wrongPasswordAlert'));
+                                }
+                              }}
+                              className={`flex-[2] py-4 rounded-2xl font-black uppercase tracking-widest transition-all ${
+                                isFacitLockedByProgress
+                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300 shadow-none'
+                                  : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95 shadow-lg shadow-indigo-100'
+                              }`}
+                            >
+                              {t(lang, 'unlockResultsBtn')}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <motion.div 
@@ -3092,6 +3367,44 @@ ${exampleJson}`;
                       })()}
                     </div>
 
+                    {/* Walked Route Summary (if quiz has geotag stations) */}
+                    {hasAnyGeotag && walkedPath.length > 0 && (
+                      <div className="mt-6 p-4 sm:p-5 rounded-2xl bg-emerald-50/90 border-2 border-emerald-200 text-left flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 shadow-sm">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shrink-0 shadow-sm">
+                            👣
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-black text-sm sm:text-base text-emerald-950">{t(lang, 'walkedRoute')}</h4>
+                              <span className={`text-[9px] sm:text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full ${
+                                isFacitUnlocked 
+                                  ? 'bg-slate-200 text-slate-700' 
+                                  : 'bg-emerald-200 text-emerald-800 animate-pulse'
+                              }`}>
+                                {isFacitUnlocked ? t(lang, 'trackingStoppedUnlocked') : t(lang, 'trackingLiveWalk')}
+                              </span>
+                            </div>
+                            <p className="text-xs sm:text-sm text-emerald-800 font-semibold mt-0.5">
+                              {t(lang, 'walkedDistance')}: <strong className="font-black text-emerald-950">{formatDistance(calculatePathDistance(walkedPath))}</strong> ({walkedPath.length} GPS-punkter)
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setView('quiz');
+                            setSelectedQuestionIndex(null);
+                            setSelectedParticipantId(null);
+                          }}
+                          className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0"
+                        >
+                          <Map className="w-4 h-4" />
+                          <span>{t(lang, 'viewWalkedTrailMap')}</span>
+                        </button>
+                      </div>
+                    )}
+
                     <div className="pt-8 sm:pt-10 flex flex-col sm:flex-row gap-3 sm:gap-4">
                       <button 
                         onClick={() => setShowResetConfirm(true)}
@@ -3113,45 +3426,82 @@ ${exampleJson}`;
 
                     <div className="pt-8 sm:pt-10 border-t border-slate-100">
                       {(!isFacitUnlocked && !isAdmin) ? (
-                        <div className="space-y-4">
-                          <div className="flex flex-col gap-2">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t(lang, 'seeAnswersTitle')}</label>
-                            <div className="flex gap-2">
-                              <input 
-                                type="password"
-                                placeholder={t(lang, 'enterQuizPassword')}
-                                className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-mono outline-none focus:border-indigo-500 transition-all shadow-sm"
-                                value={facitPasswordInput}
-                                onChange={(e) => setFacitPasswordInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    const pass = quizConfig.password || 'Password';
-                                    const input = facitPasswordInput.trim();
-                                    if (input === pass || input === 'Password' || input === '1234') {
-                                      setIsFacitUnlocked(true);
-                                    } else {
-                                      alert(t(lang, 'wrongPasswordAlert'));
-                                    }
-                                  }
-                                }}
-                              />
-                              <button 
-                                onClick={() => {
-                                  const pass = quizConfig.password || 'Password';
-                                  const input = facitPasswordInput.trim();
-                                  if (input === pass || input === 'Password' || input === '1234') {
-                                    setIsFacitUnlocked(true);
-                                  } else {
-                                    alert(t(lang, 'wrongPasswordAlert'));
-                                  }
-                                }}
-                                className="px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase shadow-md transition-all active:scale-95"
-                              >
-                                {t(lang, 'showFacitBtn')}
-                              </button>
+                        (() => {
+                          const { totalRequired, answeredCount, isAllAnswered } = getQuizAnswerProgress();
+                          const isFacitLockedByProgress = isQuizModeLocked && !isAllAnswered;
+
+                          return (
+                            <div className="space-y-4">
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t(lang, 'seeAnswersTitle')}</label>
+                                
+                                {isFacitLockedByProgress && (
+                                  <div className="p-3 bg-slate-100 border border-slate-200/80 rounded-2xl text-slate-600 text-xs font-bold flex items-center gap-2.5 text-left">
+                                    <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                                    <span className="leading-snug">
+                                      {t(lang, 'facitLockedUntilAllAnswered')
+                                        .replace('{answered}', answeredCount.toString())
+                                        .replace('{total}', totalRequired.toString())}
+                                    </span>
+                                  </div>
+                                )}
+
+                                <div className="flex gap-2">
+                                  <input 
+                                    type="password"
+                                    disabled={isFacitLockedByProgress}
+                                    placeholder={isFacitLockedByProgress ? t(lang, 'resultsLocked') : t(lang, 'enterQuizPassword')}
+                                    className={`flex-1 p-3.5 border rounded-2xl text-sm font-mono outline-none transition-all shadow-sm ${
+                                      isFacitLockedByProgress
+                                        ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed placeholder:text-slate-300'
+                                        : 'bg-slate-50 border-slate-200 focus:border-indigo-500 text-slate-800'
+                                    }`}
+                                    value={facitPasswordInput}
+                                    onChange={(e) => setFacitPasswordInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        if (isFacitLockedByProgress) {
+                                          alert(t(lang, 'allQuestionsMustBeAnsweredAlert'));
+                                          return;
+                                        }
+                                        const pass = quizConfig.password || 'Password';
+                                        const input = facitPasswordInput.trim();
+                                        if (input === pass || input === 'Password' || input === '1234') {
+                                          setIsFacitUnlocked(true);
+                                        } else {
+                                          alert(t(lang, 'wrongPasswordAlert'));
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <button 
+                                    disabled={isFacitLockedByProgress}
+                                    onClick={() => {
+                                      if (isFacitLockedByProgress) {
+                                        alert(t(lang, 'allQuestionsMustBeAnsweredAlert'));
+                                        return;
+                                      }
+                                      const pass = quizConfig.password || 'Password';
+                                      const input = facitPasswordInput.trim();
+                                      if (input === pass || input === 'Password' || input === '1234') {
+                                        setIsFacitUnlocked(true);
+                                      } else {
+                                        alert(t(lang, 'wrongPasswordAlert'));
+                                      }
+                                    }}
+                                    className={`px-6 rounded-2xl font-black text-xs uppercase shadow-md transition-all ${
+                                      isFacitLockedByProgress
+                                        ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300 shadow-none'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'
+                                    }`}
+                                  >
+                                    {t(lang, 'showFacitBtn')}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                        </div>
+                          );
+                        })()
                       ) : (
                         <div className="space-y-6">
                           <div className="flex items-center justify-between gap-4 bg-emerald-500 p-4 rounded-2xl shadow-lg border border-emerald-400">
@@ -3445,7 +3795,7 @@ ${exampleJson}`;
                 </div>
 
                   {/* Navigation Tabs */}
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/60">
                     <button
                       onClick={() => setConfigTab('general')}
                       className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
@@ -3468,18 +3818,6 @@ ${exampleJson}`;
                     >
                       <HelpCircle className="w-4 h-4" />
                       <span>{t(lang, 'questionsTab')}</span>
-                    </button>
-
-                    <button
-                      onClick={() => setConfigTab('library')}
-                      className={`py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
-                        configTab === 'library' 
-                          ? 'bg-white text-indigo-600 shadow-md border border-indigo-100' 
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      <FolderOpen className="w-4 h-4" />
-                      <span>{t(lang, 'libraryTab')}</span>
                     </button>
 
                     {isAdmin && (
@@ -3508,155 +3846,6 @@ ${exampleJson}`;
                       <span>{t(lang, 'dbTab')}</span>
                     </button>
                   </div>
-
-                  {/* TAB: LIBRARY & CATALOG */}
-                  {configTab === 'library' && (
-                    <div className="space-y-6">
-                      {/* Catalog Header */}
-                      <div className="bg-gradient-to-br from-indigo-50 to-slate-50 p-6 rounded-3xl border border-indigo-100 shadow-sm space-y-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-md shrink-0">
-                            <FolderOpen className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <h3 className="font-black text-base text-slate-800">{t(lang, 'libraryHeading')}</h3>
-                            <p className="text-xs text-slate-500 font-medium leading-relaxed">{t(lang, 'libraryDesc')}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* SECTION: SAVED QUIZZES FROM INDEXEDDB */}
-                      {savedQuizzes.length > 0 && (
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between px-1">
-                            <div className="flex items-center gap-2">
-                              <HardDrive className="w-4 h-4 text-emerald-600" />
-                              <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
-                                {t(lang, 'mySavedQuizzesSection')}
-                              </h4>
-                            </div>
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                              {savedQuizzes.length}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[45vh] overflow-y-auto pr-1 custom-scrollbar">
-                            {savedQuizzes.map(item => (
-                              <div key={item.id} className="p-4 bg-emerald-50/30 hover:bg-emerald-50/70 border border-emerald-200/80 rounded-2xl shadow-sm hover:border-emerald-300 transition-all space-y-3 flex flex-col justify-between group">
-                                <div>
-                                  <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors">{item.title}</h4>
-                                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                                    <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
-                                      🧒 {item.barnCount}
-                                    </span>
-                                    <span className="text-[10px] font-bold text-pink-700 bg-pink-100/80 px-2 py-0.5 rounded-md">
-                                      🧔 {item.vuxenCount}
-                                    </span>
-                                    {item.hasLocations && (
-                                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
-                                        <MapPin className="w-2.5 h-2.5" /> Geotag
-                                      </span>
-                                    )}
-                                    <span className="text-[10px] text-slate-400 font-medium ml-auto">
-                                      {new Date(item.updatedAt).toLocaleDateString()}
-                                    </span>
-                                  </div>
-                                </div>
-                                <button 
-                                  onClick={() => handleLoadQuizFromDB(item, false)}
-                                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2 shadow-xs"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>{t(lang, 'loadQuizBtn')}</span>
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* SECTION: PRESET CATALOG QUIZZES */}
-                      <div className="space-y-3 pt-2">
-                        <div className="flex items-center justify-between px-1">
-                          <div className="flex items-center gap-2">
-                            <FolderOpen className="w-4 h-4 text-indigo-600" />
-                            <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
-                              {t(lang, 'premadeQuizzesSection')}
-                            </h4>
-                          </div>
-                          {quizLibrary.length > 0 && (
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                              {quizLibrary.length}
-                            </span>
-                          )}
-                        </div>
-
-                        {isLibraryLoading ? (
-                          <div className="p-12 text-center text-slate-400 font-bold flex flex-col items-center gap-4">
-                            <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                            <p className="text-sm">{t(lang, 'loadingLibrary')}</p>
-                          </div>
-                        ) : libraryError ? (
-                          <div className="p-8 text-center text-rose-500 font-bold bg-rose-50 rounded-3xl border border-rose-100 flex flex-col items-center gap-2">
-                            <p>{t(lang, 'libraryError')}</p>
-                            <button 
-                              onClick={fetchQuizLibrary}
-                              className="px-4 py-1.5 bg-rose-100 hover:bg-rose-200 rounded-full text-[10px] uppercase font-black transition-all active:scale-95"
-                            >
-                              {t(lang, 'retryBtn') || 'Retry'}
-                            </button>
-                          </div>
-                        ) : quizLibrary.length === 0 ? (
-                          <div className="p-10 text-center text-slate-400 font-bold bg-slate-50 rounded-3xl border border-slate-200/60">
-                            <Database className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                            <p className="text-sm">{t(lang, 'libraryEmpty')}</p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto pr-1">
-                            {quizLibrary.map(item => (
-                              <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
-                                <div className="flex-1">
-                                  <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
-                                  <p className="text-[11px] text-slate-500 font-medium line-clamp-2 mt-1 leading-relaxed">{item.description}</p>
-                                </div>
-                                <button 
-                                  onClick={() => loadLibraryQuiz(item.filename)}
-                                  className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>{t(lang, 'loadQuizBtn')}</span>
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Manual Import Box (Pasted Code) */}
-                      <div className="pt-5 border-t border-slate-100 space-y-4">
-                        <div className="flex items-center justify-between px-1">
-                           <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400">{t(lang, 'importPastedJsonBtn')}</h3>
-                        </div>
-                        <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-200/70 space-y-4">
-                          <textarea 
-                            rows={2}
-                            value={configJsonInput}
-                            onChange={(e) => setConfigJsonInput(e.target.value)}
-                            placeholder={t(lang, 'pasteAiResponsePlaceholder')}
-                            className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-                          />
-                          <button
-                            onClick={handleImportConfig}
-                            disabled={!configJsonInput.trim()}
-                            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg shadow-emerald-100 transition-all active:scale-95 flex items-center justify-center gap-2.5"
-                          >
-                            <Sparkles className="w-4 h-4 text-emerald-200" />
-                            <span>{t(lang, 'importPastedJsonBtn')}</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {/* TAB 1: QUESTIONS EDITOR */}
                   {configTab === 'questions' && (
@@ -3690,6 +3879,35 @@ ${exampleJson}`;
                           </span>
                         </button>
                       </div>
+
+                      {/* Trail Stats Summary (if geotagged) */}
+                      {(() => {
+                        const activeList = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                        const geotaggedList = activeList.filter(q => !!q.location);
+                        if (geotaggedList.length >= 2) {
+                          let dist = 0;
+                          for (let k = 0; k < geotaggedList.length - 1; k++) {
+                            dist += calculateDistanceMeters(
+                              geotaggedList[k].location!.lat,
+                              geotaggedList[k].location!.lng,
+                              geotaggedList[k + 1].location!.lat,
+                              geotaggedList[k + 1].location!.lng
+                            );
+                          }
+                          return (
+                            <div className="bg-indigo-50/80 p-3.5 rounded-2xl border border-indigo-200/80 flex flex-wrap items-center justify-between gap-2 text-xs font-black text-indigo-950">
+                              <div className="flex items-center gap-2">
+                                <MapPin className="w-4 h-4 text-indigo-600" />
+                                <span>{t(lang, 'trailLength')}: <strong className="text-indigo-600 font-black">{formatDistance(dist)}</strong></span>
+                              </div>
+                              <div className="flex items-center gap-2 text-slate-600">
+                                <span>⏱️ {t(lang, 'estWalkTime')}: <strong className="text-indigo-700 font-black">~{calculateWalkingTimeMinutes(dist)} min</strong></span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
 
                       {/* Route GeoTag Button */}
                       <button
@@ -4211,17 +4429,61 @@ ${exampleJson}`;
 
                       {/* Saved Quizzes Section */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between px-1">
-                          <h3 className="font-black text-xs uppercase tracking-widest text-slate-400">
-                            {t(lang, 'savedQuizzesHeading')} ({savedQuizzes.length})
-                          </h3>
-                          {savedQuizzes.length > 0 && (
-                            <button
-                              onClick={handleClearAllDB}
-                              className="text-[11px] font-bold text-rose-500 hover:text-rose-700 underline"
-                            >
-                              {t(lang, 'clearDbBtn')}
-                            </button>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-black text-xs uppercase tracking-widest text-slate-400">
+                              {t(lang, 'savedQuizzesHeading')} ({savedQuizzes.length})
+                            </h3>
+                            {savedQuizzes.length > 0 && (
+                              <button
+                                onClick={handleClearAllDB}
+                                className="text-[11px] font-bold text-rose-500 hover:text-rose-700 underline ml-1"
+                              >
+                                {t(lang, 'clearDbBtn')}
+                              </button>
+                            )}
+                          </div>
+
+                          {savedQuizzes.length > 1 && (
+                            <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
+                              <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                {t(lang, 'sortByLabel')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setDbSortBy('date-desc')}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                  dbSortBy === 'date-desc'
+                                    ? 'bg-white text-indigo-600 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                }`}
+                              >
+                                {t(lang, 'sortDateDesc')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDbSortBy('date-asc')}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                  dbSortBy === 'date-asc'
+                                    ? 'bg-white text-indigo-600 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                }`}
+                              >
+                                {t(lang, 'sortDateAsc')}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDbSortBy('name-asc')}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                  dbSortBy === 'name-asc'
+                                    ? 'bg-white text-indigo-600 shadow-xs'
+                                    : 'text-slate-500 hover:text-slate-800'
+                                }`}
+                              >
+                                {t(lang, 'sortNameAsc')}
+                              </button>
+                            </div>
                           )}
                         </div>
 
@@ -4237,7 +4499,7 @@ ${exampleJson}`;
                           </div>
                         ) : (
                           <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-                            {savedQuizzes.map((item) => (
+                            {sortedSavedQuizzes.map((item) => (
                               <div 
                                 key={item.id}
                                 className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:border-indigo-200 transition-all space-y-3"
@@ -4293,6 +4555,87 @@ ${exampleJson}`;
                             ))}
                           </div>
                         )}
+                      </div>
+
+                      {/* SECTION: PRESET CATALOG QUIZZES (Bibliotek) */}
+                      <div className="space-y-3 pt-4 border-t border-slate-100">
+                        <div className="flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <FolderOpen className="w-4 h-4 text-indigo-600" />
+                            <h3 className="font-black text-xs uppercase tracking-wider text-slate-700">
+                              {t(lang, 'premadeQuizzesSection')}
+                            </h3>
+                          </div>
+                          {quizLibrary.length > 0 && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                              {quizLibrary.length}
+                            </span>
+                          )}
+                        </div>
+
+                        {isLibraryLoading ? (
+                          <div className="p-10 text-center text-slate-400 font-bold flex flex-col items-center gap-3">
+                            <div className="w-7 h-7 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            <p className="text-xs">{t(lang, 'loadingLibrary')}</p>
+                          </div>
+                        ) : libraryError ? (
+                          <div className="p-6 text-center text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 flex flex-col items-center gap-2">
+                            <p className="text-xs">{t(lang, 'libraryError')}</p>
+                            <button 
+                              onClick={fetchQuizLibrary}
+                              className="px-3.5 py-1 bg-rose-100 hover:bg-rose-200 rounded-full text-[10px] uppercase font-black transition-all active:scale-95"
+                            >
+                              {t(lang, 'retryBtn') || 'Retry'}
+                            </button>
+                          </div>
+                        ) : quizLibrary.length === 0 ? (
+                          <div className="p-8 text-center text-slate-400 font-bold bg-slate-50 rounded-2xl border border-slate-200/60">
+                            <Database className="w-7 h-7 mx-auto mb-2 opacity-20" />
+                            <p className="text-xs">{t(lang, 'libraryEmpty')}</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[45vh] overflow-y-auto pr-1 custom-scrollbar">
+                            {quizLibrary.map(item => (
+                              <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
+                                <div className="flex-1">
+                                  <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
+                                  <p className="text-[11px] text-slate-500 font-medium line-clamp-2 mt-1 leading-relaxed">{item.description}</p>
+                                </div>
+                                <button 
+                                  onClick={() => loadLibraryQuiz(item.filename)}
+                                  className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>{t(lang, 'loadQuizBtn')}</span>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Manual Import Box (Pasted Code) */}
+                      <div className="pt-4 border-t border-slate-100 space-y-3">
+                        <div className="flex items-center justify-between px-1">
+                           <h3 className="font-black text-[10px] uppercase tracking-widest text-slate-400">{t(lang, 'importPastedJsonBtn')}</h3>
+                        </div>
+                        <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/70 space-y-3">
+                          <textarea 
+                            rows={2}
+                            value={configJsonInput}
+                            onChange={(e) => setConfigJsonInput(e.target.value)}
+                            placeholder={t(lang, 'pasteAiResponsePlaceholder')}
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                          />
+                          <button
+                            onClick={handleImportConfig}
+                            disabled={!configJsonInput.trim()}
+                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-md shadow-emerald-100 transition-all active:scale-95 flex items-center justify-center gap-2"
+                          >
+                            <Sparkles className="w-4 h-4 text-emerald-200" />
+                            <span>{t(lang, 'importPastedJsonBtn')}</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -4382,6 +4725,25 @@ ${exampleJson}`;
                       {/* Share */}
                       {isAdmin && (
                         <div className="space-y-3">
+                          {/* Quiz Mode Lock Checkbox */}
+                          <label className="flex items-start gap-3 p-3.5 bg-indigo-50/70 hover:bg-indigo-50 border border-indigo-200/80 rounded-2xl cursor-pointer transition-all select-none">
+                            <input
+                              type="checkbox"
+                              checked={directLinkLockMode}
+                              onChange={(e) => setDirectLinkLockMode(e.target.checked)}
+                              className="mt-0.5 w-4 h-4 rounded text-indigo-600 border-indigo-300 focus:ring-indigo-500 accent-indigo-600 shrink-0 cursor-pointer"
+                            />
+                            <div className="text-xs">
+                              <span className="font-black text-indigo-950 flex items-center gap-1.5">
+                                <Lock className="w-3.5 h-3.5 text-indigo-600 inline" />
+                                {t(lang, 'quizModeLockCheckboxTitle')}
+                              </span>
+                              <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                {t(lang, 'quizModeLockCheckboxDesc')}
+                              </p>
+                            </div>
+                          </label>
+
                           {/* Direct Quiz Link Button (Top recommended) */}
                           <button 
                             onClick={shareDirectQuizUrl}
@@ -5774,20 +6136,61 @@ ${exampleJson}`;
                         {/* SECTION: MINA SPARADE QUIZ (INDEXEDDB) */}
                         {savedQuizzes.length > 0 && (
                           <div className="space-y-2.5">
-                            <div className="flex items-center justify-between px-1">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
                               <div className="flex items-center gap-2">
                                 <HardDrive className="w-4 h-4 text-emerald-600" />
                                 <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
                                   {t(lang, 'mySavedQuizzesSection')}
                                 </h4>
+                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                                  {savedQuizzes.length}
+                                </span>
                               </div>
-                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                                {savedQuizzes.length}
-                              </span>
+
+                              {/* Sort Controls */}
+                              <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
+                                <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  {t(lang, 'sortByLabel')}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('date-desc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'date-desc'
+                                      ? 'bg-white text-emerald-700 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortDateDesc')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('date-asc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'date-asc'
+                                      ? 'bg-white text-emerald-700 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortDateAsc')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('name-asc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'name-asc'
+                                      ? 'bg-white text-emerald-700 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortNameAsc')}
+                                </button>
+                              </div>
                             </div>
 
                             <div className="grid grid-cols-1 gap-2.5">
-                              {savedQuizzes.map(item => (
+                              {sortedSavedQuizzes.map(item => (
                                 <div key={item.id} className="p-3.5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 rounded-2xl transition-all group flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                                   <div className="min-w-0 flex-1">
                                     <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors truncate">{item.title}</h4>
@@ -6045,6 +6448,8 @@ ${exampleJson}`;
                       if (showClearConfirm) {
                         setParticipants([]);
                         setAnswers([]);
+                        setIsQuizModeLocked(false);
+                        localStorage.removeItem('family_quiz_lock_mode');
                         setShowClearConfirm(false);
                       }
                     }}

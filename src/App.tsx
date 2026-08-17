@@ -494,15 +494,18 @@ export default function App() {
   const quizUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleQuizIconClick = () => {
-    if (!isQuizModeLocked) return;
-
     quizUnlockClickCountRef.current += 1;
 
     if (quizUnlockClickCountRef.current === 7) {
       quizUnlockTimerRef.current = setTimeout(() => {
         if (quizUnlockClickCountRef.current === 7) {
-          setIsQuizModeLocked(false);
-          localStorage.removeItem('family_quiz_lock_mode');
+          const nextQuizModeLocked = !isQuizModeLocked;
+          setIsQuizModeLocked(nextQuizModeLocked);
+          if (nextQuizModeLocked) {
+            localStorage.setItem('family_quiz_lock_mode', 'true');
+          } else {
+            localStorage.removeItem('family_quiz_lock_mode');
+          }
           quizUnlockClickCountRef.current = 0;
         }
         quizUnlockTimerRef.current = null;

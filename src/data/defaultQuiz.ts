@@ -5,6 +5,7 @@ export const defaultQuiz: QuizConfig = {
   title: "Family Summer Quiz",
   password: "123",
   geotagUnlockDistance: 20,
+  requireSequentialAnswers: false,
   barnQuestions: [
     {
       id: "b1",

@@ -65,6 +65,7 @@ import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion } f
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
 import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/soundex';
 import { compressQuizToUrlCode, generateQuizDirectUrl, decompressQuizFromUrlCode } from './utils/quizCompression';
+import { validateQuizConfig } from './utils/quizValidation';
 import { 
   SavedQuizRecord, 
   saveQuizToIndexedDB, 
@@ -170,7 +171,14 @@ export default function App() {
 
   const [answers, setAnswers] = useState<AnswerRecord[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_ANSWERS);
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      console.warn('Could not load saved answers; starting with an empty answer list:', error);
+      return [];
+    }
   });
 
   const [quizConfig, setQuizConfig] = useState<QuizConfig>(() => {
@@ -208,8 +216,15 @@ export default function App() {
   }, [lang, quizConfig.barnQuestions, quizConfig.vuxenQuestions]);
 
   const [view, setView] = useState<'setup' | 'quiz' | 'results' | 'config'>('setup');
+  const [isPageVisible, setIsPageVisible] = useState(() => document.visibilityState === 'visible');
   const [userLocation, setUserLocation] = useState<Location | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => setIsPageVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   const locateUser = () => {
     if (!navigator.geolocation) {
@@ -241,7 +256,29 @@ export default function App() {
     message: string;
   } | null>(null);
 
+  const canAccessQuestionForParticipant = (participantId: string, questionIndex: number) => {
+    if (!quizConfig.requireSequentialAnswers) return true;
+
+    const answeredIndexes = answers
+      .filter(a => a.participantId === participantId)
+      .map(a => a.questionIndex);
+
+    if (answeredIndexes.length === 0) {
+      return questionIndex === 0;
+    }
+
+    const highestAnsweredIndex = Math.max(...answeredIndexes);
+    return questionIndex <= highestAnsweredIndex + 1;
+  };
+
   const handleSelectQuestionIndex = (idx: number) => {
+    if (quizConfig.requireSequentialAnswers && selectedParticipantId) {
+      if (!canAccessQuestionForParticipant(selectedParticipantId, idx)) {
+        alert(t(lang, 'sequentialAnswerRequiredAlert'));
+        return;
+      }
+    }
+
     const bQ = quizConfig.barnQuestions[idx];
     const vQ = quizConfig.vuxenQuestions[idx];
     const location = bQ?.location || vQ?.location;
@@ -292,7 +329,8 @@ export default function App() {
   const [configJsonInput, setConfigJsonInput] = useState('');
   const [showAnswerImportModal, setShowAnswerImportModal] = useState(false);
   const [answerImportInput, setAnswerImportInput] = useState('');
-    const [showAnswerExportModal, setShowAnswerExportModal] = useState(false);
+  const [showAnswerExportModal, setShowAnswerExportModal] = useState(false);
+  const [showParticipantActions, setShowParticipantActions] = useState(false);
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
@@ -447,7 +485,8 @@ export default function App() {
         text = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () => reject(new Error('Kunde inte läsa filen'));
+          reader.onerror = () => reject(new Error('Kunde inte läsa filen.'));
+          reader.onabort = () => reject(new Error('Inläsningen avbröts.'));
           reader.readAsText(file);
         });
       }
@@ -593,7 +632,11 @@ export default function App() {
 
   // GPS Tracking & Live Breadcrumb recording
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    const isGeoTagEditing = fullScreenEditingQuestionId !== null || showRouteGeoTagModal;
+    const isGpsNeeded = isPageVisible && (hasAnyGeotag || isGeoTagEditing) && !isFacitUnlocked && (
+      view === 'quiz' || view === 'results' || isGeoTagEditing
+    );
+    if (!navigator.geolocation || !isGpsNeeded) return;
 
     const handlePos = (pos: GeolocationPosition) => {
       const newLoc: Location = {
@@ -634,7 +677,7 @@ export default function App() {
     return () => {
       navigator.geolocation.clearWatch(watchId);
     };
-  }, []);
+  }, [fullScreenEditingQuestionId, hasAnyGeotag, isFacitUnlocked, isPageVisible, showRouteGeoTagModal, view]);
 
   const [pointsInputValue, setPointsInputValue] = useState<number>(0);
   const [textInputValue, setTextInputValue] = useState<string>('');
@@ -1367,6 +1410,8 @@ ${exampleJson}`;
       if (compressedCode) {
         const decompressed = decompressQuizFromUrlCode(compressedCode);
         if (decompressed) {
+          const validation = validateQuizConfig(decompressed);
+          if (!validation.valid) throw new Error(validation.error);
           const importedQuiz = ensureQuizId(decompressed);
           await autoSaveQuizToIndexedDBIfNew(importedQuiz);
           setQuizConfig(importedQuiz);
@@ -1482,6 +1527,8 @@ ${exampleJson}`;
               barnQuestions: ensureLang(parsed.barnQuestions),
               vuxenQuestions: ensureLang(parsed.vuxenQuestions)
             };
+            const validation = validateQuizConfig(fullConfig);
+            if (!validation.valid) throw new Error(validation.error);
             const importedQuiz = ensureQuizId(fullConfig);
             await autoSaveQuizToIndexedDBIfNew(importedQuiz);
             setQuizConfig(importedQuiz);
@@ -1538,7 +1585,7 @@ ${exampleJson}`;
       }
     } catch (err) {
       console.error('Import error:', err);
-      alert(t(lang, 'invalidFormatAlert'));
+      alert(err instanceof Error && err.message ? err.message : t(lang, 'invalidFormatAlert'));
     }
   };
 
@@ -2068,12 +2115,21 @@ ${exampleJson}`;
   };
 
   const shareConfig = () => {
-    const configStr = JSON.stringify(quizConfig);
-    const encrypted = xorEncryptDecrypt(configStr, '$');
-    navigator.clipboard.writeText(encrypted).then(() => {
-      setCopiedConfigCode(true);
-      setTimeout(() => setCopiedConfigCode(false), 6000);
-    });
+    try {
+      const configStr = JSON.stringify(quizConfig);
+      const encrypted = xorEncryptDecrypt(configStr, '$');
+      if (!navigator.clipboard?.writeText) throw new Error('Urklipp är inte tillgängligt.');
+      navigator.clipboard.writeText(encrypted).then(() => {
+        setCopiedConfigCode(true);
+        setTimeout(() => setCopiedConfigCode(false), 6000);
+      }).catch((error) => {
+        console.error('Could not copy quiz export:', error);
+        alert('Kunde inte kopiera quiz-exporten till urklipp.');
+      });
+    } catch (error) {
+      console.error('Could not create quiz export:', error);
+      alert('Kunde inte skapa quiz-exporten.');
+    }
   };
 
   const normalizeParticipantNameForCompare = (name: string) =>
@@ -2258,8 +2314,8 @@ ${exampleJson}`;
       const questionsForP = p.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
       totalRequired += questionsForP.length;
 
-      for (const q of questionsForP) {
-        const isAnswered = answers.some(a => a.participantId === p.id && a.questionId === q.id);
+      for (const [questionIndex] of questionsForP.entries()) {
+        const isAnswered = answers.some(a => a.participantId === p.id && a.questionIndex === questionIndex);
         if (isAnswered) {
           answeredCount += 1;
         }
@@ -2271,21 +2327,35 @@ ${exampleJson}`;
   };
 
   const shareDirectQuizUrl = () => {
-    const directUrl = generateQuizDirectUrl(quizConfig, { lockMode: directLinkLockMode });
-    setDirectUrlLength(directUrl.length);
-    if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      const directUrl = generateQuizDirectUrl(quizConfig, { lockMode: directLinkLockMode });
+      setDirectUrlLength(directUrl.length);
+      if (!navigator.clipboard?.writeText) throw new Error('Urklipp är inte tillgängligt.');
       navigator.clipboard.writeText(directUrl).then(() => {
         setCopiedDirectUrlCode(true);
         setTimeout(() => setCopiedDirectUrlCode(false), 6000);
+      }).catch((error) => {
+        console.error('Could not copy direct quiz URL:', error);
+        alert('Kunde inte kopiera quizlänken till urklipp.');
       });
+    } catch (error) {
+      console.error('Could not create direct quiz URL:', error);
+      alert('Kunde inte skapa quizlänken. Kontrollera quizets innehåll.');
     }
   };
 
   const shareAppUrl = () => {
     const appUrl = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+    if (!navigator.clipboard?.writeText) {
+      alert('Kunde inte kopiera applänken till urklipp.');
+      return;
+    }
     navigator.clipboard.writeText(appUrl).then(() => {
       setCopiedAppUrlCode(true);
       setTimeout(() => setCopiedAppUrlCode(false), 6000);
+    }).catch((error) => {
+      console.error('Could not copy app URL:', error);
+      alert('Kunde inte kopiera applänken till urklipp.');
     });
   };
 
@@ -2598,23 +2668,39 @@ ${exampleJson}`;
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-2 pt-2">
+                    <div className="pt-2 border-t border-slate-100">
                       <button
                         type="button"
-                        onClick={shareParticipantAnswers}
-                        className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                        onClick={() => setShowParticipantActions(prev => !prev)}
+                        className="w-full flex items-center justify-between gap-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 font-black text-[10px] uppercase tracking-wider transition-all"
                       >
-                        <Share2 className="w-4 h-4" />
-                        {t(lang, 'submitOurAnswersBtn')}
+                        <span className="flex items-center gap-2">
+                          <ChevronDown className={`w-4 h-4 transition-transform ${showParticipantActions ? 'rotate-180' : ''}`} />
+                          <span>{showParticipantActions ? t(lang, 'hideLabel') : t(lang, 'moreLabel')}</span>
+                        </span>
+                        <span className="text-slate-400">{showParticipantActions ? '▴' : '▾'}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={importSharedAnswers}
-                        className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
-                      >
-                        <Upload className="w-4 h-4" />
-                        {t(lang, 'importSharedAnswersBtn')}
-                      </button>
+
+                      {showParticipantActions && (
+                        <div className="mt-2 grid grid-cols-1 gap-2">
+                          <button
+                            type="button"
+                            onClick={shareParticipantAnswers}
+                            className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Share2 className="w-4 h-4" />
+                            {t(lang, 'submitOurAnswersBtn')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={importSharedAnswers}
+                            className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Upload className="w-4 h-4" />
+                            {t(lang, 'importSharedAnswersBtn')}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3652,6 +3738,7 @@ ${exampleJson}`;
                         const allQuestions = [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions];
                         const hasOptionQuestions = allQuestions.some(q => (q.type || 'options') === 'options');
                         const hasPointQuestions = allQuestions.some(q => q.type === 'points');
+                        const { isAllAnswered } = getQuizAnswerProgress();
 
                         const mappedParticipants = participants
                           .map(p => {
@@ -3742,6 +3829,25 @@ ${exampleJson}`;
                           });
                       })()}
                     </div>
+
+                    {(() => {
+                      const { isAllAnswered } = getQuizAnswerProgress();
+
+                      if (!isAllAnswered) return null;
+
+                      return (
+                        <div className="pt-4 sm:pt-5">
+                          <button
+                            type="button"
+                            onClick={shareParticipantAnswers}
+                            className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Share2 className="w-4 h-4" />
+                            {t(lang, 'submitOurAnswersBtn')}
+                          </button>
+                        </div>
+                      );
+                    })()}
 
                     {/* Walked Route Summary (if quiz has geotag stations) */}
                     {hasAnyGeotag && walkedPath.length > 0 && (
@@ -5124,6 +5230,24 @@ ${exampleJson}`;
                               </span>
                               <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
                                 {t(lang, 'quizModeLockCheckboxDesc')}
+                              </p>
+                            </div>
+                          </label>
+
+                          <label className="flex items-start gap-3 p-3.5 bg-amber-50/80 hover:bg-amber-50 border border-amber-200 rounded-2xl cursor-pointer transition-all select-none">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(quizConfig.requireSequentialAnswers)}
+                              onChange={(e) => setQuizConfig(prev => ({ ...prev, requireSequentialAnswers: e.target.checked }))}
+                              className="mt-0.5 w-4 h-4 rounded text-amber-600 border-amber-300 focus:ring-amber-500 accent-amber-600 shrink-0 cursor-pointer"
+                            />
+                            <div className="text-xs">
+                              <span className="font-black text-amber-950 flex items-center gap-1.5">
+                                <ArrowUpDown className="w-3.5 h-3.5 text-amber-700 inline" />
+                                {t(lang, 'requireSequentialAnswersTitle')}
+                              </span>
+                              <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                {t(lang, 'requireSequentialAnswersDesc')}
                               </p>
                             </div>
                           </label>

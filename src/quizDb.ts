@@ -4,6 +4,7 @@
  */
 
 import { AnswerRecord, Participant, QuizConfig } from './types';
+import { assertValidQuizConfig } from './utils/quizValidation';
 
 export interface QuizSessionState {
   participants: Participant[];
@@ -365,13 +366,17 @@ export async function importIndexedDBFromJSON(jsonString: string): Promise<numbe
         quizId: item.quizId || crypto.randomUUID(),
         title: item.title || 'Importerat Quiz',
         password: item.password || '',
+        geotagUnlockDistance: item.geotagUnlockDistance || 20,
+        requireSequentialAnswers: item.requireSequentialAnswers === true,
         barnQuestions: item.barnQuestions || [],
         vuxenQuestions: item.vuxenQuestions || [],
       };
+      assertValidQuizConfig(recordConfig);
       await saveQuizToIndexedDB(recordConfig, item.id || undefined, recordConfig.title);
       count++;
     } else if (item.quizConfig) {
       // SavedQuizRecord structure
+      assertValidQuizConfig(item.quizConfig);
       await saveQuizToIndexedDB(
         item.quizConfig,
         item.id || undefined,

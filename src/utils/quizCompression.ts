@@ -1,11 +1,13 @@
 import LZString from 'lz-string';
 import { QuizConfig, Question } from '../types';
+import { assertValidQuizConfig } from './quizValidation';
 
 /**
  * Compact minified schema mapping for QuizConfig:
  * t: title
  * p: password
  * d: geotagUnlockDistance
+ * s: requireSequentialAnswers
  * b: barnQuestions
  * v: vuxenQuestions
  *
@@ -42,6 +44,7 @@ interface MinifiedQuizConfig {
   t: string;
   p?: string;
   d?: number;
+  s?: boolean;
   b: MinifiedQuestion[];
   v: MinifiedQuestion[];
 }
@@ -116,6 +119,7 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
  * Uses schema minification + LZ-based compression encoded as URI component safe.
  */
 export function compressQuizToUrlCode(config: QuizConfig): string {
+  assertValidQuizConfig(config);
   const minified: MinifiedQuizConfig = {
     i: config.quizId,
     t: config.title || 'Tipspromenad',
@@ -127,6 +131,7 @@ export function compressQuizToUrlCode(config: QuizConfig): string {
   if (config.geotagUnlockDistance && config.geotagUnlockDistance !== 20) {
     minified.d = config.geotagUnlockDistance;
   }
+  if (config.requireSequentialAnswers) minified.s = true;
 
   const jsonStr = JSON.stringify(minified);
   // compressToEncodedURIComponent produces [a-zA-Z0-9 -_.!~*'()] string safe for URL hashes without encoding
@@ -174,14 +179,17 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
       return null;
     }
 
-    return {
+    const config: QuizConfig = {
       quizId: min.i || 'default-quiz-template',
       title: min.t || 'Tipspromenad',
       password: min.p || '',
       geotagUnlockDistance: min.d || 20,
+      requireSequentialAnswers: min.s === true,
       barnQuestions: (min.b || []).map((q, idx) => unminifyQuestion(q, idx)),
       vuxenQuestions: (min.v || []).map((q, idx) => unminifyQuestion(q, idx))
     };
+    assertValidQuizConfig(config);
+    return config;
   } catch (err) {
     console.error('Failed to decompress quiz URL code:', err);
     return null;

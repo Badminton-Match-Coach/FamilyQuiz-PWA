@@ -38,6 +38,7 @@ interface MinifiedQuestion {
 }
 
 interface MinifiedQuizConfig {
+  i?: string;
   t: string;
   p?: string;
   d?: number;
@@ -116,6 +117,7 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
  */
 export function compressQuizToUrlCode(config: QuizConfig): string {
   const minified: MinifiedQuizConfig = {
+    i: config.quizId,
     t: config.title || 'Tipspromenad',
     b: (config.barnQuestions || []).map(minifyQuestion),
     v: (config.vuxenQuestions || []).map(minifyQuestion)
@@ -173,6 +175,7 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
     }
 
     return {
+      quizId: min.i || 'default-quiz-template',
       title: min.t || 'Tipspromenad',
       password: min.p || '',
       geotagUnlockDistance: min.d || 20,

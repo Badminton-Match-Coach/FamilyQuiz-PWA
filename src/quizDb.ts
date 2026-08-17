@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { QuizConfig } from './types';
+import { AnswerRecord, Participant, QuizConfig } from './types';
+
+export interface QuizSessionState {
+  participants: Participant[];
+  answers: AnswerRecord[];
+}
 
 export interface SavedQuizRecord {
   id: string;
@@ -14,6 +19,7 @@ export interface SavedQuizRecord {
   vuxenCount: number;
   hasLocations: boolean;
   quizConfig: QuizConfig;
+  quizState?: QuizSessionState;
 }
 
 const DB_NAME = 'FamilyQuizIndexedDB';
@@ -114,7 +120,8 @@ function openDB(): Promise<IDBDatabase> {
 export async function saveQuizToIndexedDB(
   quizConfig: QuizConfig,
   existingId?: string,
-  customTitle?: string
+  customTitle?: string,
+  quizState?: QuizSessionState
 ): Promise<SavedQuizRecord> {
   const id = existingId || `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const title = customTitle?.trim() || quizConfig.title?.trim() || 'Min Tipspromenad';
@@ -143,6 +150,7 @@ export async function saveQuizToIndexedDB(
       ...quizConfig,
       title,
     },
+    quizState: quizState || existingRecord?.quizState,
   };
 
   // 1. Always update localStorage mirror first so data is never lost on mobile
@@ -253,6 +261,19 @@ export async function getQuizFromIndexedDB(id: string): Promise<SavedQuizRecord 
   return mirror.find((m) => m.id === id) || null;
 }
 
+export async function getQuizByQuizId(quizId: string): Promise<SavedQuizRecord | null> {
+  const quizzes = await getAllQuizzesFromIndexedDB();
+  return quizzes.find((record) => record.quizConfig.quizId === quizId) || null;
+}
+
+export async function saveQuizSessionToIndexedDB(
+  quizConfig: QuizConfig,
+  quizState: QuizSessionState
+): Promise<SavedQuizRecord> {
+  const existing = await getQuizByQuizId(quizConfig.quizId);
+  return saveQuizToIndexedDB(quizConfig, existing?.id, quizConfig.title, quizState);
+}
+
 /**
  * Delete a quiz from IndexedDB by ID
  */
@@ -341,6 +362,7 @@ export async function importIndexedDBFromJSON(jsonString: string): Promise<numbe
     if (!item.quizConfig && (item.barnQuestions || item.vuxenQuestions)) {
       // Direct QuizConfig structure
       const recordConfig: QuizConfig = {
+        quizId: item.quizId || crypto.randomUUID(),
         title: item.title || 'Importerat Quiz',
         password: item.password || '',
         barnQuestions: item.barnQuestions || [],

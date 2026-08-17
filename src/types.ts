@@ -9,6 +9,7 @@ export type UserType = 'barn' | 'vuxen';
 
 export interface Participant {
   id: string;
+  uniqueId: string; // Stable ID for merging answers across multiple imports
   name: string;
   type: UserType;
 }
@@ -36,6 +37,7 @@ export interface Question {
 }
 
 export interface QuizConfig {
+  quizId: string;
   title: string;
   password?: string;
   geotagUnlockDistance?: number; // Distance in meters to unlock geotagged questions (default: 20m, min: 5m)

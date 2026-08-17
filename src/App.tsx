@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import LZString from 'lz-string';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, 
@@ -67,6 +68,8 @@ import { compressQuizToUrlCode, generateQuizDirectUrl, decompressQuizFromUrlCode
 import { 
   SavedQuizRecord, 
   saveQuizToIndexedDB, 
+  saveQuizSessionToIndexedDB,
+  getQuizByQuizId,
   getAllQuizzesFromIndexedDB, 
   deleteQuizFromIndexedDB, 
   exportIndexedDBToJSON, 
@@ -79,6 +82,13 @@ const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
 const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
 const STORAGE_KEY_WALKED_PATH = 'family_quiz_walked_path';
+const DEFAULT_PARTICIPANT_UNIQUE_ID = 'default-participant-reserved';
+const DEFAULT_QUIZ_ID = 'default-quiz-template';
+
+const ensureQuizId = (config: QuizConfig): QuizConfig => {
+  if (config.quizId && config.quizId !== DEFAULT_QUIZ_ID) return config;
+  return { ...config, quizId: crypto.randomUUID() };
+};
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
@@ -140,12 +150,22 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Migration: ensure all participants have uniqueId
+          const migrated = parsed.map((p: any) => {
+            // Preserve default participant's reserved uniqueId
+            if (p.id === 'default-du') {
+              return { ...p, uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID };
+            }
+            return { ...p, uniqueId: p.uniqueId || crypto.randomUUID() };
+          });
+          return migrated;
+        }
       } catch (e) {
         console.error(e);
       }
     }
-    return [{ id: 'default-du', name: t(detectLanguage(), 'you'), type: 'vuxen' }];
+    return [{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(detectLanguage(), 'you'), type: 'vuxen' }];
   });
 
   const [answers, setAnswers] = useState<AnswerRecord[]>(() => {
@@ -164,16 +184,16 @@ export default function App() {
           correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (typeof q.correctAnswer === 'number' ? [q.correctAnswer] : [0]),
           originalLanguage: q.originalLanguage || 'en'
         }));
-        return {
+        return ensureQuizId({
           ...parsed,
           barnQuestions: migrateQuestions(parsed.barnQuestions),
           vuxenQuestions: migrateQuestions(parsed.vuxenQuestions)
-        };
+        });
       } catch (e) {
-        return defaultQuiz;
+        return ensureQuizId(defaultQuiz);
       }
     }
-    return defaultQuiz;
+    return ensureQuizId(defaultQuiz);
   });
 
   useEffect(() => {
@@ -270,6 +290,9 @@ export default function App() {
   const [isPasswordCorrect, setIsPasswordCorrect] = useState(false);
   const [showConfigInput, setShowConfigInput] = useState(false);
   const [configJsonInput, setConfigJsonInput] = useState('');
+  const [showAnswerImportModal, setShowAnswerImportModal] = useState(false);
+  const [answerImportInput, setAnswerImportInput] = useState('');
+    const [showAnswerExportModal, setShowAnswerExportModal] = useState(false);
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
@@ -328,10 +351,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (configTab === 'db' || configTab === 'library' || showConfigInput) {
+    if (configTab === 'db' || configTab === 'library' || showConfigInput || showAnswerImportModal) {
       refreshSavedQuizzes();
     }
-  }, [configTab, showConfigInput]);
+  }, [configTab, showConfigInput, showAnswerImportModal, showAnswerExportModal]);
 
   const handleSaveCurrentQuizToDB = async () => {
     setIsSavingToDb(true);
@@ -348,12 +371,15 @@ export default function App() {
   };
 
   const handleLoadQuizFromDB = (record: SavedQuizRecord, closeModal = false) => {
-    setQuizConfig(record.quizConfig);
-    setNewQuizTitle(record.quizConfig.title);
-    setNewQuizPassword(record.quizConfig.password || '');
-    setNewGeotagDistance(record.quizConfig.geotagUnlockDistance || 20);
+    const loadedQuiz = ensureQuizId(record.quizConfig);
+    setQuizConfig(loadedQuiz);
+    setNewQuizTitle(loadedQuiz.title);
+    setNewQuizPassword(loadedQuiz.password || '');
+    setNewGeotagDistance(loadedQuiz.geotagUnlockDistance || 20);
+      setParticipants(record.quizState?.participants || []);
+      setAnswers(record.quizState?.answers || []);
     try {
-      localStorage.setItem('family_quiz_config', JSON.stringify(record.quizConfig));
+      localStorage.setItem('family_quiz_config', JSON.stringify(loadedQuiz));
     } catch (err) {
       console.warn('Could not save to localStorage:', err);
     }
@@ -361,10 +387,8 @@ export default function App() {
     setTimeout(() => setDbNotification(null), 4000);
     if (closeModal) {
       setShowConfigInput(false);
-      setAnswers([]);
       setWalkedPath([]);
       localStorage.removeItem(STORAGE_KEY_WALKED_PATH);
-      setParticipants([]);
       setView('setup');
       alert(`${t(lang, 'quizLoadedSuccess')}\n"${record.title}"`);
     }
@@ -1110,7 +1134,7 @@ ${exampleJson}`;
   // Persist data to "cache" (localStorage)
   useEffect(() => {
     if (participants.length === 0) {
-      setParticipants([{ id: 'default-du', name: t(lang, 'you'), type: 'vuxen' }]);
+      setParticipants([{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(lang, 'you'), type: 'vuxen' }]);
     } else {
       localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(participants));
     }
@@ -1125,6 +1149,18 @@ ${exampleJson}`;
   }, [quizConfig]);
 
   useEffect(() => {
+    if (!isAdmin || !quizConfig.quizId) return;
+
+    const saveTimeout = window.setTimeout(() => {
+      saveQuizSessionToIndexedDB(quizConfig, { participants, answers })
+        .then(() => refreshSavedQuizzes())
+        .catch((error) => console.warn('Could not save quiz session to IndexedDB:', error));
+    }, 500);
+
+    return () => window.clearTimeout(saveTimeout);
+  }, [isAdmin, quizConfig, participants, answers]);
+
+  useEffect(() => {
     if (view === 'config') {
       setNewQuizPassword(quizConfig.password || '');
       setNewQuizTitle(quizConfig.title || '');
@@ -1137,10 +1173,16 @@ ${exampleJson}`;
   }, [quizConfig]);
 
   const addParticipant = (name: string, type: UserType) => {
-    if (!name.trim()) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    if (isReservedParticipantName(trimmedName)) {
+      alert(t(lang, 'reservedParticipantNameError', { name: trimmedName }));
+      return;
+    }
     const newParticipant: Participant = {
       id: crypto.randomUUID(),
-      name: name.trim(),
+      uniqueId: crypto.randomUUID(),
+      name: trimmedName,
       type
     };
     setParticipants([...participants, newParticipant]);
@@ -1152,7 +1194,22 @@ ${exampleJson}`;
   };
 
   const updateParticipantName = (id: string, newName: string) => {
+    // Just update without validation - validation happens on blur
     setParticipants(prev => prev.map(p => p.id === id ? { ...p, name: newName } : p));
+  };
+
+  const validateAndFinalizeParticipantName = (id: string) => {
+    const participant = participants.find(p => p.id === id);
+    if (!participant) return;
+
+    const trimmedName = participant.name.trim();
+    // Skip name validation for the default participant (allows international names like "Io", "Mina", etc.)
+    if (trimmedName && participant.uniqueId !== DEFAULT_PARTICIPANT_UNIQUE_ID && isReservedParticipantName(trimmedName)) {
+      alert(t(lang, 'reservedParticipantNameError', { name: trimmedName }));
+      setParticipants(prev => prev.map(p => p.id === id ? { ...p, name: '' } : p));
+      return;
+    }
+    setEditingParticipantId(null);
   };
 
   const submitAnswer = (answerIndex: number) => {
@@ -1310,13 +1367,77 @@ ${exampleJson}`;
       if (compressedCode) {
         const decompressed = decompressQuizFromUrlCode(compressedCode);
         if (decompressed) {
-          await autoSaveQuizToIndexedDBIfNew(decompressed);
-          setQuizConfig(decompressed);
-          localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(decompressed));
+          const importedQuiz = ensureQuizId(decompressed);
+          await autoSaveQuizToIndexedDBIfNew(importedQuiz);
+          setQuizConfig(importedQuiz);
+          localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(importedQuiz));
           setShowConfigInput(false);
           setConfigJsonInput('');
           alert(t(lang, 'importSuccess'));
           return;
+        }
+      }
+
+      if (cleanInput.toLowerCase().startsWith('qps=')) {
+        const encryptedPayload = cleanInput.slice(4);
+        const decompressed = xorDecrypt(encryptedPayload, '$');
+        const payloadText = LZString.decompressFromEncodedURIComponent(decompressed);
+        if (payloadText) {
+          try {
+            const payload = JSON.parse(payloadText);
+            if (payload && payload.schema === 'family-quiz-participant-answers-v1') {
+              const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
+              const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
+
+              if (incomingParticipants.length === 0 && incomingAnswers.length === 0) {
+                throw new Error('No participant payload data');
+              }
+
+              const nameMap = new Map<string, string>();
+              const nextParticipants = [...participants];
+
+              for (const participant of nextParticipants) {
+                const key = `${normalizeParticipantNameForCompare(participant.name)}|${participant.type}`;
+                if (!nameMap.has(key)) nameMap.set(key, participant.id);
+              }
+
+              for (const incoming of incomingParticipants) {
+                const key = `${normalizeParticipantNameForCompare(incoming.name)}|${incoming.type}`;
+                const existingId = nameMap.get(key);
+                if (existingId) {
+                  const exportedAnswers = incomingAnswers.filter(a => a.participantId === incoming.id);
+                  for (const answer of exportedAnswers) {
+                    const existingAnswerIndex = answers.findIndex(a => a.participantId === existingId && a.questionIndex === answer.questionIndex);
+                    if (existingAnswerIndex === -1) {
+                      setAnswers(prev => [...prev, { ...answer, participantId: existingId }]);
+                    }
+                  }
+                  continue;
+                }
+
+                const newParticipant: Participant = { ...incoming, id: crypto.randomUUID() };
+                nextParticipants.push(newParticipant);
+                nameMap.set(key, newParticipant.id);
+
+                const exportedAnswers = incomingAnswers.filter(a => a.participantId === incoming.id);
+                for (const answer of exportedAnswers) {
+                  const existingAnswerIndex = answers.findIndex(a => a.participantId === newParticipant.id && a.questionIndex === answer.questionIndex);
+                  if (existingAnswerIndex === -1) {
+                    setAnswers(prev => [...prev, { ...answer, participantId: newParticipant.id }]);
+                  }
+                }
+              }
+
+              setParticipants(nextParticipants);
+              setShowConfigInput(false);
+              setConfigJsonInput('');
+              setView('setup');
+              alert(t(lang, 'importSharedAnswersSuccess'));
+              return;
+            }
+          } catch (error) {
+            console.error('Failed to parse participant answer payload', error);
+          }
         }
       }
 
@@ -1361,8 +1482,9 @@ ${exampleJson}`;
               barnQuestions: ensureLang(parsed.barnQuestions),
               vuxenQuestions: ensureLang(parsed.vuxenQuestions)
             };
-            await autoSaveQuizToIndexedDBIfNew(fullConfig);
-            setQuizConfig(fullConfig);
+            const importedQuiz = ensureQuizId(fullConfig);
+            await autoSaveQuizToIndexedDBIfNew(importedQuiz);
+            setQuizConfig(importedQuiz);
             setShowConfigInput(false);
             setConfigJsonInput('');
             setAnswers([]);
@@ -1643,10 +1765,11 @@ ${exampleJson}`;
           const decompressed = decompressQuizFromUrlCode(compressedCandidate);
           if (decompressed) {
             // Spara det nya quizet i IndexedDB innan det öppnas om namnet inte redan finns
-            await autoSaveQuizToIndexedDBIfNew(decompressed);
+            const importedQuiz = ensureQuizId(decompressed);
+            await autoSaveQuizToIndexedDBIfNew(importedQuiz);
 
-            setQuizConfig(decompressed);
-            localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(decompressed));
+            setQuizConfig(importedQuiz);
+            localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(importedQuiz));
             // Clean the URL to avoid reloading on refresh while keeping clean UX
             if (window.history && window.history.replaceState) {
               const cleanUrl = window.location.origin + window.location.pathname;
@@ -1953,6 +2076,176 @@ ${exampleJson}`;
     });
   };
 
+  const normalizeParticipantNameForCompare = (name: string) =>
+    (name || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9]/g, '');
+
+  const reservedParticipantNames = new Set([
+    'me', 'jag', 'jej', 'mig', 'you', 'du', 'i', 'ich', 'moi', 'yo', 'je', 'mi', 'io', 'mina'
+  ]);
+
+  const isReservedParticipantName = (name: string) =>
+    reservedParticipantNames.has(normalizeParticipantNameForCompare(name));
+
+  const findReservedParticipantName = (currentParticipants: Participant[]) => {
+    for (const p of currentParticipants) {
+      if (p.uniqueId !== DEFAULT_PARTICIPANT_UNIQUE_ID && isReservedParticipantName(p.name)) {
+        return p;
+      }
+    }
+
+    return null;
+  };
+
+  const buildParticipantAnswerPayload = () => {
+    const reservedParticipant = findReservedParticipantName(participants);
+    if (reservedParticipant) {
+      alert(t(lang, 'reservedParticipantNameError', { name: reservedParticipant.name }));
+      return null;
+    }
+
+    const payload = {
+      schema: 'family-quiz-participant-answers-v1',
+      quizId: quizConfig.quizId,
+      title: quizConfig.title,
+      createdAt: new Date().toISOString(),
+      participants: participants.map(({ id, uniqueId, name, type }) => ({ id, uniqueId, name, type })),
+      answers: answers.map(a => ({ ...a }))
+    };
+
+    const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
+    const encrypted = xorEncryptDecrypt(compressed, '$');
+    return `qps=${encrypted}`;
+  };
+
+  const shareParticipantAnswers = async () => {
+    const payload = buildParticipantAnswerPayload();
+    if (!payload) return;
+
+    try {
+      await navigator.clipboard.writeText(payload);
+      setShowAnswerExportModal(true);
+    } catch (e) {
+      window.prompt(t(lang, 'copyGroupAnswersManualPrompt'), payload);
+    }
+  };
+
+  const importSharedAnswers = () => {
+    setAnswerImportInput('');
+    setShowAnswerImportModal(true);
+  };
+
+  const mergeParticipantAnswerPayload = (
+    baseParticipants: Participant[],
+    baseAnswers: AnswerRecord[],
+    incomingParticipants: Participant[],
+    incomingAnswers: AnswerRecord[]
+  ) => {
+    const uniqueIdMap = new Map<string, string>();
+    const nameMap = new Map<string, string>();
+    const mergedParticipants = [...baseParticipants];
+    const mergedAnswers = [...baseAnswers];
+
+    for (const participant of mergedParticipants) {
+      if (participant.uniqueId) uniqueIdMap.set(participant.uniqueId, participant.id);
+      const nameKey = `${normalizeParticipantNameForCompare(participant.name)}|${participant.type}`;
+      if (!nameMap.has(nameKey)) nameMap.set(nameKey, participant.id);
+    }
+
+    for (const incoming of incomingParticipants) {
+      const nameKey = `${normalizeParticipantNameForCompare(incoming.name)}|${incoming.type}`;
+      const existingParticipantId =
+        (incoming.uniqueId && uniqueIdMap.get(incoming.uniqueId)) || nameMap.get(nameKey);
+      const targetParticipantId = existingParticipantId || crypto.randomUUID();
+
+      if (!existingParticipantId) {
+        const newParticipant = {
+          ...incoming,
+          id: targetParticipantId,
+          uniqueId: incoming.uniqueId || crypto.randomUUID()
+        };
+        mergedParticipants.push(newParticipant);
+        uniqueIdMap.set(newParticipant.uniqueId, newParticipant.id);
+        nameMap.set(nameKey, newParticipant.id);
+      }
+
+      for (const answer of incomingAnswers.filter((item) => item.participantId === incoming.id)) {
+        const hasAnswer = mergedAnswers.some(
+          (existing) => existing.participantId === targetParticipantId && existing.questionIndex === answer.questionIndex
+        );
+        if (!hasAnswer) mergedAnswers.push({ ...answer, participantId: targetParticipantId });
+      }
+    }
+
+    return { participants: mergedParticipants, answers: mergedAnswers };
+  };
+
+  const handleImportAnswersFromInput = async () => {
+    const rawInput = answerImportInput.trim();
+    if (!rawInput) return;
+
+    try {
+      const cleanInput = rawInput.replace(/\r\n/g, '\n').trim();
+      
+      if (cleanInput.toLowerCase().startsWith('qps=')) {
+        const encryptedPayload = cleanInput.slice(4);
+        const decompressed = xorDecrypt(encryptedPayload, '$');
+        const payloadText = LZString.decompressFromEncodedURIComponent(decompressed);
+        
+        if (payloadText) {
+          const payload = JSON.parse(payloadText);
+          if (payload && payload.schema === 'family-quiz-participant-answers-v1') {
+            const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
+            const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
+
+            if (incomingParticipants.length === 0 && incomingAnswers.length === 0) {
+              throw new Error('No participant payload data');
+            }
+
+            if (payload.quizId === quizConfig.quizId) {
+              const mergedSession = mergeParticipantAnswerPayload(participants, answers, incomingParticipants, incomingAnswers);
+              setParticipants(mergedSession.participants);
+              setAnswers(mergedSession.answers);
+            } else {
+              const targetQuiz = payload.quizId ? await getQuizByQuizId(payload.quizId) : null;
+              if (!targetQuiz) {
+                alert(t(lang, 'answerImportQuizMismatch', { title: payload.title || '?' }));
+                return;
+              }
+
+              const targetSession = targetQuiz.quizState || { participants: [], answers: [] };
+              const mergedSession = mergeParticipantAnswerPayload(
+                targetSession.participants,
+                targetSession.answers,
+                incomingParticipants,
+                incomingAnswers
+              );
+              await saveQuizSessionToIndexedDB(ensureQuizId(targetQuiz.quizConfig), mergedSession);
+              await refreshSavedQuizzes();
+              alert(t(lang, 'importSharedAnswersStoredForQuiz', { title: targetQuiz.title }));
+            }
+
+            setShowAnswerImportModal(false);
+            setAnswerImportInput('');
+            setView('setup');
+            if (payload.quizId === quizConfig.quizId) alert(t(lang, 'importSharedAnswersSuccess'));
+            return;
+          }
+        }
+      }
+      
+      throw new Error('Invalid answer payload format. Must start with qps=');
+    } catch (error) {
+      console.error('Failed to import answers:', error);
+      alert(t(lang, 'invalidAnswerImportFormat'));
+    }
+  };
+
   const getQuizAnswerProgress = () => {
     if (participants.length === 0) {
       return { totalRequired: 0, answeredCount: 0, isAllAnswered: false };
@@ -2211,7 +2504,10 @@ ${exampleJson}`;
                   <div className="flex-1 space-y-3 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
                     {participants.map(p => (
                       <div key={p.id} className="p-4 rounded-2xl bg-indigo-50/80 border-2 border-indigo-100 flex items-center justify-between group">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div 
+                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                          onClick={() => setEditingParticipantId(p.id)}
+                        >
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 ${
                             p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
                           }`}>
@@ -2224,21 +2520,24 @@ ${exampleJson}`;
                                 className="w-full bg-white border border-indigo-300 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none focus:border-indigo-500"
                                 value={p.name}
                                 onChange={(e) => updateParticipantName(p.id, e.target.value)}
-                                onBlur={() => setEditingParticipantId(null)}
-                                onKeyDown={(e) => e.key === 'Enter' && setEditingParticipantId(null)}
+                                onBlur={() => validateAndFinalizeParticipantName(p.id)}
+                                onKeyDown={(e) => e.key === 'Enter' && validateAndFinalizeParticipantName(p.id)}
+                                onClick={(e) => e.stopPropagation()}
                               />
                             ) : (
                               <p 
-                                className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors truncate"
-                                onClick={() => setEditingParticipantId(p.id)}
+                                className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors truncate min-h-[1.2em]"
                                 title={t(lang, 'clickToEditName')}
                               >
                                 {p.name}
                               </p>
                             )}
-                            <span className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase inline-block mt-0.5 ${
-                              p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
-                            }`}>
+                            <span 
+                              className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase inline-block mt-0.5 cursor-pointer transition-opacity hover:opacity-70 ${
+                                p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
+                              }`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}
                             </span>
                           </div>
@@ -2266,6 +2565,7 @@ ${exampleJson}`;
                           const el = e.currentTarget;
                           addParticipant(el.value, 'vuxen');
                           el.value = '';
+                          el.focus();
                         }
                       }}
                     />
@@ -2273,8 +2573,11 @@ ${exampleJson}`;
                       <button 
                         onClick={() => {
                           const el = document.getElementById('name-input') as HTMLInputElement;
-                          addParticipant(el.value, 'barn');
-                          el.value = '';
+                          if (el) {
+                            addParticipant(el.value, 'barn');
+                            el.value = '';
+                            el.focus();
+                          }
                         }}
                         className="py-3.5 bg-amber-400 hover:bg-amber-300 text-indigo-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#d97706] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-1.5"
                       >
@@ -2283,12 +2586,34 @@ ${exampleJson}`;
                       <button 
                         onClick={() => {
                           const el = document.getElementById('name-input') as HTMLInputElement;
-                          addParticipant(el.value, 'vuxen');
-                          el.value = '';
+                          if (el) {
+                            addParticipant(el.value, 'vuxen');
+                            el.value = '';
+                            el.focus();
+                          }
                         }}
                         className="py-3.5 bg-pink-400 hover:bg-pink-300 text-indigo-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#db2777] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-1.5"
                       >
                         <Plus className="w-4 h-4" /> {t(lang, 'adult')}
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={shareParticipantAnswers}
+                        className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                      >
+                        <Share2 className="w-4 h-4" />
+                        {t(lang, 'submitOurAnswersBtn')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={importSharedAnswers}
+                        className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                      >
+                        <Upload className="w-4 h-4" />
+                        {t(lang, 'importSharedAnswersBtn')}
                       </button>
                     </div>
                   </div>
@@ -4761,6 +5086,14 @@ ${exampleJson}`;
                         <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'currentPasswordLabel')} <span className="font-mono font-bold text-slate-600">{quizConfig.password || t(lang, 'noPasswordSet')}</span></p>
                       </div>
 
+                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-4 h-4 text-indigo-600" />
+                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'quizIdHeading')}</h3>
+                        </div>
+                        <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-xs font-bold text-slate-700 border border-slate-200">{quizConfig.quizId}</p>
+                      </div>
+
                       {/* Danger Zone */}
                       {isAdmin && (
                         <div className="pt-2 border-t border-slate-100 space-y-2">
@@ -6388,6 +6721,102 @@ ${exampleJson}`;
           )}
         </AnimatePresence>
 
+        {/* Answer Import Modal */}
+        <AnimatePresence>
+          {showAnswerImportModal && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-emerald-900/80 backdrop-blur-md overflow-y-auto"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-white rounded-[3rem] p-6 sm:p-8 max-w-xl w-full shadow-2xl space-y-6 relative max-h-[90vh] overflow-y-auto custom-scrollbar"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                      <Upload className="text-emerald-600 w-5 h-5" />
+                    </div>
+                    <h2 className="text-2xl font-black text-slate-800">{t(lang, 'importAnswersModal')}</h2>
+                  </div>
+                  <button 
+                    onClick={() => setShowAnswerImportModal(false)}
+                    className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-5">
+                  <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 flex items-start gap-3">
+                    <Sparkles className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-emerald-700 font-medium leading-relaxed">
+                      {t(lang, 'importSharedAnswersBtn')}: Klistra in den komprimerade texten som deltagarna skickade till dig.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{t(lang, 'pasteEncryptedAnswersLabel')}</p>
+                    <textarea 
+                      className="w-full h-48 p-4 bg-slate-50 rounded-2xl border-2 border-slate-100 text-xs font-mono outline-none focus:border-emerald-500 custom-scrollbar resize-none"
+                      placeholder={t(lang, 'pasteAnswersPlaceholder')}
+                      value={answerImportInput}
+                      onChange={(e) => setAnswerImportInput(e.target.value)}
+                    />
+                  </div>
+
+                  <button 
+                    onClick={handleImportAnswersFromInput}
+                    disabled={!answerImportInput.trim()}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm uppercase shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Upload className="w-4 h-4" /> {t(lang, 'importSharedAnswersBtn')}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Lock Notice Modal for Geofenced Questions */}
+        {/* Export Answers Modal */}
+        <AnimatePresence>
+          {showAnswerExportModal && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-emerald-900/80 backdrop-blur-md overflow-y-auto"
+            >
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-white rounded-[3rem] p-6 sm:p-8 max-w-md w-full shadow-2xl text-center"
+              >
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100">
+                  <Check className="h-7 w-7 text-emerald-600" />
+                </div>
+                <h2 className="text-2xl font-black text-slate-800">{t(lang, 'exportAnswersModal')}</h2>
+                <p className="mt-3 text-sm font-medium leading-relaxed text-slate-600">
+                  {t(lang, 'exportAnswersInstructions')}
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAnswerExportModal(false)}
+                                  className="mt-6 w-full rounded-2xl bg-emerald-600 py-3 text-sm font-black uppercase text-white shadow-lg shadow-emerald-200 transition-all hover:bg-emerald-700 active:scale-95"
+                                >
+                                  {t(lang, 'close')}
+                                </button>
+                </p>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Lock Notice Modal for Geofenced Questions */}
         <AnimatePresence>
           {lockNotice && (
@@ -6499,6 +6928,7 @@ ${exampleJson}`;
                       if (showClearConfirm) {
                         setParticipants([]);
                         setAnswers([]);
+                        setQuizConfig(prev => ({ ...prev, quizId: crypto.randomUUID() }));
                         setIsQuizModeLocked(false);
                         localStorage.removeItem('family_quiz_lock_mode');
                         setShowClearConfirm(false);

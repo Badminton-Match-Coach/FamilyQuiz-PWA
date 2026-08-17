@@ -490,6 +490,40 @@ export default function App() {
       return false;
     }
   });
+  const quizUnlockClickCountRef = useRef(0);
+  const quizUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleQuizIconClick = () => {
+    if (!isQuizModeLocked) return;
+
+    quizUnlockClickCountRef.current += 1;
+
+    if (quizUnlockClickCountRef.current === 7) {
+      quizUnlockTimerRef.current = setTimeout(() => {
+        if (quizUnlockClickCountRef.current === 7) {
+          setIsQuizModeLocked(false);
+          localStorage.removeItem('family_quiz_lock_mode');
+          quizUnlockClickCountRef.current = 0;
+        }
+        quizUnlockTimerRef.current = null;
+      }, 3000);
+      return;
+    }
+
+    if (quizUnlockClickCountRef.current > 7) {
+      if (quizUnlockTimerRef.current) {
+        clearTimeout(quizUnlockTimerRef.current);
+        quizUnlockTimerRef.current = null;
+      }
+      quizUnlockClickCountRef.current = 0;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (quizUnlockTimerRef.current) clearTimeout(quizUnlockTimerRef.current);
+    };
+  }, []);
 
   // Tracked walked path (breadcrumbs) with local persistence
   const [walkedPath, setWalkedPath] = useState<Location[]>(() => {
@@ -1984,7 +2018,12 @@ ${exampleJson}`;
           <div className="flex flex-col gap-5">
             <div className="flex items-center justify-between gap-3 w-full">
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={handleQuizIconClick}
+                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
+                  aria-label="Quiz"
+                >
                   <img 
                     src="./icon.svg" 
                     alt="FamilyQuiz Icon" 
@@ -2002,7 +2041,7 @@ ${exampleJson}`;
                       }
                     }}
                   />
-                </div>
+                </button>
                 <div className="min-w-0">
                   <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
                     {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}

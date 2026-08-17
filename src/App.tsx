@@ -499,13 +499,15 @@ export default function App() {
     if (quizUnlockClickCountRef.current === 7) {
       quizUnlockTimerRef.current = setTimeout(() => {
         if (quizUnlockClickCountRef.current === 7) {
-          const nextQuizModeLocked = !isQuizModeLocked;
-          setIsQuizModeLocked(nextQuizModeLocked);
-          if (nextQuizModeLocked) {
-            localStorage.setItem('family_quiz_lock_mode', 'true');
-          } else {
-            localStorage.removeItem('family_quiz_lock_mode');
-          }
+          setIsQuizModeLocked((currentQuizModeLocked) => {
+            const nextQuizModeLocked = !currentQuizModeLocked;
+            if (nextQuizModeLocked) {
+              localStorage.setItem('family_quiz_lock_mode', 'true');
+            } else {
+              localStorage.removeItem('family_quiz_lock_mode');
+            }
+            return nextQuizModeLocked;
+          });
           quizUnlockClickCountRef.current = 0;
         }
         quizUnlockTimerRef.current = null;
@@ -2045,15 +2047,39 @@ ${exampleJson}`;
                     }}
                   />
                 </button>
-                <div className="min-w-0">
-                  <h1 className="text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
-                    {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
-                  </h1>
-                  <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 mt-0.5">
-                    <span>{totalQuestions} {t(lang, 'questionsCount')}</span>
-                    <span>•</span>
-                    <span>{participants.length} {t(lang, 'participantsCount')}</span>
-                  </p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 min-w-0">
+                    <h1 className="min-w-[10rem] flex-1 text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
+                      {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
+                    </h1>
+                    <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shrink-0">
+                      <span>{totalQuestions} {t(lang, 'questionsCount')}</span>
+                      <span>•</span>
+                      <span>{participants.length} {t(lang, 'participantsCount')}</span>
+                    </p>
+                  </div>
+
+                  {/* Language Selector Bar */}
+                  <div className="flex items-center gap-1 bg-black/30 p-1.5 mt-2 rounded-2xl border border-white/15 w-fit max-w-full overflow-x-auto no-scrollbar scroll-smooth snap-x">
+                    <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold shrink-0" title={t(lang, 'autoLanguageDetected')}>
+                      <Globe className="w-3.5 h-3.5" />
+                    </div>
+                    {SUPPORTED_LANGUAGES.map((l) => (
+                      <button
+                        key={l.code}
+                        onClick={() => changeLanguage(l.code)}
+                        className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 shrink-0 snap-start ${
+                          lang === l.code
+                            ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
+                            : 'text-white/70 hover:text-white hover:bg-white/10'
+                        }`}
+                        title={l.name}
+                      >
+                        <span className="text-base leading-none">{l.flag}</span>
+                        <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -2085,27 +2111,6 @@ ${exampleJson}`;
                 )}
 
 
-                {/* Language Selector Bar */}
-                <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15 max-w-[140px] xs:max-w-[180px] sm:max-w-none overflow-x-auto no-scrollbar scroll-smooth snap-x">
-                  <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold shrink-0" title={t(lang, 'autoLanguageDetected')}>
-                    <Globe className="w-3.5 h-3.5" />
-                  </div>
-                  {SUPPORTED_LANGUAGES.map((l) => (
-                    <button
-                      key={l.code}
-                      onClick={() => changeLanguage(l.code)}
-                      className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 shrink-0 snap-start ${
-                        lang === l.code
-                          ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
-                          : 'text-white/70 hover:text-white hover:bg-white/10'
-                      }`}
-                      title={l.name}
-                    >
-                      <span className="text-base leading-none">{l.flag}</span>
-                      <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
 

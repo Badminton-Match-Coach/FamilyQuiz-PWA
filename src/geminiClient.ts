@@ -37,7 +37,11 @@ export async function generateQuizClient(params: {
     fr: 'French',
     en: 'English',
     es: 'Spanish',
-    de: 'German'
+    de: 'German',
+    no: 'Norwegian',
+    da: 'Danish',
+    fi: 'Finnish',
+    it: 'Italian'
   };
   const targetLangName = langNames[currentLang] || 'Swedish';
 
@@ -186,7 +190,7 @@ export async function validateTextAnswerWithGemini(params: {
 }): Promise<{
   match: boolean;
   confidence: number;
-  detected_language: 'sv' | 'en' | 'de' | 'fr' | 'es';
+  detected_language: 'sv' | 'en' | 'de' | 'fr' | 'es' | 'no' | 'da' | 'fi' | 'it';
 }> {
   const apiKey = params.apiKey || getStoredApiKey();
   if (!apiKey) {
@@ -198,14 +202,14 @@ export async function validateTextAnswerWithGemini(params: {
 
   const prompt = `You are a linguistic validation engine for a multi-lingual Progressive Web App (PWA). Your job is to determine if a user's input matches a specific target word or concept, even if the user has made severe spelling or grammatical errors typical of dyslexia.
 
-Support these five European languages: Swedish, English, German, French, and Spanish.
+Support these European languages: Swedish, English, German, French, Spanish, Norwegian, Danish, Finnish, and Italian.
 
 Apply the following evaluation rules to the user's input:
 1. Ignore case sensitivity completely (e.g., "aba" should match "Abba").
 2. Ignore missing, extra, or swapped double consonants (e.g., "aba" or "abbba" matches "Abba"; "alene" matches "alleine").
 3. Ignore missing or incorrect diacritics/accents (e.g., "ee" or "e" for "é"/"è" in French, missing "umlauts" ä/ö/ü in German/Swedish, missing "ñ" or accents in Spanish).
 4. Forgive character transpositions/swaps (e.g., "baab" instead of "barn", "teh" instead of "the").
-5. Forgive phonetic substitutions common in the specific language (e.g., "sk", "stj", "sj" in Swedish; "ph" vs "f" in English/German/French; "v" vs "b" in Spanish; "c" vs "z"/"s" in Spanish/French).
+5. Forgive phonetic substitutions common in the specific language.
 
 Allow a general fuzziness/error margin of up to 30-35% of the target word's length.
 
@@ -219,7 +223,7 @@ Output structure:
 {
   "match": boolean,
   "confidence": float (0.0 to 1.0),
-  "detected_language": "sv" | "en" | "de" | "fr" | "es"
+  "detected_language": "sv" | "en" | "de" | "fr" | "es" | "no" | "da" | "fi" | "it"
 }`;
 
   const response = await ai.models.generateContent({
@@ -234,7 +238,7 @@ Output structure:
           confidence: { type: Type.NUMBER },
           detected_language: { 
             type: Type.STRING,
-            enum: ["sv", "en", "de", "fr", "es"]
+            enum: ["sv", "en", "de", "fr", "es", "no", "da", "fi", "it"]
           }
         },
         required: ["match", "confidence", "detected_language"]

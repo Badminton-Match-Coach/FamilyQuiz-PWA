@@ -53,6 +53,10 @@ export function getCompassDirection(bearing: number, lang: Language = 'sv'): { l
     fr: ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'],
     es: ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'],
     de: ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'],
+    no: ['N', 'NØ', 'Ø', 'SØ', 'S', 'SV', 'V', 'NV'],
+    da: ['N', 'NØ', 'Ø', 'SØ', 'S', 'SV', 'V', 'NV'],
+    fi: ['P', 'KO', 'I', 'KA', 'E', 'LO', 'L', 'LU'],
+    it: ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'],
   };
 
   const arrows = ['⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️'];
@@ -1413,10 +1417,10 @@ export const RouteGeoTagModal: React.FC<RouteGeoTagModalProps> = ({
         </div>
 
         {/* Category Pill Switcher */}
-        <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-2xl border border-slate-700">
+        <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-2xl border border-slate-700 overflow-x-auto no-scrollbar max-w-full">
           <button
             onClick={() => setSelectedCategory('barn')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
               selectedCategory === 'barn'
                 ? 'bg-amber-400 text-slate-950 shadow-md'
                 : 'text-slate-300 hover:text-white'
@@ -1426,7 +1430,7 @@ export const RouteGeoTagModal: React.FC<RouteGeoTagModalProps> = ({
           </button>
           <button
             onClick={() => setSelectedCategory('vuxen')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
               selectedCategory === 'vuxen'
                 ? 'bg-pink-500 text-white shadow-md'
                 : 'text-slate-300 hover:text-white'
@@ -1436,7 +1440,7 @@ export const RouteGeoTagModal: React.FC<RouteGeoTagModalProps> = ({
           </button>
           <button
             onClick={() => setSelectedCategory('both')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
               selectedCategory === 'both'
                 ? 'bg-indigo-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white'

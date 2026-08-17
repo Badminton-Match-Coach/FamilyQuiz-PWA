@@ -616,7 +616,11 @@ export default function App() {
       fr: lang === 'sv' ? 'franska (French)' : lang === 'fr' ? 'français (French)' : lang === 'es' ? 'francés (French)' : lang === 'de' ? 'Französisch (French)' : 'French',
       en: lang === 'sv' ? 'engelska (English)' : lang === 'fr' ? 'anglais (English)' : lang === 'es' ? 'inglés (English)' : lang === 'de' ? 'Englisch (English)' : 'English',
       es: lang === 'sv' ? 'spanska (Spanish)' : lang === 'fr' ? 'espagnol (Spanish)' : lang === 'es' ? 'español (Spanish)' : lang === 'de' ? 'Spanisch (Spanish)' : 'Spanish',
-      de: lang === 'sv' ? 'tyska (German)' : lang === 'fr' ? 'allemand (German)' : lang === 'es' ? 'alemán (German)' : lang === 'de' ? 'Deutsch (German)' : 'German'
+      de: lang === 'sv' ? 'tyska (German)' : lang === 'fr' ? 'allemand (German)' : lang === 'es' ? 'alemán (German)' : lang === 'de' ? 'Deutsch (German)' : 'German',
+      no: lang === 'sv' ? 'norska (Norwegian)' : 'Norwegian',
+      da: lang === 'sv' ? 'danska (Danish)' : 'Danish',
+      fi: lang === 'sv' ? 'finska (Finnish)' : 'Finnish',
+      it: lang === 'sv' ? 'italienska (Italian)' : 'Italian'
     };
 
     const primaryLang = promptLanguages[0] || lang;
@@ -1978,8 +1982,8 @@ ${exampleJson}`;
         {/* Clean Header with Unified View Navigation Bar */}
         <header className="flex flex-col gap-4 mb-6 sm:mb-8 bg-white/10 p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] backdrop-blur-md border border-white/20 shadow-xl">
           <div className="flex flex-col gap-5">
-            <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3.5 w-full">
-              <div className="flex items-center gap-3.5 min-w-0">
+            <div className="flex items-center justify-between gap-3 w-full">
+              <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center">
                   <img 
                     src="./icon.svg" 
@@ -2012,7 +2016,7 @@ ${exampleJson}`;
               </div>
 
               {/* Language & PWA Controls */}
-              <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-center">
+              <div className="flex items-center gap-2 shrink-0 ml-auto">
                 {/* Online / Offline Status Badge */}
                 <div 
                   className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1.5 border transition-all ${
@@ -2040,15 +2044,15 @@ ${exampleJson}`;
 
 
                 {/* Language Selector Bar */}
-                <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15">
-                  <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold" title={t(lang, 'autoLanguageDetected')}>
+                <div className="flex items-center gap-1 bg-black/30 p-1.5 rounded-2xl border border-white/15 max-w-[140px] xs:max-w-[180px] sm:max-w-none overflow-x-auto no-scrollbar scroll-smooth snap-x">
+                  <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold shrink-0" title={t(lang, 'autoLanguageDetected')}>
                     <Globe className="w-3.5 h-3.5" />
                   </div>
                   {SUPPORTED_LANGUAGES.map((l) => (
                     <button
                       key={l.code}
                       onClick={() => changeLanguage(l.code)}
-                      className={`px-2 sm:px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 ${
+                      className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 shrink-0 snap-start ${
                         lang === l.code
                           ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
                           : 'text-white/70 hover:text-white hover:bg-white/10'
@@ -2537,9 +2541,9 @@ ${exampleJson}`;
                             </div>
 
                             {/* Distance / Location info */}
-                            <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between text-xs font-semibold gap-2">
+                            <div className="pt-2 border-t border-slate-100/80 flex flex-wrap items-center justify-between text-xs font-semibold gap-2">
                               {location ? (
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 shrink-0">
                                   <CompassDirectionBadge 
                                     userLocation={userLocation}
                                     targetLocation={location}
@@ -2549,20 +2553,20 @@ ${exampleJson}`;
                                   />
                                 </div>
                               ) : (
-                                <span className="text-[11px] text-slate-400 font-normal">
+                                <span className="text-[11px] text-slate-400 font-normal truncate">
                                   {t(lang, 'notGeotagged')}
                                 </span>
                               )}
 
                               {/* Participant response dots */}
-                              <div className="flex items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1 justify-end ml-auto">
                                 {participants.map(p => {
                                   const answered = answers.some(a => a.participantId === p.id && a.questionIndex === idx);
                                   return (
                                     <span 
                                       key={p.id}
                                       title={`${p.name}: ${answered ? t(lang, 'answeredStatus') : t(lang, 'notAnsweredStatus')}`}
-                                      className={`w-2.5 h-2.5 rounded-full ${
+                                      className={`w-2.5 h-2.5 rounded-full shrink-0 ${
                                         answered ? 'bg-emerald-500' : 'bg-slate-300'
                                       }`}
                                     />
@@ -3316,21 +3320,21 @@ ${exampleJson}`;
                               <button 
                                 key={p.id} 
                                 onClick={() => setViewingParticipantId(p.id)}
-                                className={`w-full flex items-center justify-between p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all hover:scale-[1.02] active:scale-95 ${
+                                className={`w-full flex flex-wrap items-center justify-between p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all hover:scale-[1.02] active:scale-95 gap-4 ${
                                   isFirstPlace ? 'bg-indigo-600 text-white border-indigo-800 shadow-xl' : 'bg-slate-50 border-slate-100 text-slate-800'
                                 }`}
                               >
-                                <div className="flex items-center gap-3 sm:gap-4 text-left min-w-0">
+                                <div className="flex items-center gap-3 sm:gap-4 text-left min-w-0 flex-1">
                                   <span className={`text-xl sm:text-2xl font-black shrink-0 ${isFirstPlace ? 'text-yellow-300' : 'text-slate-300'}`}>#{rank}</span>
-                                  <div className="min-w-0">
+                                  <div className="min-w-0 flex-1">
                                     <span className="font-black text-lg sm:text-xl block leading-none truncate">{p.name}</span>
-                                    <span className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-widest ${isFirstPlace ? 'text-indigo-200' : 'text-slate-400'}`}>
+                                    <span className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-widest block mt-1 ${isFirstPlace ? 'text-indigo-200' : 'text-slate-400'}`}>
                                       {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')} • {p.total} {t(lang, 'answered')}
                                     </span>
                                   </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                                <div className="flex items-center gap-2 sm:gap-4 shrink-0 ml-auto">
                                   <div className="text-right flex items-center gap-2 sm:gap-3">
                                     {hasOptionQuestions && (
                                       <div className="text-right">
@@ -3851,10 +3855,10 @@ ${exampleJson}`;
                   {configTab === 'questions' && (
                     <div className="space-y-5">
                       {/* Category Switcher Pills */}
-                      <div className="flex items-center justify-between gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200/60">
+                      <div className="flex flex-col xs:flex-row items-center justify-between gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200/60">
                         <button 
                           onClick={() => setEditingQuestionsCategory('barn')}
-                          className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                          className={`w-full xs:flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
                             editingQuestionsCategory === 'barn' 
                               ? 'bg-amber-400 text-white shadow-md' 
                               : 'text-slate-500 hover:bg-slate-200/60'
@@ -3867,7 +3871,7 @@ ${exampleJson}`;
                         </button>
                         <button 
                           onClick={() => setEditingQuestionsCategory('vuxen')}
-                          className={`flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
+                          className={`w-full xs:flex-1 py-3 rounded-xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 ${
                             editingQuestionsCategory === 'vuxen' 
                               ? 'bg-pink-400 text-white shadow-md' 
                               : 'text-slate-500 hover:bg-slate-200/60'
@@ -5335,8 +5339,8 @@ ${exampleJson}`;
                   return (
                     <>
                       {/* Editor Header */}
-                      <header className="p-4 sm:p-6 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-4 border-b border-slate-800">
-                        <div className="flex items-center gap-3.5 min-w-0">
+                      <header className="p-4 sm:p-6 bg-slate-900 text-white flex items-center justify-between shrink-0 gap-4 border-b border-slate-800">
+                        <div className="flex items-center gap-3.5 min-w-0 flex-1">
                           <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/10 rounded-2xl flex items-center justify-center text-lg sm:text-xl font-black text-indigo-300 shrink-0">
                             {qIdx + 1}
                           </div>
@@ -5346,14 +5350,14 @@ ${exampleJson}`;
                               <span className="text-xl shrink-0">{currentLangOption.flag}</span>
                             </div>
                             <p className="text-[11px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest truncate">
-                              {t(lang, 'categorySubheading', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}
+                              {quizConfig.title} • {t(lang, 'categorySubheading', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}
                             </p>
                           </div>
                         </div>
 
                         {/* Language Switcher Bar */}
-                        <div className="flex items-center justify-between md:justify-end gap-2 w-full md:w-auto">
-                          <div className="flex items-center bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner gap-1 max-w-full overflow-x-auto custom-scrollbar">
+                        <div className="flex items-center justify-between md:justify-end gap-2 shrink-0 ml-auto">
+                          <div className="flex items-center bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner gap-1 max-w-[140px] xs:max-w-[180px] sm:max-w-none overflow-x-auto no-scrollbar scroll-smooth snap-x">
                             <button
                               type="button"
                               onClick={goToPrevLang}

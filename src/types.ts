@@ -39,6 +39,7 @@ export interface Question {
 export interface QuizConfig {
   quizId: string;
   title: string;
+  logoUrl?: string;
   password?: string;
   geotagUnlockDistance?: number; // Distance in meters to unlock geotagged questions (default: 20m, min: 5m)
   requireSequentialAnswers?: boolean; // Questions must be answered in sequence order

@@ -5,6 +5,7 @@ import { assertValidQuizConfig } from './quizValidation';
 /**
  * Compact minified schema mapping for QuizConfig:
  * t: title
+ * u: logoUrl
  * p: password
  * d: geotagUnlockDistance
  * s: requireSequentialAnswers
@@ -42,6 +43,7 @@ interface MinifiedQuestion {
 interface MinifiedQuizConfig {
   i?: string;
   t: string;
+  u?: string;
   p?: string;
   d?: number;
   s?: boolean;
@@ -127,6 +129,7 @@ export function compressQuizToUrlCode(config: QuizConfig): string {
     v: (config.vuxenQuestions || []).map(minifyQuestion)
   };
 
+  if (config.logoUrl) minified.u = config.logoUrl;
   if (config.password) minified.p = config.password;
   if (config.geotagUnlockDistance && config.geotagUnlockDistance !== 20) {
     minified.d = config.geotagUnlockDistance;
@@ -182,6 +185,7 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
     const config: QuizConfig = {
       quizId: min.i || 'default-quiz-template',
       title: min.t || 'Tipspromenad',
+      logoUrl: min.u || undefined,
       password: min.p || '',
       geotagUnlockDistance: min.d || 20,
       requireSequentialAnswers: min.s === true,

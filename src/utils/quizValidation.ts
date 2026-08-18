@@ -43,6 +43,9 @@ export function validateQuizConfig(value: unknown): QuizValidationResult {
   if (typeof value.title !== 'string' || value.title.trim().length === 0) {
     return { valid: false, error: 'Quizet saknar titel.' };
   }
+  if (value.logoUrl !== undefined && typeof value.logoUrl !== 'string') {
+    return { valid: false, error: 'Quizet har en ogiltig logotyp-länk.' };
+  }
   if (!Array.isArray(value.barnQuestions) || !Array.isArray(value.vuxenQuestions)) {
     return { valid: false, error: 'Quizet måste innehålla barn- och vuxenfrågor.' };
   }

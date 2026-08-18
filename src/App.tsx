@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import LZString from 'lz-string';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -66,6 +67,7 @@ import { subscribeTranslationCache, requestQuestionTranslations, registerQuestio
 import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/soundex';
 import { compressQuizToUrlCode, generateQuizDirectUrl, decompressQuizFromUrlCode } from './utils/quizCompression';
 import { validateQuizConfig } from './utils/quizValidation';
+import { cacheLogoAsDataUrl } from './utils/logoCache';
 import { 
   SavedQuizRecord, 
   saveQuizToIndexedDB, 
@@ -93,10 +95,14 @@ const ensureQuizId = (config: QuizConfig): QuizConfig => {
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
+  const [languageMenuPosition, setLanguageMenuPosition] = useState({ top: 0, left: 0 });
+  const languageMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const [, setTranslationTick] = useState(0);
   const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+  const selectedLanguage = SUPPORTED_LANGUAGES.find((l) => l.code === lang) ?? SUPPORTED_LANGUAGES[0];
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -125,6 +131,41 @@ export default function App() {
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isLanguageMenuOpen) return;
+
+    const updateMenuPosition = () => {
+      const button = languageMenuButtonRef.current;
+      if (!button) return;
+
+      const rect = button.getBoundingClientRect();
+      const menuWidth = 224;
+      const left = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 12);
+      setLanguageMenuPosition({
+        top: rect.bottom + 8,
+        left: Math.max(12, left)
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('[data-language-menu-root]')) {
+        setIsLanguageMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [isLanguageMenuOpen]);
 
   const handleInstallPwa = async () => {
     if (!deferredInstallPrompt) return;
@@ -516,6 +557,7 @@ export default function App() {
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
   const [newQuizPassword, setNewQuizPassword] = useState('');
   const [newQuizTitle, setNewQuizTitle] = useState('');
+  const [newQuizLogoUrl, setNewQuizLogoUrl] = useState('');
   const [newGeotagDistance, setNewGeotagDistance] = useState<number>(() => quizConfig.geotagUnlockDistance || 20);
   const [importTarget, setImportTarget] = useState<'barn' | 'vuxen' | 'båda'>('båda');
   const [showFacit, setShowFacit] = useState(false);
@@ -1207,6 +1249,7 @@ ${exampleJson}`;
     if (view === 'config') {
       setNewQuizPassword(quizConfig.password || '');
       setNewQuizTitle(quizConfig.title || '');
+      setNewQuizLogoUrl(quizConfig.logoUrl || '');
       setNewGeotagDistance(quizConfig.geotagUnlockDistance || 20);
     }
   }, [view, quizConfig]);
@@ -1412,7 +1455,8 @@ ${exampleJson}`;
         if (decompressed) {
           const validation = validateQuizConfig(decompressed);
           if (!validation.valid) throw new Error(validation.error);
-          const importedQuiz = ensureQuizId(decompressed);
+          let importedQuiz = ensureQuizId(decompressed);
+          importedQuiz = { ...importedQuiz, logoUrl: await cacheLogoAsDataUrl(importedQuiz.logoUrl) };
           await autoSaveQuizToIndexedDBIfNew(importedQuiz);
           setQuizConfig(importedQuiz);
           localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(importedQuiz));
@@ -1529,7 +1573,8 @@ ${exampleJson}`;
             };
             const validation = validateQuizConfig(fullConfig);
             if (!validation.valid) throw new Error(validation.error);
-            const importedQuiz = ensureQuizId(fullConfig);
+            let importedQuiz = ensureQuizId(fullConfig);
+            importedQuiz = { ...importedQuiz, logoUrl: await cacheLogoAsDataUrl(importedQuiz.logoUrl) };
             await autoSaveQuizToIndexedDBIfNew(importedQuiz);
             setQuizConfig(importedQuiz);
             setShowConfigInput(false);
@@ -1812,7 +1857,8 @@ ${exampleJson}`;
           const decompressed = decompressQuizFromUrlCode(compressedCandidate);
           if (decompressed) {
             // Spara det nya quizet i IndexedDB innan det öppnas om namnet inte redan finns
-            const importedQuiz = ensureQuizId(decompressed);
+            let importedQuiz = ensureQuizId(decompressed);
+            importedQuiz = { ...importedQuiz, logoUrl: await cacheLogoAsDataUrl(importedQuiz.logoUrl) };
             await autoSaveQuizToIndexedDBIfNew(importedQuiz);
 
             setQuizConfig(importedQuiz);
@@ -2365,8 +2411,49 @@ ${exampleJson}`;
     return (answers.length / totalPossibleAnswers) * 100;
   };
 
+  const languageMenuPortal = isLanguageMenuOpen && typeof document !== 'undefined'
+    ? createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="fixed w-56 rounded-2xl border border-white/15 bg-slate-950/95 p-1.5 shadow-2xl backdrop-blur-md z-[2000]"
+            style={{ top: languageMenuPosition.top, left: languageMenuPosition.left }}
+            data-language-menu-root
+          >
+            {SUPPORTED_LANGUAGES.map((l) => {
+              const isActive = lang === l.code;
+              return (
+                <button
+                  key={l.code}
+                  type="button"
+                  onClick={() => {
+                    changeLanguage(l.code);
+                    setIsLanguageMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-left transition-all ${
+                    isActive ? 'bg-white/10 text-white' : 'text-slate-200 hover:bg-white/5 hover:text-white'
+                  }`}
+                >
+                  <span className="flex items-center gap-3 min-w-0">
+                    <span className="text-lg leading-none">{l.flag}</span>
+                    <span className="text-sm font-semibold truncate">{l.name}</span>
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-300">{l.code}</span>
+                </button>
+              );
+            })}
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )
+    : null;
+
   return (
-    <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-3 sm:p-4 md:p-8 flex flex-col">
+    <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-2 sm:p-3 md:p-6 flex flex-col">
+      {languageMenuPortal}
       <div className="fixed inset-x-0 top-0 z-[200] bg-slate-950/85 backdrop-blur-sm border-b border-white/10 shadow-md">
         <a
           href="https://badminton-match-coach.github.io/FamilyQuiz-PWA/"
@@ -2382,72 +2469,78 @@ ${exampleJson}`;
       <div className="max-w-5xl mx-auto w-full flex flex-col flex-1 pt-7 sm:pt-9">
         
         {/* Clean Header with Unified View Navigation Bar */}
-        <header className="flex flex-col gap-4 mb-6 sm:mb-8 bg-white/10 p-4 sm:p-5 rounded-[2rem] sm:rounded-[2.5rem] backdrop-blur-md border border-white/20 shadow-xl">
+        <header className="flex flex-col gap-3 mb-3 sm:mb-5 bg-white/10 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl">
           <div className="flex flex-col gap-5">
             <div className="flex items-center justify-between gap-3 w-full">
               <div className="flex items-center gap-3.5 min-w-0 flex-1">
                 <button
                   type="button"
                   onClick={handleQuizIconClick}
-                  className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
+                  className={
+                    quizConfig.logoUrl
+                      ? "h-11 sm:h-12 w-auto max-w-[9.5rem] rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default px-1"
+                      : "w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
+                  }
                   aria-label="Quiz"
                 >
-                  <img 
-                    src="./icon.svg" 
-                    alt="FamilyQuiz Icon" 
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      const target = e.currentTarget;
-                      if (!target.dataset.triedFallback) {
-                        target.dataset.triedFallback = '1';
-                        target.src = './icon.png';
-                      } else if (target.dataset.triedFallback === '1') {
-                        target.dataset.triedFallback = '2';
-                        target.src = '/icon.svg';
-                      } else {
-                        target.style.display = 'none';
-                      }
-                    }}
-                  />
+                  {quizConfig.logoUrl ? (
+                    <img
+                      src={quizConfig.logoUrl}
+                      alt={`${quizConfig.title} logo`}
+                      className="h-full w-auto max-w-full object-contain"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        target.dataset.triedFallback = 'app';
+                        target.src = './icon.svg';
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src="./icon.svg"
+                      alt="FamilyQuiz Icon"
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.triedFallback) {
+                          target.dataset.triedFallback = '1';
+                          target.src = './icon.png';
+                        } else if (target.dataset.triedFallback === '1') {
+                          target.dataset.triedFallback = '2';
+                          target.src = '/icon.svg';
+                        } else {
+                          target.style.display = 'none';
+                        }
+                      }}
+                    />
+                  )}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 min-w-0">
+                  <div className="flex items-center min-w-0 gap-3">
                     <h1 className="min-w-[10rem] flex-1 text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
                       {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
                     </h1>
-                    <p className="text-indigo-200 text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 shrink-0">
-                      <span>{totalQuestions} {t(lang, 'questionsCount')}</span>
-                      <span>•</span>
-                      <span>{participants.length} {t(lang, 'participantsCount')}</span>
-                    </p>
                   </div>
 
-                  {/* Language Selector Bar */}
-                  <div className="flex items-center gap-1 bg-black/30 p-1.5 mt-2 rounded-2xl border border-white/15 w-fit max-w-full overflow-x-auto no-scrollbar scroll-smooth snap-x">
-                    <div className="px-1.5 text-white/60 hidden md:flex items-center gap-1 text-xs font-bold shrink-0" title={t(lang, 'autoLanguageDetected')}>
-                      <Globe className="w-3.5 h-3.5" />
-                    </div>
-                    {SUPPORTED_LANGUAGES.map((l) => (
-                      <button
-                        key={l.code}
-                        onClick={() => changeLanguage(l.code)}
-                        className={`px-2.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1 shrink-0 snap-start ${
-                          lang === l.code
-                            ? 'bg-white text-indigo-950 shadow-md font-black scale-105'
-                            : 'text-white/70 hover:text-white hover:bg-white/10'
-                        }`}
-                        title={l.name}
-                      >
-                        <span className="text-base leading-none">{l.flag}</span>
-                        <span className="hidden sm:inline uppercase tracking-wider text-[10px]">{l.code}</span>
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </div>
 
               {/* Language & PWA Controls */}
-              <div className="flex items-center gap-2 shrink-0 ml-auto">
+              <div className="flex items-center gap-2 shrink-0 ml-auto relative z-[1200]">
+                <div className="relative z-[1300]" data-language-menu-root>
+                  <button
+                    ref={languageMenuButtonRef}
+                    type="button"
+                    onClick={() => setIsLanguageMenuOpen((open) => !open)}
+                    className="flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-2.5 py-1.5 text-white hover:bg-white/15 transition-all shadow-md relative z-[1400]"
+                    title={selectedLanguage.name}
+                    aria-label={`Selected language: ${selectedLanguage.name}`}
+                  >
+                    <span className="text-lg leading-none">{selectedLanguage.flag}</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em]">{selectedLanguage.code}</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isLanguageMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                </div>
                 {/* Online / Offline Status Badge */}
                 <div 
                   className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1.5 border transition-all ${
@@ -2563,7 +2656,7 @@ ${exampleJson}`;
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="grid grid-cols-1 md:grid-cols-12 gap-6 flex-1"
+              className="grid grid-cols-1 md:grid-cols-12 gap-4 flex-1"
             >
               <div className="md:col-span-5 flex flex-col gap-4">
                 <h2 className="text-indigo-100 text-xs font-bold uppercase tracking-widest px-2 flex items-center gap-2">
@@ -2706,8 +2799,8 @@ ${exampleJson}`;
                 </div>
               </div>
 
-              <div className="md:col-span-7 flex flex-col justify-between p-6 sm:p-8 bg-white/10 backdrop-blur-md rounded-[2.5rem] border border-white/20 text-white space-y-6">
-                <div className="space-y-4">
+              <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 bg-white/10 backdrop-blur-md rounded-[2rem] border border-white/20 text-white space-y-4">
+                <div className="space-y-3">
                   <div className="w-16 h-16 sm:w-20 sm:h-20 bg-yellow-400 text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl text-3xl font-black">
                     🚶‍♂️
                   </div>
@@ -2767,7 +2860,7 @@ ${exampleJson}`;
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col gap-6 flex-1 max-w-5xl mx-auto w-full"
+              className="flex flex-col gap-4 flex-1 max-w-5xl mx-auto w-full"
             >
               {selectedQuestionIndex === null ? (
                 /* Unified Overview View: Map + Unified Question Selection */
@@ -3094,8 +3187,8 @@ ${exampleJson}`;
                   </div>
 
                   {!selectedParticipantId ? (
-                    <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
-                      <div className="mb-6 sm:mb-10">
+                    <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
+                      <div className="mb-4 sm:mb-6">
                         <span className="text-indigo-500 font-black text-lg sm:text-xl uppercase tracking-tighter">{t(lang, 'selectParticipantToAnswer')}</span>
                         <h3 className="text-2xl sm:text-4xl font-black mt-2 leading-tight text-slate-800">{t(lang, 'whoWillAnswer', { num: (selectedQuestionIndex + 1).toString() })}</h3>
                       </div>
@@ -3142,7 +3235,7 @@ ${exampleJson}`;
                     <motion.div 
                       initial={{ x: 50, opacity: 0 }}
                       animate={{ x: 0, opacity: 1 }}
-                      className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 flex-1 shadow-2xl flex flex-col border border-indigo-200/50 relative overflow-hidden"
+                      className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50 relative overflow-hidden"
                     >
                       {/* Big Decorative Number */}
                       <div className="absolute top-0 right-0 -mt-6 -mr-6 sm:-mt-10 sm:-mr-10 opacity-[0.03] pointer-events-none">
@@ -3169,7 +3262,7 @@ ${exampleJson}`;
                         
                         return (
                           <>
-                            <div className="mb-6 sm:mb-10 relative">
+                            <div className="mb-4 sm:mb-6 relative">
                               <div className="flex items-center gap-3 mb-2">
                                 <span className={`px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white ${
                                   isBarn ? 'bg-amber-400' : 'bg-pink-400'
@@ -3455,7 +3548,7 @@ ${exampleJson}`;
               key="results"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="max-w-2xl mx-auto w-full space-y-6"
+              className="max-w-2xl mx-auto w-full space-y-4"
             >
               {viewingParticipantId ? (
                 (!isFacitUnlocked && !isAdmin) ? (
@@ -5131,30 +5224,64 @@ ${exampleJson}`;
                           <Edit2 className="w-4 h-4 text-indigo-600" />
                           <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'quizTitleHeading')}</h3>
                         </div>
-                        <div className="flex gap-2">
-                          <input 
-                            type="text" 
-                            placeholder={t(lang, 'quizTitlePlaceholder')}
-                            className={`flex-1 p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
-                              isAdmin 
-                                ? 'bg-white border-slate-200 focus:border-indigo-500' 
-                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
-                            }`}
-                            value={newQuizTitle}
-                            readOnly={!isAdmin}
-                            onChange={(e) => setNewQuizTitle(e.target.value)}
-                          />
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                setQuizConfig({ ...quizConfig, title: newQuizTitle });
-                                alert(t(lang, 'titleUpdatedAlert'));
-                              }}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
-                            >
-                              {t(lang, 'saveBtn')}
-                            </button>
-                          )}
+                        <div className="space-y-3">
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              placeholder={t(lang, 'quizTitlePlaceholder')}
+                              className={`flex-1 p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
+                                isAdmin 
+                                  ? 'bg-white border-slate-200 focus:border-indigo-500' 
+                                  : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                              }`}
+                              value={newQuizTitle}
+                              readOnly={!isAdmin}
+                              onChange={(e) => setNewQuizTitle(e.target.value)}
+                            />
+                            {isAdmin && (
+                              <button 
+                                onClick={() => {
+                                  setQuizConfig({ ...quizConfig, title: newQuizTitle });
+                                  alert(t(lang, 'titleUpdatedAlert'));
+                                }}
+                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
+                              >
+                                {t(lang, 'saveBtn')}
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">
+                              {t(lang, 'logoUrlLabel')}
+                            </label>
+                            <div className="flex gap-2">
+                              <input
+                                type="url"
+                                placeholder="https://example.com/logo.png"
+                                className={`flex-1 p-3 border rounded-xl text-xs font-medium outline-none transition-all ${
+                                  isAdmin
+                                    ? 'bg-white border-slate-200 focus:border-indigo-500'
+                                    : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                }`}
+                                value={newQuizLogoUrl}
+                                readOnly={!isAdmin}
+                                onChange={(e) => setNewQuizLogoUrl(e.target.value)}
+                              />
+                              {isAdmin && (
+                                <button
+                                  onClick={async () => {
+                                    const cachedLogoUrl = await cacheLogoAsDataUrl(newQuizLogoUrl.trim() || undefined);
+                                    setQuizConfig({ ...quizConfig, logoUrl: cachedLogoUrl });
+                                    alert(t(lang, 'logoUpdatedAlert'));
+                                  }}
+                                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
+                                >
+                                  {t(lang, 'saveBtn')}
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
 

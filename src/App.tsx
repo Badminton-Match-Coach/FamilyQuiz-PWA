@@ -37,8 +37,6 @@ import {
   Search,
   Maximize2,
   Globe,
-  Wifi,
-  WifiOff,
   Download,
   Database,
   Save,
@@ -62,7 +60,7 @@ import {
   calculatePathDistance 
 } from './components/MapComponent';
 import { generateQuizClient, getStoredApiKey, setStoredApiKey, validateTextAnswerWithGemini } from './geminiClient';
-import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion } from './i18n';
+import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion, unpackLanguage } from './i18n';
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
 import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/soundex';
 import { compressQuizToUrlCode, generateQuizDirectUrl, decompressQuizFromUrlCode } from './utils/quizCompression';
@@ -85,8 +83,33 @@ const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
 const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
 const STORAGE_KEY_WALKED_PATH = 'family_quiz_walked_path';
+const STORAGE_KEY_CACHED_APP_URL = 'family_quiz_cached_app_url';
 const DEFAULT_PARTICIPANT_UNIQUE_ID = 'default-participant-reserved';
 const DEFAULT_QUIZ_ID = 'default-quiz-template';
+const FALLBACK_APP_URL = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+
+function getInitialCachedAppUrl(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_CACHED_APP_URL);
+      if (saved && (saved.startsWith('http://') || saved.startsWith('https://'))) {
+        return saved;
+      }
+      if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+        const current = `${window.location.origin}${window.location.pathname}`;
+        try {
+          localStorage.setItem(STORAGE_KEY_CACHED_APP_URL, current);
+        } catch {
+          // ignore
+        }
+        return current;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return FALLBACK_APP_URL;
+}
 
 const ensureQuizId = (config: QuizConfig): QuizConfig => {
   if (config.quizId && config.quizId !== DEFAULT_QUIZ_ID) return config;
@@ -102,7 +125,20 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(() => typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+  const [cachedAppUrl, setCachedAppUrl] = useState<string>(() => getInitialCachedAppUrl());
   const selectedLanguage = SUPPORTED_LANGUAGES.find((l) => l.code === lang) ?? SUPPORTED_LANGUAGES[0];
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window.location.protocol === 'http:' || window.location.protocol === 'https:')) {
+      const current = `${window.location.origin}${window.location.pathname}`;
+      try {
+        localStorage.setItem(STORAGE_KEY_CACHED_APP_URL, current);
+        setCachedAppUrl(current);
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -178,6 +214,7 @@ export default function App() {
   };
 
   const changeLanguage = (newLang: Language) => {
+    unpackLanguage(newLang);
     setLang(newLang);
     localStorage.setItem('quiz_app_lang', newLang);
     
@@ -313,8 +350,9 @@ export default function App() {
   };
 
   const handleSelectQuestionIndex = (idx: number) => {
-    if (quizConfig.requireSequentialAnswers && selectedParticipantId) {
-      if (!canAccessQuestionForParticipant(selectedParticipantId, idx)) {
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (quizConfig.requireSequentialAnswers && activePartId) {
+      if (!canAccessQuestionForParticipant(activePartId, idx)) {
         alert(t(lang, 'sequentialAnswerRequiredAlert'));
         return;
       }
@@ -348,7 +386,7 @@ export default function App() {
 
     // Question is non-geotagged or within unlock radius -> open question!
     setSelectedQuestionIndex(idx);
-    setSelectedParticipantId(null);
+    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
     setLockNotice(null);
   };
   const [viewingParticipantId, setViewingParticipantId] = useState<string | null>(null);
@@ -372,6 +410,7 @@ export default function App() {
   const [answerImportInput, setAnswerImportInput] = useState('');
   const [showAnswerExportModal, setShowAnswerExportModal] = useState(false);
   const [showParticipantActions, setShowParticipantActions] = useState(false);
+  const [showResultsActions, setShowResultsActions] = useState(false);
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
@@ -768,7 +807,15 @@ export default function App() {
       no: lang === 'sv' ? 'norska (Norwegian)' : 'Norwegian',
       da: lang === 'sv' ? 'danska (Danish)' : 'Danish',
       fi: lang === 'sv' ? 'finska (Finnish)' : 'Finnish',
-      it: lang === 'sv' ? 'italienska (Italian)' : 'Italian'
+      it: lang === 'sv' ? 'italienska (Italian)' : 'Italian',
+      et: lang === 'sv' ? 'estniska (Estonian)' : 'Estonian',
+      lv: lang === 'sv' ? 'lettiska (Latvian)' : 'Latvian',
+      lt: lang === 'sv' ? 'litauiska (Lithuanian)' : 'Lithuanian',
+      uk: lang === 'sv' ? 'ukrainska (Ukrainian)' : 'Ukrainian',
+      is: lang === 'sv' ? 'isländska (Icelandic)' : 'Icelandic',
+      se: lang === 'sv' ? 'nordsamiska (Northern Sami)' : 'Northern Sami',
+      nl: lang === 'sv' ? 'nederländska (Dutch)' : 'Dutch',
+      be: lang === 'sv' ? 'flamländska/belgiska (Flemish/Belgian)' : 'Flemish/Belgian'
     };
 
     const primaryLang = promptLanguages[0] || lang;
@@ -1050,16 +1097,17 @@ ${exampleJson}`;
   };
 
   useEffect(() => {
-    if (selectedParticipantId && selectedQuestionIndex !== null) {
-      const participant = participants.find(p => p.id === selectedParticipantId);
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (activePartId && selectedQuestionIndex !== null) {
+      const participant = participants.find(p => p.id === activePartId);
       if (participant) {
         const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
         const q = questions[selectedQuestionIndex];
         if (q && q.type === 'points') {
-          const ans = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+          const ans = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
           setPointsInputValue(typeof ans?.pointsScored === 'number' ? ans.pointsScored : 0);
         } else if (q && q.type === 'text') {
-          const ans = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+          const ans = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
           setTextInputValue(ans?.textAnswer || '');
         }
       }
@@ -1299,9 +1347,10 @@ ${exampleJson}`;
   };
 
   const submitAnswer = (answerIndex: number) => {
-    if (!selectedParticipantId || selectedQuestionIndex === null) return;
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (!activePartId || selectedQuestionIndex === null) return;
 
-    const participant = participants.find(p => p.id === selectedParticipantId);
+    const participant = participants.find(p => p.id === activePartId);
     if (!participant) return;
 
     const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
@@ -1310,14 +1359,14 @@ ${exampleJson}`;
     const isCorrect = (question?.correctAnswers || []).includes(answerIndex);
 
     const newAnswer: AnswerRecord = {
-      participantId: selectedParticipantId,
+      participantId: activePartId,
       questionIndex: selectedQuestionIndex,
       answerIndex,
       isCorrect,
       timestamp: Date.now()
     };
 
-    const existingIndex = answers.findIndex(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+    const existingIndex = answers.findIndex(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
     if (existingIndex > -1) {
       const newAnswers = [...answers];
       newAnswers[existingIndex] = newAnswer;
@@ -1326,21 +1375,22 @@ ${exampleJson}`;
       setAnswers([...answers, newAnswer]);
     }
 
-    setSelectedParticipantId(null);
+    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
     setSelectedQuestionIndex(null);
   };
 
   const submitPointsAnswer = (pointsScored: number) => {
-    if (!selectedParticipantId || selectedQuestionIndex === null) return;
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (!activePartId || selectedQuestionIndex === null) return;
 
     const newAnswer: AnswerRecord = {
-      participantId: selectedParticipantId,
+      participantId: activePartId,
       questionIndex: selectedQuestionIndex,
       pointsScored: Math.max(0, pointsScored),
       timestamp: Date.now()
     };
 
-    const existingIndex = answers.findIndex(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex);
+    const existingIndex = answers.findIndex(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
     if (existingIndex > -1) {
       const newAnswers = [...answers];
       newAnswers[existingIndex] = newAnswer;
@@ -1349,14 +1399,15 @@ ${exampleJson}`;
       setAnswers([...answers, newAnswer]);
     }
 
-    setSelectedParticipantId(null);
+    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
     setSelectedQuestionIndex(null);
   };
 
   const submitTextAnswer = (rawUserText: string) => {
-    if (!selectedParticipantId || selectedQuestionIndex === null) return;
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (!activePartId || selectedQuestionIndex === null) return;
 
-    const participant = participants.find(p => p.id === selectedParticipantId);
+    const participant = participants.find(p => p.id === activePartId);
     if (!participant) return;
 
     const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
@@ -1371,7 +1422,7 @@ ${exampleJson}`;
       targetLang
     );
 
-    const targetPartId = selectedParticipantId;
+    const targetPartId = activePartId;
     const targetQIdx = selectedQuestionIndex;
 
     const newAnswer: AnswerRecord = {
@@ -1413,7 +1464,7 @@ ${exampleJson}`;
       });
     }
 
-    setSelectedParticipantId(null);
+    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
     setSelectedQuestionIndex(null);
   };
 
@@ -2372,18 +2423,31 @@ ${exampleJson}`;
     return { totalRequired, answeredCount, isAllAnswered };
   };
 
-  const shareDirectQuizUrl = () => {
+  const shareDirectQuizUrl = async () => {
     try {
       const directUrl = generateQuizDirectUrl(quizConfig, { lockMode: directLinkLockMode });
       setDirectUrlLength(directUrl.length);
-      if (!navigator.clipboard?.writeText) throw new Error('Urklipp är inte tillgängligt.');
-      navigator.clipboard.writeText(directUrl).then(() => {
-        setCopiedDirectUrlCode(true);
-        setTimeout(() => setCopiedDirectUrlCode(false), 6000);
-      }).catch((error) => {
-        console.error('Could not copy direct quiz URL:', error);
-        alert('Kunde inte kopiera quizlänken till urklipp.');
-      });
+
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        try {
+          await navigator.share({
+            title: quizConfig.title || 'FamilyQuiz',
+            text: `${quizConfig.title || 'FamilyQuiz'} - Tipsrunda`,
+            url: directUrl,
+          });
+          return;
+        } catch (err: any) {
+          if (err.name === 'AbortError') return;
+        }
+      }
+
+      if (!navigator.clipboard?.writeText) {
+        window.prompt(t(lang, 'shareDirectLinkBtn') || 'Länk till quiz:', directUrl);
+        return;
+      }
+      await navigator.clipboard.writeText(directUrl);
+      setCopiedDirectUrlCode(true);
+      setTimeout(() => setCopiedDirectUrlCode(false), 6000);
     } catch (error) {
       console.error('Could not create direct quiz URL:', error);
       alert('Kunde inte skapa quizlänken. Kontrollera quizets innehåll.');
@@ -2391,7 +2455,7 @@ ${exampleJson}`;
   };
 
   const shareAppUrl = () => {
-    const appUrl = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+    const appUrl = cachedAppUrl || FALLBACK_APP_URL;
     if (!navigator.clipboard?.writeText) {
       alert('Kunde inte kopiera applänken till urklipp.');
       return;
@@ -2456,13 +2520,13 @@ ${exampleJson}`;
       {languageMenuPortal}
       <div className="fixed inset-x-0 top-0 z-[200] bg-slate-950/85 backdrop-blur-sm border-b border-white/10 shadow-md">
         <a
-          href="https://badminton-match-coach.github.io/FamilyQuiz-PWA/"
+          href={cachedAppUrl}
           target="_blank"
           rel="noreferrer"
           className="block max-w-5xl mx-auto px-2 py-1.5 text-center text-[8px] sm:text-[10px] font-black tracking-[0.08em] text-indigo-100 hover:text-white transition-colors truncate"
-          title="https://badminton-match-coach.github.io/FamilyQuiz-PWA/"
+          title={cachedAppUrl}
         >
-          https://Badminton-Match-Coach.github.io/FamilyQuiz-PWA/
+          {cachedAppUrl}
         </a>
       </div>
 
@@ -2541,19 +2605,6 @@ ${exampleJson}`;
                   </button>
 
                 </div>
-                {/* Online / Offline Status Badge */}
-                <div 
-                  className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1.5 border transition-all ${
-                    isOnline 
-                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30' 
-                      : 'bg-amber-500/30 text-amber-100 border-amber-300/40 animate-pulse'
-                  }`}
-                  title={isOnline ? t(lang, 'onlineStatus') : t(lang, 'offlineStatus')}
-                >
-                  {isOnline ? <Wifi className="w-3.5 h-3.5 text-emerald-300" /> : <WifiOff className="w-3.5 h-3.5 text-amber-300" />}
-                  <span className="hidden xs:inline">{isOnline ? t(lang, 'onlineStatus') : t(lang, 'offlineStatus')}</span>
-                </div>
-
                 {/* PWA Install Button when install prompt is available */}
                 {deferredInstallPrompt && (
                   <button
@@ -2569,16 +2620,6 @@ ${exampleJson}`;
 
               </div>
             </div>
-
-            {/* Offline Mode Info Banner */}
-            {!isOnline && (
-              <div className="bg-amber-400/20 border border-amber-300/40 rounded-2xl p-3 flex items-center gap-3 text-amber-100 text-xs font-bold shadow-inner">
-                <WifiOff className="w-4 h-4 shrink-0 text-amber-300" />
-                <p className="flex-1 leading-snug">
-                  {t(lang, 'offlineBannerText')}
-                </p>
-              </div>
-            )}
 
             {/* Top View Selector Navigation Tabs */}
             <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1.5 rounded-2xl border border-white/10 w-full overflow-visible">
@@ -2761,7 +2802,7 @@ ${exampleJson}`;
                       </button>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-100">
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
                       <button
                         type="button"
                         onClick={() => setShowParticipantActions(prev => !prev)}
@@ -2778,11 +2819,19 @@ ${exampleJson}`;
                         <div className="mt-2 grid grid-cols-1 gap-2">
                           <button
                             type="button"
+                            onClick={shareDirectQuizUrl}
+                            className="py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#4338ca] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Share2 className="w-4 h-4" />
+                            <span>{t(lang, 'shareDirectLinkBtn')?.replace(/\(.*\)/, '').trim() || 'Dela Quiz'}</span>
+                          </button>
+                          <button
+                            type="button"
                             onClick={shareParticipantAnswers}
                             className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
                           >
                             <Share2 className="w-4 h-4" />
-                            {t(lang, 'submitOurAnswersBtn')}
+                            <span>{t(lang, 'submitOurAnswersBtn')}</span>
                           </button>
                           <button
                             type="button"
@@ -2790,7 +2839,7 @@ ${exampleJson}`;
                             className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
                           >
                             <Upload className="w-4 h-4" />
-                            {t(lang, 'importSharedAnswersBtn')}
+                            <span>{t(lang, 'importSharedAnswersBtn')}</span>
                           </button>
                         </div>
                       )}
@@ -3186,7 +3235,7 @@ ${exampleJson}`;
                     </div>
                   </div>
 
-                  {!selectedParticipantId ? (
+                  {!selectedParticipantId && participants.length > 1 ? (
                     <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
                       <div className="mb-4 sm:mb-6">
                         <span className="text-indigo-500 font-black text-lg sm:text-xl uppercase tracking-tighter">{t(lang, 'selectParticipantToAnswer')}</span>
@@ -3243,7 +3292,8 @@ ${exampleJson}`;
                       </div>
 
                       {(() => {
-                        const currentParticipant = participants.find(p => p.id === selectedParticipantId);
+                        const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+                        const currentParticipant = participants.find(p => p.id === activePartId);
                         const isBarn = currentParticipant?.type === 'barn';
                         const primaryQuestions = isBarn ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
                         const fallbackQuestions = isBarn ? quizConfig.vuxenQuestions : quizConfig.barnQuestions;
@@ -3473,7 +3523,7 @@ ${exampleJson}`;
                                 {activeQ.options.map((opt, idx) => {
                                   const colors = ['border-rose-500 bg-rose-50 text-rose-600 hover:bg-rose-100', 'border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100', 'border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100', 'border-sky-500 bg-sky-50 text-sky-600 hover:bg-sky-100'];
                                   const color = colors[idx % colors.length];
-                                  const isCurrentAnswer = answers.find(a => a.participantId === selectedParticipantId && a.questionIndex === selectedQuestionIndex)?.answerIndex === idx;
+                                  const isCurrentAnswer = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex)?.answerIndex === idx;
                                   const isCorrectAnswer = (activeQ?.correctAnswers || []).includes(idx);
 
                                   return (
@@ -3530,12 +3580,14 @@ ${exampleJson}`;
                         </div>
                       )}
 
-                      <button 
-                        onClick={() => setSelectedParticipantId(null)}
-                        className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
-                      >
-                        {t(lang, 'changePerson')}
-                      </button>
+                      {participants.length > 1 && (
+                        <button 
+                          onClick={() => setSelectedParticipantId(null)}
+                          className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
+                        >
+                          {t(lang, 'changePerson')}
+                        </button>
+                      )}
                     </motion.div>
                   )}
                 </div>
@@ -3819,7 +3871,77 @@ ${exampleJson}`;
                 </motion.div>
               )) : (
                 <div className="space-y-6">
-                  <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-2xl border border-indigo-200/50 text-center">
+                  <div className="relative bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-2xl border border-indigo-200/50 text-center">
+                    {/* Top Right Mer Actions */}
+                    <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-20">
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={() => setShowResultsActions(prev => !prev)}
+                          className="flex items-center gap-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shadow-xs active:scale-95 border border-slate-200/60"
+                          title={showResultsActions ? t(lang, 'hideLabel') : t(lang, 'moreLabel')}
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>{t(lang, 'moreLabel')}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showResultsActions ? 'rotate-180' : ''}`} />
+                        </button>
+
+                        <AnimatePresence>
+                          {showResultsActions && (
+                            <>
+                              <div 
+                                className="fixed inset-0 z-20" 
+                                onClick={() => setShowResultsActions(false)} 
+                              />
+                              <motion.div
+                                initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -6, scale: 0.95 }}
+                                transition={{ duration: 0.15 }}
+                                className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 space-y-1.5 z-30 text-left"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowResultsActions(false);
+                                    shareDirectQuizUrl();
+                                  }}
+                                  className="w-full py-2.5 px-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-all flex items-center gap-2"
+                                >
+                                  <Share2 className="w-4 h-4 shrink-0" />
+                                  <span>{t(lang, 'shareDirectLinkBtn')?.replace(/\(.*\)/, '').trim() || 'Dela Quiz'}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowResultsActions(false);
+                                    shareParticipantAnswers();
+                                  }}
+                                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-all flex items-center gap-2"
+                                >
+                                  <Share2 className="w-4 h-4 shrink-0" />
+                                  <span>{t(lang, 'submitOurAnswersBtn')}</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowResultsActions(false);
+                                    importSharedAnswers();
+                                  }}
+                                  className="w-full py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-black text-xs uppercase shadow-xs active:scale-95 transition-all flex items-center gap-2"
+                                >
+                                  <Upload className="w-4 h-4 shrink-0 text-slate-600" />
+                                  <span>{t(lang, 'importSharedAnswersBtn')}</span>
+                                </button>
+                              </motion.div>
+                            </>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-yellow-400 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white">
                       <Trophy className="text-indigo-900 w-10 h-10 sm:w-12 sm:h-12" />
                     </div>

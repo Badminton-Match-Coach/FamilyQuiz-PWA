@@ -41,7 +41,11 @@ export async function generateQuizClient(params: {
     no: 'Norwegian',
     da: 'Danish',
     fi: 'Finnish',
-    it: 'Italian'
+    it: 'Italian',
+    et: 'Estonian',
+    lv: 'Latvian',
+    lt: 'Lithuanian',
+    uk: 'Ukrainian'
   };
   const targetLangName = langNames[currentLang] || 'Swedish';
 
@@ -190,7 +194,7 @@ export async function validateTextAnswerWithGemini(params: {
 }): Promise<{
   match: boolean;
   confidence: number;
-  detected_language: 'sv' | 'en' | 'de' | 'fr' | 'es' | 'no' | 'da' | 'fi' | 'it';
+  detected_language: 'sv' | 'en' | 'de' | 'fr' | 'es' | 'no' | 'da' | 'fi' | 'it' | 'et' | 'lv' | 'lt' | 'uk' | 'is' | 'se' | 'nl' | 'be';
 }> {
   const apiKey = params.apiKey || getStoredApiKey();
   if (!apiKey) {
@@ -202,12 +206,12 @@ export async function validateTextAnswerWithGemini(params: {
 
   const prompt = `You are a linguistic validation engine for a multi-lingual Progressive Web App (PWA). Your job is to determine if a user's input matches a specific target word or concept, even if the user has made severe spelling or grammatical errors typical of dyslexia.
 
-Support these European languages: Swedish, English, German, French, Spanish, Norwegian, Danish, Finnish, and Italian.
+Support these European languages: Swedish, English, German, French, Spanish, Norwegian, Danish, Finnish, Italian, Estonian, Latvian, Lithuanian, Ukrainian, Icelandic, Northern Sami, Dutch, and Belgian Dutch/Flemish.
 
 Apply the following evaluation rules to the user's input:
 1. Ignore case sensitivity completely (e.g., "aba" should match "Abba").
 2. Ignore missing, extra, or swapped double consonants (e.g., "aba" or "abbba" matches "Abba"; "alene" matches "alleine").
-3. Ignore missing or incorrect diacritics/accents (e.g., "ee" or "e" for "é"/"è" in French, missing "umlauts" ä/ö/ü in German/Swedish, missing "ñ" or accents in Spanish).
+3. Ignore missing or incorrect diacritics/accents (e.g., "ee" or "e" for "é"/"è" in French, missing "umlauts" ä/ö/ü in German/Swedish, missing "ñ" or accents in Spanish, ā/č/ē/ģ/ī/ķ/ļ/ņ/š/ū/ž in Latvian, ą/č/ę/ė/į/š/ų/ū/ž in Lithuanian, ä/ö/õ/ü in Estonian, і/ї/є in Ukrainian).
 4. Forgive character transpositions/swaps (e.g., "baab" instead of "barn", "teh" instead of "the").
 5. Forgive phonetic substitutions common in the specific language.
 
@@ -223,7 +227,7 @@ Output structure:
 {
   "match": boolean,
   "confidence": float (0.0 to 1.0),
-  "detected_language": "sv" | "en" | "de" | "fr" | "es" | "no" | "da" | "fi" | "it"
+  "detected_language": "sv" | "en" | "de" | "fr" | "es" | "no" | "da" | "fi" | "it" | "et" | "lv" | "lt" | "uk"
 }`;
 
   const response = await ai.models.generateContent({
@@ -238,7 +242,7 @@ Output structure:
           confidence: { type: Type.NUMBER },
           detected_language: { 
             type: Type.STRING,
-            enum: ["sv", "en", "de", "fr", "es", "no", "da", "fi", "it"]
+            enum: ["sv", "en", "de", "fr", "es", "no", "da", "fi", "it", "et", "lv", "lt", "uk"]
           }
         },
         required: ["match", "confidence", "detected_language"]

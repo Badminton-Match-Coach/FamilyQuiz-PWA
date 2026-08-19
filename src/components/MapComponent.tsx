@@ -57,6 +57,14 @@ export function getCompassDirection(bearing: number, lang: Language = 'sv'): { l
     da: ['N', 'NØ', 'Ø', 'SØ', 'S', 'SV', 'V', 'NV'],
     fi: ['P', 'KO', 'I', 'KA', 'E', 'LO', 'L', 'LU'],
     it: ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'],
+    et: ['P', 'KI', 'I', 'KA', 'L', 'ED', 'LÄ', 'LO'],
+    lv: ['Z', 'ZA', 'A', 'DA', 'D', 'DR', 'R', 'ZR'],
+    lt: ['Š', 'ŠR', 'R', 'PR', 'P', 'PV', 'V', 'ŠV'],
+    uk: ['Пн', 'Пн-Сх', 'Сх', 'Пд-Сх', 'Пд', 'Пд-Зх', 'Зх', 'Пн-Зх'],
+    is: ['N', 'NA', 'A', 'SA', 'S', 'SV', 'V', 'NV'],
+    se: ['D', 'DN', 'N', 'MN', 'M', 'MO', 'O', 'DO'],
+    nl: ['N', 'NO', 'O', 'ZO', 'Z', 'ZW', 'W', 'NW'],
+    be: ['N', 'NO', 'O', 'ZO', 'Z', 'ZW', 'W', 'NW'],
   };
 
   const arrows = ['⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️'];

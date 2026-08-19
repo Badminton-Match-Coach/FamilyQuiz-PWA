@@ -51,7 +51,7 @@ interface MinifiedQuizConfig {
   v: MinifiedQuestion[];
 }
 
-function minifyQuestion(q: Question): MinifiedQuestion {
+function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
   const min: MinifiedQuestion = {
     q: q.text
   };
@@ -61,18 +61,21 @@ function minifyQuestion(q: Question): MinifiedQuestion {
   if (q.options && q.options.length > 0) min.o = q.options;
   if (q.correctAnswers && q.correctAnswers.length > 0) min.c = q.correctAnswers;
   if (q.location && typeof q.location.lat === 'number' && typeof q.location.lng === 'number') {
-    // Round to 5 decimals (~1.1 meter precision) to save space
+    // Round to 4 decimals (~11m precision) for QR codes or 5 decimals (~1.1m precision) otherwise
+    const precision = compactForQr ? 10000 : 100000;
     min.l = [
-      Math.round(q.location.lat * 100000) / 100000,
-      Math.round(q.location.lng * 100000) / 100000
+      Math.round(q.location.lat * precision) / precision,
+      Math.round(q.location.lng * precision) / precision
     ];
   }
   if (typeof q.maxPoints === 'number') min.m = q.maxPoints;
   if (q.correctTextAnswer) min.a = q.correctTextAnswer;
-  if (q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0) min.k = q.acceptedTextAnswers;
+  if (q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0) {
+    min.k = compactForQr ? q.acceptedTextAnswers.slice(0, 3) : q.acceptedTextAnswers;
+  }
   if (q.originalLanguage && q.originalLanguage !== 'sv') min.g = q.originalLanguage;
 
-  if (q.translations && Object.keys(q.translations).length > 0) {
+  if (!compactForQr && q.translations && Object.keys(q.translations).length > 0) {
     const minTrans: Record<string, { q: string; o?: string[] }> = {};
     for (const [langKey, trans] of Object.entries(q.translations)) {
       const transObj = trans as { text?: string; options?: string[] } | undefined;
@@ -120,16 +123,19 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
  * Compresses a QuizConfig object into an ultra-compact, URL-safe string.
  * Uses schema minification + LZ-based compression encoded as URI component safe.
  */
-export function compressQuizToUrlCode(config: QuizConfig): string {
+export function compressQuizToUrlCode(config: QuizConfig, options?: { compactForQr?: boolean }): string {
   assertValidQuizConfig(config);
+  const isCompact = options?.compactForQr;
   const minified: MinifiedQuizConfig = {
     i: config.quizId,
     t: config.title || 'Tipspromenad',
-    b: (config.barnQuestions || []).map(minifyQuestion),
-    v: (config.vuxenQuestions || []).map(minifyQuestion)
+    b: (config.barnQuestions || []).map(q => minifyQuestion(q, isCompact)),
+    v: (config.vuxenQuestions || []).map(q => minifyQuestion(q, isCompact))
   };
 
-  if (config.logoUrl) minified.u = config.logoUrl;
+  if (config.logoUrl && (!isCompact || !config.logoUrl.startsWith('data:') || config.logoUrl.length < 80)) {
+    minified.u = config.logoUrl;
+  }
   if (config.password) minified.p = config.password;
   if (config.geotagUnlockDistance && config.geotagUnlockDistance !== 20) {
     minified.d = config.geotagUnlockDistance;
@@ -145,11 +151,21 @@ export function compressQuizToUrlCode(config: QuizConfig): string {
 /**
  * Generates the full clickable direct-open URL for a quiz.
  */
-export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?: boolean }): string {
-  const code = compressQuizToUrlCode(config);
-  const baseUrl = typeof window !== 'undefined' 
-    ? `${window.location.origin}${window.location.pathname}` 
-    : 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?: boolean; compactForQr?: boolean }): string {
+  const code = compressQuizToUrlCode(config, options);
+  let baseUrl = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+  if (typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('family_quiz_cached_app_url');
+      if (cached && (cached.startsWith('http://') || cached.startsWith('https://'))) {
+        baseUrl = cached;
+      } else if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+        baseUrl = `${window.location.origin}${window.location.pathname}`;
+      }
+    } catch {
+      baseUrl = `${window.location.origin}${window.location.pathname}`;
+    }
+  }
   const suffix = options?.lockMode ? '&lock=1' : '';
   return `${baseUrl}#${code}${suffix}`;
 }

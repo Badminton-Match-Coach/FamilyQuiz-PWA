@@ -2,13 +2,17 @@ import { Question } from './types';
 import { Language } from './i18n';
 import { translateQuestionsClient } from './geminiClient';
 
+const MAX_TRANSLATION_CACHE_ENTRIES = 250;
 const memoryCache = new Map<string, { text: string; options: string[] }>();
 
 try {
   const saved = localStorage.getItem('quiz_app_translation_cache');
   if (saved) {
     const parsed = JSON.parse(saved);
-    Object.keys(parsed).forEach(k => {
+    const keys = Object.keys(parsed);
+    // Keep only latest MAX_TRANSLATION_CACHE_ENTRIES if storage is large
+    const trimmedKeys = keys.length > MAX_TRANSLATION_CACHE_ENTRIES ? keys.slice(keys.length - MAX_TRANSLATION_CACHE_ENTRIES) : keys;
+    trimmedKeys.forEach(k => {
       memoryCache.set(k, parsed[k]);
     });
   }
@@ -18,6 +22,12 @@ try {
 
 function saveCacheToStorage() {
   try {
+    // If cache exceeds limit, prune oldest entries
+    if (memoryCache.size > MAX_TRANSLATION_CACHE_ENTRIES) {
+      const keys = Array.from(memoryCache.keys());
+      const keysToRemove = keys.slice(0, keys.length - MAX_TRANSLATION_CACHE_ENTRIES);
+      keysToRemove.forEach(k => memoryCache.delete(k));
+    }
     const obj: Record<string, { text: string; options: string[] }> = {};
     memoryCache.forEach((v, k) => {
       obj[k] = v;

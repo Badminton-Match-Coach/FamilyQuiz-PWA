@@ -3,12 +3,14 @@
     "id": "intro-sv",
     "title": "Välkomstquiz (SV)",
     "filename": "intro.txt",
-    "description": "Ett kort quiz för att komma igång med appen."
+    "description": "Ett kort quiz för att komma igång med appen.",
+    "languages": ["sv"]
   },
   {
     "id": "intro-en",
     "title": "Welcome Quiz (EN)",
     "filename": "intro_en.txt",
-    "description": "A short quiz to get started with the app."
+    "description": "A short quiz to get started with the app.",
+    "languages": ["en"]
   }
 ]

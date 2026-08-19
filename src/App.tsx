@@ -78,6 +78,12 @@ import {
   shareIndexedDBJSON, 
   clearAllQuizzesFromIndexedDB 
 } from './quizDb';
+import { 
+  getQuestionAvailableLanguages, 
+  getQuizAvailableLanguages, 
+  getLibraryItemLanguages, 
+  getLanguageOption 
+} from './utils/quizLanguages';
 
 const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
@@ -849,11 +855,11 @@ export default function App() {
 
     const buildSampleQuestion = (isAdult: boolean) => {
       const qText = isAdult 
-        ? (lang === 'en' ? "In which year did World War I start?" : lang === 'fr' ? "En quelle année la Première Guerre mondiale a-t-elle commencé ?" : lang === 'es' ? "¿En qué año comenzó la Primera Guerra Mundial?" : lang === 'de' ? "In welchem Jahr begann der Erste Weltkrieg?" : "Vilket år startade första världskriget?")
-        : (lang === 'en' ? "What is the capital of Sweden?" : lang === 'fr' ? "Quelle est la capitale de la Suède ?" : lang === 'es' ? "¿Cuál es la capital de Suecia?" : lang === 'de' ? "Was ist die Hauptstadt von Schweden?" : "Vad heter Sveriges huvudstad?");
+        ? (primaryLang === 'en' ? "In which year did World War I start?" : primaryLang === 'fr' ? "En quelle année la Première Guerre mondiale a-t-elle commencé ?" : primaryLang === 'es' ? "¿En qué año comenzó la Primera Guerra Mundial?" : primaryLang === 'de' ? "In welchem Jahr begann der Erste Weltkrieg?" : "Vilket år startade första världskriget?")
+        : (primaryLang === 'en' ? "What is the capital of Sweden?" : primaryLang === 'fr' ? "Quelle est la capitale de la Suède ?" : primaryLang === 'es' ? "¿Cuál es la capital de Suecia?" : primaryLang === 'de' ? "Was ist die Hauptstadt von Schweden?" : "Vad heter Sveriges huvudstad?");
       const qOpts = isAdult
-        ? ["1912", "1914", "1918"]
-        : (lang === 'en' ? ["Stockholm", "Gothenburg", "Malmo"] : ["Stockholm", "Göteborg", "Malmö"]);
+        ? ["1912", "1914", "1918", "1939"]
+        : (primaryLang === 'en' ? ["Stockholm", "Gothenburg", "Malmo"] : ["Stockholm", "Göteborg", "Malmö"]);
       const correct = isAdult ? 1 : 0;
 
       const base: any = {
@@ -865,31 +871,38 @@ export default function App() {
 
       if (otherLangs.length > 0) {
         const transObj: Record<string, any> = {};
-        otherLangs.forEach(l => {
+        // Sample with up to 3 requested translation languages to keep example clean
+        const sampleLangs = otherLangs.slice(0, 3);
+        sampleLangs.forEach(l => {
           if (l === 'en') {
             transObj.en = {
               text: isAdult ? "In which year did World War I start?" : "What is the capital of Sweden?",
-              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Gothenburg", "Malmo"]
+              options: isAdult ? ["1912", "1914", "1918", "1939"] : ["Stockholm", "Gothenburg", "Malmo"]
             };
           } else if (l === 'fr') {
             transObj.fr = {
               text: isAdult ? "En quelle année la Première Guerre mondiale a-t-elle commencé ?" : "Quelle est la capitale de la Suède ?",
-              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
-            };
-          } else if (l === 'es') {
-            transObj.es = {
-              text: isAdult ? "¿En qué año comenzó la Primera Guerra Mundial?" : "¿Cuál es la capital de Suecia?",
-              options: isAdult ? ["1912", "1914", "1918"] : ["Estocolmo", "Gotemburgo", "Malmo"]
+              options: isAdult ? ["1912", "1914", "1918", "1939"] : ["Stockholm", "Göteborg", "Malmö"]
             };
           } else if (l === 'de') {
             transObj.de = {
               text: isAdult ? "In welchem Jahr begann der Erste Weltkrieg?" : "Was ist die Hauptstadt von Schweden?",
-              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
+              options: isAdult ? ["1912", "1914", "1918", "1939"] : ["Stockholm", "Göteborg", "Malmö"]
             };
-          } else {
+          } else if (l === 'es') {
+            transObj.es = {
+              text: isAdult ? "¿En qué año comenzó la Primera Guerra Mundial?" : "¿Cuál es la capital de Suecia?",
+              options: isAdult ? ["1912", "1914", "1918", "1939"] : ["Estocolmo", "Gotemburgo", "Malmo"]
+            };
+          } else if (l === 'sv') {
             transObj.sv = {
               text: isAdult ? "Vilket år startade första världskriget?" : "Vad heter Sveriges huvudstad?",
-              options: isAdult ? ["1912", "1914", "1918"] : ["Stockholm", "Göteborg", "Malmö"]
+              options: isAdult ? ["1912", "1914", "1918", "1939"] : ["Stockholm", "Göteborg", "Malmö"]
+            };
+          } else {
+            transObj[l] = {
+              text: isAdult ? `[${langNames[l] || l}] Question text...` : `[${langNames[l] || l}] Question text...`,
+              options: isAdult ? ["Opt 1", "Opt 2", "Opt 3", "Opt 4"] : ["Opt 1", "Opt 2", "Opt 3"]
             };
           }
         });
@@ -919,67 +932,67 @@ export default function App() {
       let langReqs = `1. Primary language: ${primaryLangName}. All root fields ("text" and "options") MUST be in this language. Set "originalLanguage": "${primaryLang}".\n`;
       if (otherLangs.length > 0) {
         const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
-        langReqs += `2. TRANSLATIONS: Each question MUST include a "translations" object with fully translated "text" and "options" for the following language codes: ${otherLangDesc}.\n`;
+        langReqs += `2. TRANSLATIONS: Each question MUST include a "translations" object with fully translated "text" and "options" for the following language codes: ${otherLangDesc}. Do NOT duplicate root language in translations.\n`;
       }
 
       return `Create a walk-quiz/trivia set about the topic: "${topicText}".
 
 REQUIREMENTS:
-${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Create ${targetDesc}
-${otherLangs.length > 0 ? '4' : '3'}. Each question MUST have exactly 3 options (1, X, 2 format).
-${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" is an integer: 0 for 1st option, 1 for 2nd option, or 2 for 3rd option.
-${otherLangs.length > 0 ? '6' : '5'}. Respond ONLY with valid JSON matching the template below without explanatory text or markdown blocks.
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Questions to generate: ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Answer options: Anywhere between 2 and 5 multiple choice options per question in the "options" array (questions can have 2, 3, 4, or 5 options).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" is a 0-based integer index for the correct option (0 for 1st option, 1 for 2nd, 2 for 3rd, 3 for 4th, 4 for 5th).
+${otherLangs.length > 0 ? '6' : '5'}. Output format: Return ONLY valid JSON matching the template below without markdown code fences or explanatory text.
 
-EXACT JSON TEMPLATE TO RETURN:
+EXACT JSON TEMPLATE:
 ${exampleJson}`;
     } else if (lang === 'fr') {
       let langReqs = `1. Langue principale : ${primaryLangName}. Tous les champs principaux ("text" et "options") DOIVENT être dans cette langue. Indiquez "originalLanguage": "${primaryLang}".\n`;
       if (otherLangs.length > 0) {
         const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
-        langReqs += `2. TRADUCTIONS : Chaque question DOIT inclure un objet "translations" avec la "text" et les "options" entièrement traduites pour les codes de langue suivants : ${otherLangDesc}.\n`;
+        langReqs += `2. TRADUCTIONS : Chaque question DOIT inclure un objet "translations" avec la "text" et les "options" entièrement traduites pour les codes : ${otherLangDesc}.\n`;
       }
 
       return `Créez un jeu de cartes/quiz sur le thème : "${topicText}".
 
 EXIGENCES :
-${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Créez ${targetDesc}
-${otherLangs.length > 0 ? '4' : '3'}. Chaque question DOIT avoir exactement 3 options.
-${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" est un entier : 0 pour la 1ère option, 1 pour la 2ème option, ou 2 pour la 3ème option.
-${otherLangs.length > 0 ? '6' : '5'}. Répondez UNIQUEMENT avec un JSON valide correspondant au modèle ci-dessous, sans texte ni bloc de code markdown.
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Nombre de questions : ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Options de réponse : Entre 2 et 5 options au choix par question dans le tableau "options" (2, 3, 4 ou 5 options).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" est un entier basé sur 0 indiquant la bonne réponse (0 pour la 1ère option, 1 pour la 2ème, 2 pour la 3ème, etc.).
+${otherLangs.length > 0 ? '6' : '5'}. Format de sortie : Renvoyez UNIQUEMENT un JSON valide selon le modèle ci-dessous.
 
-MODÈLE JSON EXACT À RETOURNER :
+MODÈLE JSON :
 ${exampleJson}`;
     } else if (lang === 'es') {
       let langReqs = `1. Idioma principal: ${primaryLangName}. Todos los campos principales ("text" y "options") DEBEN estar en este idioma. Establece "originalLanguage": "${primaryLang}".\n`;
       if (otherLangs.length > 0) {
         const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
-        langReqs += `2. TRADUCCIONES: Cada pregunta DEBE incluir un objeto "translations" con "text" y "options" completamente traducidos para los siguientes códigos de idioma: ${otherLangDesc}.\n`;
+        langReqs += `2. TRADUCCIONES: Cada pregunta DEBE incluir un objeto "translations" con "text" y "options" traducidos para: ${otherLangDesc}.\n`;
       }
 
       return `Crea un cuestionario sobre el tema: "${topicText}".
 
 REQUISITOS:
-${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Crea ${targetDesc}
-${otherLangs.length > 0 ? '4' : '3'}. Cada pregunta DEBE tener exactamente 3 opciones.
-${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" es un número entero: 0 para la 1ª opción, 1 para la 2ª opción, o 2 para la 3ª opción.
-${otherLangs.length > 0 ? '6' : '5'}. Responde ÚNICAMENTE con un JSON válido que coincida con la plantilla a continuación, sin texto ni bloques de código markdown.
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Cantidad de preguntas: ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Opciones de respuesta: Entre 2 y 5 opciones por pregunta en el arreglo "options" (2, 3, 4 o 5 opciones).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" es un número entero con índice base 0 para la opción correcta (0 para la 1ª opción, 1 para la 2ª, etc.).
+${otherLangs.length > 0 ? '6' : '5'}. Formato de salida: Devuelve ÚNICAMENTE un JSON válido según la plantilla.
 
-PLANTILLA JSON EXACTA A DEVOLVER:
+PLANTILLA JSON:
 ${exampleJson}`;
     } else if (lang === 'de') {
       let langReqs = `1. Hauptsprache: ${primaryLangName}. Alle Hauptfelder ("text" und "options") MÜSSEN in dieser Sprache sein. Setze "originalLanguage": "${primaryLang}".\n`;
       if (otherLangs.length > 0) {
         const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
-        langReqs += `2. ÜBERSETZUNGEN: Jede Frage MUSS ein "translations"-Objekt mit vollständig übersetztem "text" und "options" für folgende Sprachcodes enthalten: ${otherLangDesc}.\n`;
+        langReqs += `2. ÜBERSETZUNGEN: Jede Frage MUSS ein "translations"-Objekt mit übersetztem "text" und "options" für folgende Sprachcodes enthalten: ${otherLangDesc}.\n`;
       }
 
       return `Erstelle ein Quiz/Trivia-Set zum Thema: "${topicText}".
 
 ANFORDERUNGEN:
-${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Erstelle ${targetDesc}
-${otherLangs.length > 0 ? '4' : '3'}. Jede Frage MUSS genau 3 Antwortmöglichkeiten haben.
-${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" ist eine Ganzzahl: 0 für die 1. Option, 1 für die 2. Option oder 2 für die 3. Option.
-${otherLangs.length > 0 ? '6' : '5'}. Antworte AUSSCHLIESSLICH mit gültigem JSON gemäß der folgenden Vorlage, ohne Erklärungstext oder Markdown-Blöcke.
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Fragen: ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Antwortoptionen: Frei wählbar zwischen 2 und 5 Antwortmöglichkeiten pro Frage im "options"-Array (2, 3, 4 oder 5 Optionen).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" ist eine 0-basierte Ganzzahl für die richtige Option (0 für die 1. Option, 1 für die 2., etc.).
+${otherLangs.length > 0 ? '6' : '5'}. Ausgabeformat: Antworte AUSSCHLIESSLICH mit gültigem JSON gemäß Vorlage.
 
 EXAKTE JSON-VORLAGE:
 ${exampleJson}`;
@@ -987,16 +1000,16 @@ ${exampleJson}`;
       let langReqs = `1. Huvudsakligt språk: ${primaryLangName}. Alla grundfält ("text" och "options") MÅSTE vara på detta språk. Sätt "originalLanguage": "${primaryLang}".\n`;
       if (otherLangs.length > 0) {
         const otherLangDesc = otherLangs.map(l => `"${l}" (${langNames[l]})`).join(', ');
-        langReqs += `2. ÖVERSÄTTNINGAR: Varje fråga MÅSTE inkludera ett "translations"-objekt med fullständigt översatt "text" och "options" för följande språkkoder: ${otherLangDesc}.\n`;
+        langReqs += `2. ÖVERSÄTTNINGAR: Varje fråga MÅSTE inkludera ett "translations"-objekt med fullständigt översatt "text" och "options" för följande språkkoder: ${otherLangDesc}. (Inkludera inte "${primaryLang}" i translations-objektet).\n`;
       }
 
       return `Skapa ett tipspromenad-quiz om ämnet/temat: "${topicText}".
 
 KRAV:
-${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Skapa ${targetDesc}
-${otherLangs.length > 0 ? '4' : '3'}. Varje fråga MÅSTE ha exakt 3 svarsalternativ (alternativ 1, X, 2).
-${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer" är ett heltal: 0 för det 1:a alternativet, 1 för det 2:a alternativet, eller 2 för det 3:e alternativet.
-${otherLangs.length > 0 ? '6' : '5'}. Svara ENBART med giltig JSON enligt mallen nedan utan förklarande text eller markdown-kodblock.
+${langReqs}${otherLangs.length > 0 ? '3' : '2'}. Antal frågor: ${targetDesc}
+${otherLangs.length > 0 ? '4' : '3'}. Svarsalternativ: Valfritt mellan 2 och 5 svarsalternativ per fråga i "options"-listan (frågor kan ha 2, 3, 4 eller 5 alternativ).
+${otherLangs.length > 0 ? '5' : '4'}. "correctAnswer": 0-baserat heltal för indexet av det rätta alternativet (0 för 1:a alternativet, 1 för 2:a, 2 för 3:e, 3 för 4:e, eller 4 för 5:e alternativet).
+${otherLangs.length > 0 ? '6' : '5'}. Format: Svara ENBART med ett giltigt JSON-objekt enligt mallen nedan utan förklarande text före eller efter.
 
 EXAKT JSON-MALL ATT RETURNERA:
 ${exampleJson}`;
@@ -1009,6 +1022,61 @@ ${exampleJson}`;
       setCopiedCustomPrompt(true);
       setTimeout(() => setCopiedCustomPrompt(false), 4000);
     });
+  };
+
+  const robustParseQuizJson = (rawInput: string): any => {
+    if (!rawInput || typeof rawInput !== 'string') return null;
+    let clean = rawInput.trim();
+
+    // 1. Strip markdown fences
+    clean = clean.replace(/```(?:json|text|markdown)?\s*/gi, '').replace(/```\s*$/gi, '').replace(/```/g, '').trim();
+
+    // 2. Extract substring between outer { } or [ ] if surrounded by explanatory text
+    const firstBrace = clean.indexOf('{');
+    const firstBracket = clean.indexOf('[');
+    let startIdx = -1;
+    let endIdx = -1;
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      startIdx = firstBrace;
+      endIdx = clean.lastIndexOf('}');
+    } else if (firstBracket !== -1) {
+      startIdx = firstBracket;
+      endIdx = clean.lastIndexOf(']');
+    }
+
+    if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+      clean = clean.substring(startIdx, endIdx + 1);
+    }
+
+    // 3. Clean trailing commas in objects and arrays
+    const sanitized = clean.replace(/,\s*([\]}])/g, '$1');
+
+    try {
+      return JSON.parse(sanitized);
+    } catch (e1) {
+      try {
+        return JSON.parse(clean);
+      } catch (e2) {
+        // 4. Try repairing truncated JSON (if AI stopped due to token limit)
+        try {
+          let repaired = sanitized;
+          const openBraces = (repaired.match(/{/g) || []).length;
+          const closeBraces = (repaired.match(/}/g) || []).length;
+          const openBrackets = (repaired.match(/\[/g) || []).length;
+          const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+          // Remove trailing incomplete property if cut off
+          repaired = repaired.replace(/,\s*("[^"]*"?\s*:?\s*[^,}\]]*)$/, '');
+          
+          for (let i = 0; i < (openBrackets - closeBrackets); i++) repaired += ']';
+          for (let i = 0; i < (openBraces - closeBraces); i++) repaired += '}';
+          return JSON.parse(repaired);
+        } catch (e3) {
+          return null;
+        }
+      }
+    }
   };
 
   const formatImportedQuestion = (q: any, idx: number): Question => {
@@ -1046,17 +1114,12 @@ ${exampleJson}`;
 
   const handleImportPastedJson = (jsonStr: string) => {
     try {
-      let cleanInput = jsonStr.trim()
-        .replace(/^```(?:json|text|markdown)?\s*/i, '')
-        .replace(/\s*```$/i, '')
-        .trim();
-
-      if (!cleanInput) {
+      if (!jsonStr || !jsonStr.trim()) {
         alert(t(lang, 'couldNotReadInputAlert'));
         return;
       }
 
-      const parsed = JSON.parse(cleanInput);
+      const parsed = robustParseQuizJson(jsonStr);
 
       // Case A: { barnQuestions: [...], vuxenQuestions: [...] }
       if (parsed && typeof parsed === 'object' && (parsed.barnQuestions || parsed.vuxenQuestions)) {
@@ -1085,6 +1148,16 @@ ${exampleJson}`;
 
         applyQuestionsToConfig(formattedQuestions);
         alert(t(lang, 'aiDoneAlert', { count: formattedQuestions.length.toString() }));
+        setPastedJsonInput('');
+        setShowSettingsModal(false);
+        return;
+      }
+
+      // Fallback: try parsing plain text numbered format
+      const fallbackQuestions = parseQuizText(jsonStr);
+      if (fallbackQuestions && fallbackQuestions.length > 0) {
+        applyQuestionsToConfig(fallbackQuestions);
+        alert(t(lang, 'aiDoneAlert', { count: fallbackQuestions.length.toString() }));
         setPastedJsonInput('');
         setShowSettingsModal(false);
         return;
@@ -1606,21 +1679,21 @@ ${exampleJson}`;
         }
       }
 
-      // Try parsing JSON if candidate starts with '{' or '['
-      if (jsonCandidate.startsWith('{') || jsonCandidate.startsWith('[')) {
+      // Try parsing JSON using robust parser
+      const parsed = robustParseQuizJson(jsonCandidate) || robustParseQuizJson(rawInput);
+      if (parsed) {
         try {
-          const parsed = JSON.parse(jsonCandidate);
-          
           // Case 1: Full Quiz Config with barnQuestions and vuxenQuestions
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.barnQuestions && parsed.vuxenQuestions) {
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.barnQuestions || parsed.vuxenQuestions)) {
             const ensureLang = (qs: any[]) => (qs || []).map(q => ({
               ...q,
               originalLanguage: q.originalLanguage || lang || 'sv'
             }));
             const fullConfig: QuizConfig = {
+              ...quizConfig,
               ...parsed,
-              barnQuestions: ensureLang(parsed.barnQuestions),
-              vuxenQuestions: ensureLang(parsed.vuxenQuestions)
+              barnQuestions: ensureLang(parsed.barnQuestions || []),
+              vuxenQuestions: ensureLang(parsed.vuxenQuestions || [])
             };
             const validation = validateQuizConfig(fullConfig);
             if (!validation.valid) throw new Error(validation.error);
@@ -1649,13 +1722,7 @@ ${exampleJson}`;
           }
 
           if (questionArray) {
-            const formattedQuestions: Question[] = questionArray.map((q, idx) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              text: q.text || q.question || `${t(lang, 'question')} ${idx + 1}`,
-              options: Array.isArray(q.options) && q.options.map(String).length > 0 ? q.options.map(String) : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
-              correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : (typeof q.correctAnswer === 'number' ? [q.correctAnswer] : [0]),
-              originalLanguage: q.originalLanguage || lang || 'sv'
-            }));
+            const formattedQuestions: Question[] = questionArray.map((q, idx) => formatImportedQuestion(q, idx));
 
             applyQuestionsToConfig(formattedQuestions);
             return;
@@ -2680,10 +2747,10 @@ ${exampleJson}`;
                     setConfigTab('library');
                   }}
                   className="flex-1 px-3 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0"
-                  title="Importera färdigt quiz"
+                  title={t(lang, 'libraryTitle')}
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>{t(lang, 'import')}</span>
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  <span>{t(lang, 'libraryTab')}</span>
                 </button>
               )}
             </div>
@@ -2882,6 +2949,48 @@ ${exampleJson}`;
                       {Array.from({ length: totalQuestions }).filter((_, idx) => quizConfig.barnQuestions[idx]?.location || quizConfig.vuxenQuestions[idx]?.location).length}
                     </span>
                   </div>
+
+                  {(() => {
+                    const quizLangsSummary = getQuizAvailableLanguages(quizConfig);
+                    return (
+                      <div className="pt-2.5 border-t border-white/10 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-indigo-200 flex items-center gap-1.5 font-bold text-xs">
+                            <Globe className="w-3.5 h-3.5 text-yellow-300" />
+                            <span>{t(lang, 'quizLanguagesTitle')}</span>
+                          </span>
+                          <span className="text-[10px] font-black uppercase text-indigo-300 bg-white/10 px-2 py-0.5 rounded-full">
+                            {quizLangsSummary.allLanguages.length} {t(lang, 'availableLanguagesLabel')?.toLowerCase()}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pt-0.5">
+                          {quizLangsSummary.allLanguages.map(l => {
+                            const isSelected = l.code === lang;
+                            const qCount = quizLangsSummary.questionLanguageCounts[l.code] || 0;
+                            return (
+                              <span
+                                key={l.code}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-black transition-all shadow-sm ${
+                                  isSelected
+                                    ? 'bg-yellow-400 text-indigo-950 ring-2 ring-yellow-200 scale-105'
+                                    : 'bg-white/15 text-white border border-white/20 hover:bg-white/25'
+                                }`}
+                                title={`${l.name} (${qCount}/${totalQuestions} ${t(lang, 'questionsShort') || 'frågor'})`}
+                              >
+                                <span className="text-sm leading-none">{l.flag}</span>
+                                <span>{l.name}</span>
+                                {isSelected && (
+                                  <span className="text-[9px] font-black uppercase bg-indigo-950 text-yellow-300 px-1.5 py-0.5 rounded-md ml-0.5">
+                                    Aktiv
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="space-y-3">
@@ -3313,13 +3422,33 @@ ${exampleJson}`;
                         return (
                           <>
                             <div className="mb-4 sm:mb-6 relative">
-                              <div className="flex items-center gap-3 mb-2">
+                              <div className="flex items-center gap-3 mb-2 flex-wrap">
                                 <span className={`px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white ${
                                   isBarn ? 'bg-amber-400' : 'bg-pink-400'
                                 }`}>
                                   {currentParticipant?.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')} - {currentParticipant?.name}
                                 </span>
                                 <span className="text-indigo-500 font-black text-xs sm:text-sm uppercase tracking-widest opacity-40">{t(lang, 'question')} {selectedQuestionIndex + 1}</span>
+
+                                {(() => {
+                                  const qLangs = getQuestionAvailableLanguages(rawQ);
+                                  return (
+                                    <div className="flex items-center gap-1 ml-auto shrink-0 bg-slate-100/90 border border-slate-200 px-2 py-0.5 rounded-full" title={t(lang, 'availableLanguagesLabel')}>
+                                      <Globe className="w-3 h-3 text-indigo-500 shrink-0" />
+                                      {qLangs.map(l => (
+                                        <span
+                                          key={l.code}
+                                          className={`text-xs px-1 rounded transition-all ${
+                                            l.code === lang ? 'bg-indigo-600 text-white font-black scale-110' : 'opacity-80 hover:opacity-100'
+                                          }`}
+                                          title={`${l.name} (${l.code === (rawQ.originalLanguage || 'sv') ? t(lang, 'questionOriginalLang') : t(lang, 'translationsAvailable')})`}
+                                        >
+                                          {l.flag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                               <h3 className="text-2xl sm:text-4xl font-black leading-tight text-slate-800">
                                 {activeQ.text}
@@ -4045,24 +4174,49 @@ ${exampleJson}`;
                       })()}
                     </div>
 
-                    {(() => {
-                      const { isAllAnswered } = getQuizAnswerProgress();
+                    {/* Mer (Dela quiz / Skicka & Importera svar) */}
+                    <div className="pt-4 border-t border-slate-100 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowResultsActions(prev => !prev)}
+                        className="w-full flex items-center justify-between gap-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Share2 className="w-4 h-4 text-indigo-600" />
+                          <span>{showResultsActions ? t(lang, 'hideLabel') : t(lang, 'moreLabel')}</span>
+                        </span>
+                        <span className="text-slate-400">{showResultsActions ? '▴' : '▾'}</span>
+                      </button>
 
-                      if (!isAllAnswered) return null;
-
-                      return (
-                        <div className="pt-4 sm:pt-5">
+                      {showResultsActions && (
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={shareDirectQuizUrl}
+                            className="py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#4338ca] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Share2 className="w-4 h-4" />
+                            <span>{t(lang, 'shareDirectLinkBtn')?.replace(/\(.*\)/, '').trim() || 'Dela Quiz'}</span>
+                          </button>
                           <button
                             type="button"
                             onClick={shareParticipantAnswers}
-                            className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                            className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
                           >
                             <Share2 className="w-4 h-4" />
-                            {t(lang, 'submitOurAnswersBtn')}
+                            <span>{t(lang, 'submitOurAnswersBtn')}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={importSharedAnswers}
+                            className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                          >
+                            <Upload className="w-4 h-4" />
+                            <span>{t(lang, 'importSharedAnswersBtn')}</span>
                           </button>
                         </div>
-                      );
-                    })()}
+                      )}
+                    </div>
 
                     {/* Walked Route Summary (if quiz has geotag stations) */}
                     {hasAnyGeotag && walkedPath.length > 0 && (
@@ -4708,6 +4862,7 @@ ${exampleJson}`;
                           .filter(q => !questionSearch || q.text.toLowerCase().includes(questionSearch.toLowerCase()))
                           .map((q, idx) => {
                             const isSelected = selectedQuestionIds.includes(q.id);
+                            const qLangs = getQuestionAvailableLanguages(q);
                             return (
                               <div 
                                 key={q.id} 
@@ -4719,7 +4874,7 @@ ${exampleJson}`;
                                   className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors cursor-pointer"
                                   onClick={() => openQuestionEditor(q.id)}
                                 >
-                                  <div className="flex items-center gap-2.5 text-left min-w-0 pr-2">
+                                  <div className="flex items-start gap-2.5 text-left min-w-0 pr-2">
                                     <button 
                                       type="button"
                                       onClick={(e) => {
@@ -4741,9 +4896,31 @@ ${exampleJson}`;
                                       {idx + 1}
                                     </span>
 
-                                    <span className="flex-1 min-w-0 text-xs sm:text-sm font-bold text-slate-800 truncate">
-                                      {q.text || t(lang, 'writeQuestionPlaceholder')}
-                                    </span>
+                                    <div className="flex-1 min-w-0 space-y-1.5">
+                                      <div className="text-xs sm:text-sm font-bold leading-snug text-slate-800 break-words">
+                                        {q.text || t(lang, 'writeQuestionPlaceholder')}
+                                      </div>
+
+                                      <div className="flex items-center gap-1 flex-wrap" title={t(lang, 'availableLanguagesLabel')}>
+                                        {qLangs.slice(0, 4).map(l => (
+                                          <span
+                                            key={l.code}
+                                            className="text-[11px] px-1 py-0.5 rounded-md bg-white border border-slate-200 shadow-2xs"
+                                            title={`${l.name} (${l.code === (q.originalLanguage || 'sv') ? t(lang, 'questionOriginalLang') : t(lang, 'translationsAvailable')})`}
+                                          >
+                                            {l.flag}
+                                          </span>
+                                        ))}
+                                        {qLangs.length > 4 && (
+                                          <span 
+                                            className="text-[9px] font-black text-slate-600 bg-slate-200 px-1 py-0.5 rounded-md"
+                                            title={qLangs.slice(4).map(l => `${l.flag} ${l.name}`).join(', ')}
+                                          >
+                                            +{qLangs.length - 4}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
 
                                     {q.location && (
                                       <span 
@@ -6844,10 +7021,10 @@ ${exampleJson}`;
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-                      <Upload className="text-blue-600 w-5 h-5" />
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
+                      <FolderOpen className="text-indigo-600 w-5 h-5" />
                     </div>
-                    <h2 className="text-2xl font-black text-slate-800">{t(lang, 'importQuizTitle')}</h2>
+                    <h2 className="text-2xl font-black text-slate-800">{configTab === 'library' ? t(lang, 'libraryTab') : t(lang, 'importQuizTitle')}</h2>
                   </div>
                   <button 
                     onClick={() => setShowConfigInput(false)}
@@ -6947,36 +7124,69 @@ ${exampleJson}`;
                             </div>
 
                             <div className="grid grid-cols-1 gap-2.5">
-                              {sortedSavedQuizzes.map(item => (
-                                <div key={item.id} className="p-3.5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 rounded-2xl transition-all group flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                                  <div className="min-w-0 flex-1">
-                                    <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors truncate">{item.title}</h4>
-                                    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
-                                        🧒 {item.barnCount}
+                              {sortedSavedQuizzes.map(item => {
+                                const itemLangs = getQuizAvailableLanguages(item.quizConfig);
+                                return (
+                                  <div key={item.id} className="p-3.5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 rounded-2xl transition-all group flex flex-col justify-between gap-3 shadow-xs">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0 flex-1">
+                                      <div className="min-w-0 flex-1">
+                                        <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors truncate">{item.title}</h4>
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                                            🧒 {item.barnCount}
+                                          </span>
+                                          <span className="text-[10px] font-bold text-pink-700 bg-pink-100/80 px-2 py-0.5 rounded-md">
+                                            🧔 {item.vuxenCount}
+                                          </span>
+                                          {item.hasLocations && (
+                                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
+                                              <MapPin className="w-2.5 h-2.5" /> Geotag
+                                            </span>
+                                          )}
+                                          <span className="text-[10px] text-slate-400 font-medium ml-auto">
+                                            {new Date(item.updatedAt).toLocaleDateString()}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <button 
+                                        onClick={() => handleLoadQuizFromDB(item, true)}
+                                        className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>{t(lang, 'loadQuizBtn')}</span>
+                                      </button>
+                                    </div>
+
+                                    {/* Language Indicators for Saved Quiz */}
+                                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-emerald-100/80">
+                                      <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                                        <Globe className="w-3 h-3 text-emerald-600" />
+                                        <span>{t(lang, 'availableLanguagesLabel')}:</span>
                                       </span>
-                                      <span className="text-[10px] font-bold text-pink-700 bg-pink-100/80 px-2 py-0.5 rounded-md">
-                                        🧔 {item.vuxenCount}
-                                      </span>
-                                      {item.hasLocations && (
-                                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
-                                          <MapPin className="w-2.5 h-2.5" /> Geotag
-                                        </span>
-                                      )}
-                                      <span className="text-[10px] text-slate-400 font-medium ml-auto">
-                                        {new Date(item.updatedAt).toLocaleDateString()}
-                                      </span>
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        {itemLangs.allLanguages.slice(0, 6).map(l => (
+                                          <span
+                                            key={l.code}
+                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-emerald-200 text-[10px] font-semibold text-slate-700 shadow-2xs"
+                                            title={l.name}
+                                          >
+                                            <span>{l.flag}</span>
+                                            <span className="font-mono text-[9px] uppercase font-bold text-slate-500">{l.code}</span>
+                                          </span>
+                                        ))}
+                                        {itemLangs.allLanguages.length > 6 && (
+                                          <span
+                                            className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800"
+                                            title={itemLangs.allLanguages.slice(6).map(l => `${l.flag} ${l.name}`).join(', ')}
+                                          >
+                                            +{itemLangs.allLanguages.length - 6} {t(lang, 'moreLangsLabel')}
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
                                   </div>
-                                  <button 
-                                    onClick={() => handleLoadQuizFromDB(item, true)}
-                                    className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'loadQuizBtn')}</span>
-                                  </button>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -7018,21 +7228,46 @@ ${exampleJson}`;
                             </div>
                           ) : (
                             <div className="grid grid-cols-1 gap-2.5">
-                              {quizLibrary.map(item => (
-                                <div key={item.id} className="p-3.5 bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 transition-all group flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
-                                  <div className="min-w-0 flex-1">
-                                    <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors truncate">{item.title}</h4>
-                                    <p className="text-[10px] text-slate-500 font-medium line-clamp-1">{item.description}</p>
+                              {quizLibrary.map(item => {
+                                const catalogLangs = getLibraryItemLanguages(item);
+                                return (
+                                  <div key={item.id} className="p-3.5 bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 transition-all group flex flex-col justify-between gap-3 shadow-xs">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0 flex-1">
+                                      <div className="min-w-0 flex-1">
+                                        <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors truncate">{item.title}</h4>
+                                        <p className="text-[10px] text-slate-500 font-medium line-clamp-1">{item.description}</p>
+                                      </div>
+                                      <button 
+                                        onClick={() => loadLibraryQuiz(item.filename)}
+                                        className="py-2.5 px-4 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 active:scale-95"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>{t(lang, 'loadQuizBtn')}</span>
+                                      </button>
+                                    </div>
+
+                                    {/* Language Indicators for Catalog Quiz */}
+                                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+                                      <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                                        <Globe className="w-3 h-3 text-indigo-500" />
+                                        <span>{t(lang, 'availableLanguagesLabel')}:</span>
+                                      </span>
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        {catalogLangs.map(l => (
+                                          <span
+                                            key={l.code}
+                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-[10px] font-semibold text-indigo-900"
+                                            title={l.name}
+                                          >
+                                            <span>{l.flag}</span>
+                                            <span>{l.name}</span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <button 
-                                    onClick={() => loadLibraryQuiz(item.filename)}
-                                    className="py-2.5 px-4 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 active:scale-95"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'loadQuizBtn')}</span>
-                                  </button>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>

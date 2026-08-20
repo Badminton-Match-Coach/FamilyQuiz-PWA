@@ -3024,8 +3024,8 @@ ${exampleJson}`;
 
               <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 bg-white/10 backdrop-blur-md rounded-[2rem] border border-white/20 text-white space-y-4">
                 <div className="space-y-3">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-yellow-400 text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl text-3xl font-black">
-                    🚶‍♂️
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-transparent text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-white/30">
+                    <img src="/HelFamilj.png" alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
                   </div>
                   <div>
                     <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-md">
@@ -4155,8 +4155,8 @@ ${exampleJson}`;
                       </div>
                     </div>
 
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-yellow-400 rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white">
-                      <Trophy className="text-indigo-900 w-10 h-10 sm:w-12 sm:h-12" />
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
+                      <img src="/HelFamilj.png" alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
                     </div>
                     <h2 className="text-3xl sm:text-5xl font-black text-slate-800 mb-2">{t(lang, 'scoreboard')}</h2>
                     <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm mb-6 sm:mb-10">{t(lang, 'clickParticipantForDetails')}</p>

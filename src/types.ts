@@ -31,6 +31,8 @@ export interface Question {
   correctTextAnswer?: string; // Correct text answer for 'text' type (e.g. "Stockholm")
   acceptedTextAnswers?: string[]; // Optional alternative accepted answers (e.g. ["Sthlm", "Hufvudstaden"])
   maxPoints?: number; // Optional max points for points questions
+  followUpQuestionId?: string;
+  followUpMode?: 'always' | 'correct' | 'incorrect';
   location?: Location;
   originalLanguage?: Language; // Language code when created (e.g. 'sv', 'fr', 'en', 'es')
   translations?: Record<string, { text: string; options: string[]; correctTextAnswer?: string }>;

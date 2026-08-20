@@ -63,6 +63,22 @@ export function validateQuizConfig(value: unknown): QuizValidationResult {
     if (error) return { valid: false, error };
   }
 
+  const questionIds = new Set([...value.barnQuestions, ...value.vuxenQuestions]
+    .filter(isObject)
+    .map(question => question.id)
+    .filter(id => typeof id === 'string'));
+  for (const question of [...value.barnQuestions, ...value.vuxenQuestions]) {
+    if (!isObject(question)) continue;
+    if (question.followUpQuestionId !== undefined && (
+      typeof question.followUpQuestionId !== 'string' || !questionIds.has(question.followUpQuestionId)
+    )) {
+      return { valid: false, error: 'En följdfråga pekar på en fråga som inte finns.' };
+    }
+    if (question.followUpMode !== undefined && !['always', 'correct', 'incorrect'].includes(String(question.followUpMode))) {
+      return { valid: false, error: 'En följdfråga har ett ogiltigt visningsläge.' };
+    }
+  }
+
   return { valid: true };
 }
 

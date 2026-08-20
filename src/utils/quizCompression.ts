@@ -20,6 +20,8 @@ import { assertValidQuizConfig } from './quizValidation';
  * c: correctAnswers
  * l: location [lat, lng]
  * m: maxPoints
+ * f: followUpQuestionId
+ * w: followUpMode
  * a: correctTextAnswer
  * k: acceptedTextAnswers
  * g: originalLanguage
@@ -34,6 +36,8 @@ interface MinifiedQuestion {
   c?: number[];
   l?: [number, number];
   m?: number;
+  f?: string;
+  w?: 'always' | 'correct' | 'incorrect';
   a?: string;
   k?: string[];
   g?: string;
@@ -69,6 +73,8 @@ function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
     ];
   }
   if (typeof q.maxPoints === 'number') min.m = q.maxPoints;
+  if (q.followUpQuestionId) min.f = q.followUpQuestionId;
+  if (q.followUpMode && q.followUpMode !== 'always') min.w = q.followUpMode;
   if (q.correctTextAnswer) min.a = q.correctTextAnswer;
   if (q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0) {
     min.k = compactForQr ? q.acceptedTextAnswers.slice(0, 3) : q.acceptedTextAnswers;
@@ -112,6 +118,8 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
     correctAnswers: min.c || (min.y === 'points' || min.y === 'text' ? [] : [0]),
     location: min.l ? { lat: min.l[0], lng: min.l[1] } : undefined,
     maxPoints: min.m,
+    followUpQuestionId: min.f,
+    followUpMode: min.w || 'always',
     correctTextAnswer: min.a,
     acceptedTextAnswers: min.k,
     originalLanguage: (min.g as any) || 'sv',

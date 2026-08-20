@@ -158,6 +158,85 @@ export function getDefaultQuestionTranslations(): Record<string, Record<Language
 }
 
 const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = {
+  geotagFollowUpSection: {
+    sv: 'GEOTAGG/FÖLJDFRÅGA', en: 'GEOTAG/FOLLOW-UP', nl: 'GEOTAG/VERVOLGVRAAG', be: 'GEOTAG/VERVOLGVRAAG',
+    no: 'GEOTAG/OPPFØLGINGSSPØRSMÅL', da: 'GEOTAG/OPFØLGENDE SPØRGSMÅL', fi: 'GEOTAG/JATKOKYSYMYS',
+    is: 'GEOTAG/FRAMHALDSSPURNING', se: 'GEOTAG/ČUOVUSGAHČČAN', et: 'GEOTAG/JÄRELKÜSIMUS',
+    lv: 'ĢEOTAGS/PAPILJAUTĀJUMS', lt: 'GEOTAG/PAPILDOMAS KLAUSIMAS', uk: 'ГЕОТЕГ/ДОДАТКОВЕ ПИТАННЯ',
+    de: 'GEOTAG/FOLGEFRAGE', fr: 'GÉOTAG/QUESTION SUIVANTE', it: 'GEOTAG/DOMANDA SUCCESSIVA', es: 'GEOTAG/PREGUNTA DE SEGUIMIENTO'
+  },
+  followUpQuestionLabel: {
+    sv: 'Följdfråga', en: 'Follow-up question', nl: 'Vervolgvraag', be: 'Vervolgvraag', no: 'Oppfølgingsspørsmål',
+    da: 'Opfølgende spørgsmål', fi: 'Jatkokysymys', is: 'Framhaldsspurning', se: 'Čuovusgažžan', et: 'Järelküsimus',
+    lv: 'Papiljautājums', lt: 'Papildomas klausimas', uk: 'Додаткове питання', de: 'Folgefrage', fr: 'Question suivante',
+    it: 'Domanda successiva', es: 'Pregunta de seguimiento'
+  },
+  followUpQuestionDescription: {
+    sv: 'Välj en manuellt skapad fråga som öppnas efter denna.', en: 'Choose a manually created question to open after this one.',
+    nl: 'Kies een handmatig gemaakte vraag die hierna wordt geopend.', be: 'Kies een handmatig gemaakte vraag die hierna wordt geopend.',
+    no: 'Velg et manuelt opprettet spørsmål som åpnes etter dette.', da: 'Vælg et manuelt oprettet spørgsmål, der åbnes bagefter.',
+    fi: 'Valitse manuaalisesti luotu kysymys, joka avautuu tämän jälkeen.', is: 'Veldu handvirkt búna spurningu sem opnast eftir þessa.',
+    se: 'Vállje jearaldaga mii rahppojuvvo dán maŋŋá.', et: 'Vali käsitsi loodud küsimus, mis avatakse pärast seda.',
+    lv: 'Izvēlieties manuāli izveidotu jautājumu, kas tiks atvērts pēc šī.', lt: 'Pasirinkite rankiniu būdu sukurtą klausimą, kuris bus atidarytas po šio.',
+    uk: 'Виберіть створене вручну питання, яке відкриється після цього.', de: 'Wählen Sie eine manuell erstellte Frage, die danach geöffnet wird.',
+    fr: 'Choisissez une question créée manuellement à ouvrir ensuite.', it: 'Scegli una domanda creata manualmente da aprire dopo questa.',
+    es: 'Elige una pregunta creada manualmente para abrirla después de esta.'
+  },
+  noFollowUpOption: {
+    sv: 'Ingen följdfråga', en: 'No follow-up question', nl: 'Geen vervolgvraag', be: 'Geen vervolgvraag', no: 'Ingen oppfølging',
+    da: 'Ingen opfølgende spørgsmål', fi: 'Ei jatkokysymystä', is: 'Engin framhaldsspurning', se: 'Ii čuovusgažžan', et: 'Järelküsimust pole',
+    lv: 'Nav papiljautājuma', lt: 'Nėra papildomo klausimo', uk: 'Без додаткового питання', de: 'Keine Folgefrage', fr: 'Aucune question suivante',
+    it: 'Nessuna domanda successiva', es: 'Sin pregunta de seguimiento'
+  },
+  followUpAlwaysOption: {
+    sv: 'Visa alltid', en: 'Always show', nl: 'Altijd tonen', be: 'Altijd tonen', no: 'Vis alltid', da: 'Vis altid', fi: 'Näytä aina',
+    is: 'Sýna alltaf', se: 'Čájet álo', et: 'Näita alati', lv: 'Rādīt vienmēr', lt: 'Rodyti visada', uk: 'Показувати завжди',
+    de: 'Immer anzeigen', fr: 'Toujours afficher', it: 'Mostra sempre', es: 'Mostrar siempre'
+  },
+  followUpCorrectOption: {
+    sv: 'Visa efter rätt svar', en: 'Show after correct answer', nl: 'Tonen na goed antwoord', be: 'Tonen na goed antwoord', no: 'Vis etter riktig svar',
+    da: 'Vis efter korrekt svar', fi: 'Näytä oikean vastauksen jälkeen', is: 'Sýna eftir rétt svar', se: 'Čájet rievttes vástádusa maŋŋá',
+    et: 'Näita pärast õiget vastust', lv: 'Rādīt pēc pareizas atbildes', lt: 'Rodyti po teisingo atsakymo', uk: 'Показувати після правильної відповіді',
+    de: 'Nach richtiger Antwort anzeigen', fr: 'Afficher après une bonne réponse', it: 'Mostra dopo la risposta corretta', es: 'Mostrar tras la respuesta correcta'
+  },
+  followUpIncorrectOption: {
+    sv: 'Visa efter fel svar', en: 'Show after incorrect answer', nl: 'Tonen na fout antwoord', be: 'Tonen na fout antwoord', no: 'Vis etter feil svar',
+    da: 'Vis efter forkert svar', fi: 'Näytä väärän vastauksen jälkeen', is: 'Sýna eftir rangt svar', se: 'Čájet boastut vástádusa maŋŋá',
+    et: 'Näita pärast valet vastust', lv: 'Rādīt pēc nepareizas atbildes', lt: 'Rodyti po neteisingo atsakymo', uk: 'Показувати після неправильної відповіді',
+    de: 'Nach falscher Antwort anzeigen', fr: 'Afficher après une mauvaise réponse', it: 'Mostra dopo la risposta errata', es: 'Mostrar tras la respuesta incorrecta'
+  },
+  overwriteQuizConfirm: {
+    sv: 'Vill du uppdatera detta quiz i IndexedDB med ditt nuvarande quiz?', en: 'Do you want to update this quiz in IndexedDB with your current quiz?',
+    nl: 'Wil je deze quiz in IndexedDB bijwerken met je huidige quiz?', be: 'Wil je deze quiz in IndexedDB bijwerken met je huidige quiz?',
+    no: 'Vil du oppdatere denne quizen i IndexedDB med den nåværende quizen?', da: 'Vil du opdatere denne quiz i IndexedDB med din nuværende quiz?',
+    fi: 'Haluatko päivittää tämän tietokannan nykyisellä visallasi?', is: 'Viltu uppfæra þessa spurningakeppni í IndexedDB með núverandi keppni?',
+    se: 'Háliidat go ođasmahttit dán kviza IndexedDB:s dálá kvizaiguin?', et: 'Kas soovid seda viktoriini IndexedDB-s praeguse viktoriiniga uuendada?',
+    lv: 'Vai vēlaties atjaunināt šo viktorīnu IndexedDB ar pašreizējo viktorīnu?', lt: 'Ar norite atnaujinti šią viktoriną IndexedDB su dabartine viktorina?',
+    uk: 'Оновити цей тест в IndexedDB поточним тестом?', de: 'Möchten Sie dieses Quiz in IndexedDB mit Ihrem aktuellen Quiz aktualisieren?',
+    fr: 'Voulez-vous mettre à jour ce quiz dans IndexedDB avec votre quiz actuel ?', it: 'Vuoi aggiornare questo quiz in IndexedDB con il quiz corrente?',
+    es: '¿Quieres actualizar este quiz en IndexedDB con tu quiz actual?'
+  },
+  deleteQuizConfirm: {
+    sv: 'Vill du radera detta sparade quiz?', en: 'Do you want to delete this saved quiz?', nl: 'Wil je deze opgeslagen quiz verwijderen?', be: 'Wil je deze opgeslagen quiz verwijderen?',
+    no: 'Vil du slette denne lagrede quizen?', da: 'Vil du slette denne gemte quiz?', fi: 'Haluatko poistaa tämän tallennetun visan?', is: 'Viltu eyða þessari vistuðu spurningakeppni?',
+    se: 'Háliidat go sihkkut dán vurkejuvvon kviza?', et: 'Kas soovid selle salvestatud viktoriini kustutada?', lv: 'Vai vēlaties dzēst šo saglabāto viktorīnu?',
+    lt: 'Ar norite ištrinti šią išsaugotą viktoriną?', uk: 'Видалити цей збережений тест?', de: 'Möchten Sie dieses gespeicherte Quiz löschen?',
+    fr: 'Voulez-vous supprimer ce quiz enregistré ?', it: 'Vuoi eliminare questo quiz salvato?', es: '¿Quieres eliminar este quiz guardado?'
+  },
+  clearDbConfirm: {
+    sv: 'Vill du radera alla sparade quiz från IndexedDB?', en: 'Do you want to delete all saved quizzes from IndexedDB?', nl: 'Wil je alle opgeslagen quizzen uit IndexedDB verwijderen?', be: 'Wil je alle opgeslagen quizzen uit IndexedDB verwijderen?',
+    no: 'Vil du slette alle lagrede quizer fra IndexedDB?', da: 'Vil du slette alle gemte quizzer fra IndexedDB?', fi: 'Haluatko poistaa kaikki tallennetut visat IndexedDB:stä?', is: 'Viltu eyða öllum vistuðum spurningakeppnum úr IndexedDB?',
+    se: 'Háliidat go sihkkut buot vurkejuvvon kvizat IndexedDB:s?', et: 'Kas soovid kõik salvestatud viktoriinid IndexedDB-st kustutada?', lv: 'Vai vēlaties dzēst visas saglabātās viktorīnas no IndexedDB?',
+    lt: 'Ar norite ištrinti visas išsaugotas viktorinas iš IndexedDB?', uk: 'Видалити всі збережені тести з IndexedDB?', de: 'Möchten Sie alle gespeicherten Quizze aus IndexedDB löschen?',
+    fr: 'Voulez-vous supprimer tous les quiz enregistrés d’IndexedDB ?', it: 'Vuoi eliminare tutti i quiz salvati da IndexedDB?', es: '¿Quieres eliminar todos los quizzes guardados de IndexedDB?'
+  },
+  indexedDbActionFailed: {
+    sv: 'Åtgärden kunde inte genomföras i IndexedDB.', en: 'The action could not be completed in IndexedDB.', nl: 'De actie kon niet worden uitgevoerd in IndexedDB.', be: 'De actie kon niet worden uitgevoerd in IndexedDB.',
+    no: 'Handlingen kunne ikke fullføres i IndexedDB.', da: 'Handlingen kunne ikke fuldføres i IndexedDB.', fi: 'Toimintoa ei voitu suorittaa IndexedDB:ssä.', is: 'Ekki tókst að framkvæma aðgerðina í IndexedDB.',
+    se: 'Dáhttu ii sáhttán čađahuvvot IndexedDB:s.', et: 'Toimingut ei saanud IndexedDB-s lõpule viia.', lv: 'Darbību nevarēja pabeigt IndexedDB.',
+    lt: 'Veiksmo nepavyko užbaigti IndexedDB.', uk: 'Не вдалося виконати дію в IndexedDB.', de: 'Die Aktion konnte in IndexedDB nicht abgeschlossen werden.',
+    fr: 'L’action n’a pas pu être effectuée dans IndexedDB.', it: 'Impossibile completare l’operazione in IndexedDB.', es: 'No se pudo completar la acción en IndexedDB.'
+  },
   libraryTab: {
     sv: 'Bibliotek',
     en: 'Library',

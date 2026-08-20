@@ -355,18 +355,19 @@ export default function App() {
     return questionIndex <= highestAnsweredIndex + 1;
   };
 
-  const handleSelectQuestionIndex = (idx: number) => {
-    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
-    if (quizConfig.requireSequentialAnswers && activePartId) {
+  const handleSelectQuestionIndex = (idx: number, isFollowUp = false, participantId?: string) => {
+    const activePartId = participantId || selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (quizConfig.requireSequentialAnswers && activePartId && !isFollowUp) {
       if (!canAccessQuestionForParticipant(activePartId, idx)) {
         alert(t(lang, 'sequentialAnswerRequiredAlert'));
         return;
       }
     }
 
-    const bQ = quizConfig.barnQuestions[idx];
-    const vQ = quizConfig.vuxenQuestions[idx];
-    const location = bQ?.location || vQ?.location;
+    const question = quizQuestionPool?.[idx]
+      || quizConfig.barnQuestions[idx]
+      || quizConfig.vuxenQuestions[idx];
+    const location = question?.location;
     const unlockDistance = Math.max(5, quizConfig.geotagUnlockDistance || 20);
 
     if (location) {
@@ -392,8 +393,24 @@ export default function App() {
 
     // Question is non-geotagged or within unlock radius -> open question!
     setSelectedQuestionIndex(idx);
-    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
+    setSelectedParticipantId(
+      isFollowUp ? activePartId : participants.length === 1 ? participants[0].id : null
+    );
     setLockNotice(null);
+  };
+
+  const openFollowUpQuestion = (question: Question, participantId: string, isCorrect?: boolean): boolean => {
+    const mode = question.followUpMode || 'always';
+    if (!question.followUpQuestionId || (mode === 'correct' && !isCorrect) || (mode === 'incorrect' && isCorrect !== false)) return false;
+
+    const participant = participants.find(p => p.id === participantId);
+    if (!participant) return false;
+    const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    const followUpIndex = questions.findIndex(q => q.id === question.followUpQuestionId);
+    if (followUpIndex < 0) return false;
+
+    handleSelectQuestionIndex(followUpIndex, true, participantId);
+    return true;
   };
   const [viewingParticipantId, setViewingParticipantId] = useState<string | null>(null);
   const [fullScreenEditingQuestionId, setFullScreenEditingQuestionId] = useState<string | null>(null);
@@ -418,6 +435,7 @@ export default function App() {
   const [showParticipantActions, setShowParticipantActions] = useState(false);
   const [showResultsActions, setShowResultsActions] = useState(false);
   const [editingQuestionsCategory, setEditingQuestionsCategory] = useState<UserType>('barn');
+  const [showQuestionMore, setShowQuestionMore] = useState(false);
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
   const [dbSortBy, setDbSortBy] = useState<'date-desc' | 'date-asc' | 'name-asc'>('date-desc');
@@ -519,27 +537,11 @@ export default function App() {
   };
 
   const handleOverwriteQuizInDB = async (recordId: string) => {
-    if (window.confirm(t(lang, 'overwriteQuizConfirm'))) {
-      try {
-        await saveQuizToIndexedDB(quizConfig, recordId);
-        await refreshSavedQuizzes();
-        setDbNotification(t(lang, 'quizSavedSuccess'));
-        setTimeout(() => setDbNotification(null), 4000);
-      } catch (err) {
-        alert('Kunde inte uppdatera i IndexedDB');
-      }
-    }
+    setDbConfirmation({ action: 'overwrite', recordId });
   };
 
   const handleDeleteQuizFromDB = async (recordId: string) => {
-    if (window.confirm(t(lang, 'deleteQuizConfirm'))) {
-      try {
-        await deleteQuizFromIndexedDB(recordId);
-        await refreshSavedQuizzes();
-      } catch (err) {
-        alert('Kunde inte radera från IndexedDB');
-      }
-    }
+    setDbConfirmation({ action: 'delete', recordId });
   };
 
   const handleShareExportDB = async () => {
@@ -588,14 +590,7 @@ export default function App() {
   };
 
   const handleClearAllDB = async () => {
-    if (window.confirm(t(lang, 'clearDbConfirm'))) {
-      try {
-        await clearAllQuizzesFromIndexedDB();
-        await refreshSavedQuizzes();
-      } catch (err) {
-        alert('Kunde inte tömma IndexedDB');
-      }
-    }
+    setDbConfirmation({ action: 'clear' });
   };
   const [questionSearch, setQuestionSearch] = useState('');
   const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
@@ -1107,6 +1102,8 @@ ${exampleJson}`;
       text,
       options,
       correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
+      followUpQuestionId: typeof q.followUpQuestionId === 'string' ? q.followUpQuestionId : undefined,
+      followUpMode: q.followUpMode === 'correct' || q.followUpMode === 'incorrect' ? q.followUpMode : 'always',
       originalLanguage: origLang,
       translations: translationsObj
     };
@@ -1379,6 +1376,77 @@ ${exampleJson}`;
     return Math.max(quizConfig.barnQuestions.length, quizConfig.vuxenQuestions.length, 1);
   }, [quizConfig]);
 
+  const followUpQuestionIds = useMemo(() => new Set(
+    [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions]
+      .map(question => question.followUpQuestionId)
+      .filter((id): id is string => !!id)
+  ), [quizConfig]);
+
+  const participantTypes = new Set(participants.map(participant => participant.type));
+  const quizQuestionType = participantTypes.size === 1
+    ? participants[0]?.type
+    : selectedParticipantId
+      ? participants.find(participant => participant.id === selectedParticipantId)?.type
+      : null;
+  const quizQuestionPool = quizQuestionType === 'barn'
+    ? quizConfig.barnQuestions
+    : quizQuestionType === 'vuxen'
+      ? quizConfig.vuxenQuestions
+      : null;
+
+  const visibleQuestionIndexes = useMemo(() => (
+    Array.from({ length: totalQuestions }, (_, index) => index)
+      .filter(index => {
+        const question = quizQuestionPool
+          ? quizQuestionPool[index]
+          : quizConfig.barnQuestions[index] || quizConfig.vuxenQuestions[index];
+        const categoryFollowUpIds = quizQuestionPool
+          ? new Set(quizQuestionPool
+            .map(candidate => candidate.followUpQuestionId)
+            .filter((id): id is string => !!id))
+          : followUpQuestionIds;
+        return !!question && !categoryFollowUpIds.has(question.id);
+      })
+  ), [followUpQuestionIds, quizConfig, quizQuestionPool, totalQuestions]);
+
+  const visibleQuestionCount = visibleQuestionIndexes.length;
+
+  const editorQuestionRows = useMemo(() => {
+    const questions = editingQuestionsCategory === 'barn'
+      ? quizConfig.barnQuestions
+      : quizConfig.vuxenQuestions;
+    const followUpTargetIds = new Set(
+      questions
+        .map(question => question.followUpQuestionId)
+        .filter((id): id is string => !!id)
+    );
+    const childrenByParentId = new globalThis.Map<string, Question[]>();
+
+    for (const question of questions) {
+      if (!question.followUpQuestionId) continue;
+      const children = childrenByParentId.get(question.id) || [];
+      const child = questions.find(candidate => candidate.id === question.followUpQuestionId);
+      if (child) children.push(child);
+      childrenByParentId.set(question.id, children);
+    }
+
+    const rows: { question: Question; label: string; isFollowUp: boolean }[] = [];
+    const addRowAndChildren = (question: Question, label: string, isFollowUp: boolean, visited: Set<string>) => {
+      if (visited.has(question.id)) return;
+      const nextVisited = new Set(visited).add(question.id);
+      rows.push({ question, label, isFollowUp });
+      (childrenByParentId.get(question.id) || []).forEach((child, childIndex) => {
+        addRowAndChildren(child, `${label}:${childIndex + 1}`, true, nextVisited);
+      });
+    };
+
+    questions
+      .filter(question => !followUpTargetIds.has(question.id))
+      .forEach((question, index) => addRowAndChildren(question, `${index + 1}`, false, new Set()));
+
+    return rows;
+  }, [editingQuestionsCategory, quizConfig]);
+
   const addParticipant = (name: string, type: UserType) => {
     const trimmedName = name.trim();
     if (!trimmedName) return;
@@ -1448,13 +1516,22 @@ ${exampleJson}`;
       setAnswers([...answers, newAnswer]);
     }
 
-    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
-    setSelectedQuestionIndex(null);
+    const openedFollowUp = openFollowUpQuestion(question, activePartId, isCorrect);
+    if (!openedFollowUp) {
+      setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
+      setSelectedQuestionIndex(null);
+    }
   };
 
   const submitPointsAnswer = (pointsScored: number) => {
     const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
     if (!activePartId || selectedQuestionIndex === null) return;
+
+    const participant = participants.find(p => p.id === activePartId);
+    if (!participant) return;
+    const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    const question = questions[selectedQuestionIndex];
+    if (!question) return;
 
     const newAnswer: AnswerRecord = {
       participantId: activePartId,
@@ -1472,8 +1549,11 @@ ${exampleJson}`;
       setAnswers([...answers, newAnswer]);
     }
 
-    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
-    setSelectedQuestionIndex(null);
+    const openedFollowUp = openFollowUpQuestion(question, activePartId);
+    if (!openedFollowUp) {
+      setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
+      setSelectedQuestionIndex(null);
+    }
   };
 
   const submitTextAnswer = (rawUserText: string) => {
@@ -1537,8 +1617,11 @@ ${exampleJson}`;
       });
     }
 
-    setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
-    setSelectedQuestionIndex(null);
+    const openedFollowUp = openFollowUpQuestion(question, targetPartId, evalResult.isCorrect);
+    if (!openedFollowUp) {
+      setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
+      setSelectedQuestionIndex(null);
+    }
   };
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -1885,6 +1968,30 @@ ${exampleJson}`;
   const [questionToDelete, setQuestionToDelete] = useState<{ category: UserType; id: string } | null>(null);
   const [participantToDelete, setParticipantToDelete] = useState<Participant | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [dbConfirmation, setDbConfirmation] = useState<{ action: 'overwrite' | 'delete' | 'clear'; recordId?: string } | null>(null);
+
+  const confirmDbAction = async () => {
+    const confirmation = dbConfirmation;
+    setDbConfirmation(null);
+    if (!confirmation) return;
+
+    try {
+      if (confirmation.action === 'overwrite' && confirmation.recordId) {
+        await saveQuizToIndexedDB(quizConfig, confirmation.recordId);
+        await refreshSavedQuizzes();
+        setDbNotification(t(lang, 'quizSavedSuccess'));
+      } else if (confirmation.action === 'delete' && confirmation.recordId) {
+        await deleteQuizFromIndexedDB(confirmation.recordId);
+        await refreshSavedQuizzes();
+      } else if (confirmation.action === 'clear') {
+        await clearAllQuizzesFromIndexedDB();
+        await refreshSavedQuizzes();
+      }
+      setTimeout(() => setDbNotification(null), 4000);
+    } catch (err) {
+      alert(t(lang, 'indexedDbActionFailed'));
+    }
+  };
 
   // Bulk question selection state
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
@@ -3023,7 +3130,9 @@ ${exampleJson}`;
               {selectedQuestionIndex === null ? (
                 /* Unified Overview View: Map + Unified Question Selection */
                 (() => {
-                  const hasAnyGeotag = [...quizConfig.barnQuestions, ...quizConfig.vuxenQuestions].some(q => !!q.location);
+                  const hasAnyGeotag = visibleQuestionIndexes.some(index =>
+                    !!quizConfig.barnQuestions[index]?.location || !!quizConfig.vuxenQuestions[index]?.location
+                  );
 
                   return (
                     <div className="space-y-6">
@@ -3070,22 +3179,23 @@ ${exampleJson}`;
                       </div>
 
                       {/* Trail Progress Bar */}
-                      {totalQuestions > 0 && (
+                      {visibleQuestionCount > 0 && (
                         <TrailProgressBar
-                          questions={Array.from({ length: totalQuestions }).map((_, idx) => {
-                            const bQ = quizConfig.barnQuestions[idx];
-                            const vQ = quizConfig.vuxenQuestions[idx];
-                            const location = bQ?.location || vQ?.location;
+                          questions={visibleQuestionIndexes.map((idx) => {
+                            const question = quizQuestionPool?.[idx]
+                              || quizConfig.barnQuestions[idx]
+                              || quizConfig.vuxenQuestions[idx];
+                            const location = question?.location;
                             const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
                             const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
                             return {
-                              index: idx,
+                              index: visibleQuestionIndexes.indexOf(idx),
                               isAnswered: isFullyAnswered,
                               hasLocation: !!location,
                             };
                           })}
-                          activeIndex={selectedQuestionIndex}
-                          onSelectQuestion={handleSelectQuestionIndex}
+                          activeIndex={visibleQuestionIndexes.indexOf(selectedQuestionIndex ?? -1)}
+                          onSelectQuestion={(displayIndex) => handleSelectQuestionIndex(visibleQuestionIndexes[displayIndex])}
                           lang={lang}
                         />
                       )}
@@ -3104,11 +3214,12 @@ ${exampleJson}`;
                           </div>
 
                           <ParticipantMap 
-                            questions={Array.from({ length: totalQuestions }).map((_, idx) => {
-                              const bQ = quizConfig.barnQuestions[idx];
-                              const vQ = quizConfig.vuxenQuestions[idx];
-                              const location = bQ?.location || vQ?.location;
-                              const rawQ = bQ || vQ || { id: `q-${idx}`, text: `${t(lang, 'question')} ${idx + 1}`, options: [], correctAnswers: [0] };
+                            questions={visibleQuestionIndexes.map((idx) => {
+                              const rawQ = quizQuestionPool?.[idx]
+                                || quizConfig.barnQuestions[idx]
+                                || quizConfig.vuxenQuestions[idx]
+                                || { id: `q-${idx}`, text: `${t(lang, 'question')} ${idx + 1}`, options: [], correctAnswers: [0] };
+                              const location = rawQ.location;
                               const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang);
                               const q = { ...rawQ, text: trans.text, options: trans.options };
                               const qWithLoc = { ...q, location: q.location || location };
@@ -3118,14 +3229,14 @@ ${exampleJson}`;
 
                               return {
                                 q: qWithLoc,
-                                index: idx,
+                                index: visibleQuestionIndexes.indexOf(idx),
                                 isAnswered: isFullyAnswered,
                               };
                             })}
                             userType={participants[0]?.type || 'barn'}
                             userLocation={userLocation}
                             unlockDistance={quizConfig.geotagUnlockDistance || 20}
-                            onSelectQuestion={handleSelectQuestionIndex}
+                            onSelectQuestion={(displayIndex) => handleSelectQuestionIndex(visibleQuestionIndexes[displayIndex])}
                             lang={lang}
                             walkedPath={walkedPath}
                             isLiveTracking={hasAnyGeotag && !isFacitUnlocked && walkedPath.length > 0}
@@ -3143,7 +3254,7 @@ ${exampleJson}`;
                           <div>
                             <h3 className="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-2">
                               <MapPin className="w-6 h-6 text-indigo-600" />
-                              <span>{t(lang, 'questionListTitle')} ({totalQuestions})</span>
+                              <span>{t(lang, 'questionListTitle')} ({visibleQuestionCount})</span>
                             </h3>
                           </div>
 
@@ -3161,11 +3272,11 @@ ${exampleJson}`;
                         </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-                      {Array.from({ length: totalQuestions }).map((_, idx) => {
-                        const bQ = quizConfig.barnQuestions[idx];
-                        const vQ = quizConfig.vuxenQuestions[idx];
-                        const location = bQ?.location || vQ?.location;
-                        const rawQ = bQ || vQ;
+                      {visibleQuestionIndexes.map((idx) => {
+                        const rawQ = quizQuestionPool?.[idx]
+                          || quizConfig.barnQuestions[idx]
+                          || quizConfig.vuxenQuestions[idx];
+                        const location = rawQ?.location;
                         const trans = rawQ ? translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage) : null;
                         const sampleQ = rawQ && trans ? { ...rawQ, text: trans.text, options: trans.options } : null;
                         
@@ -3204,11 +3315,11 @@ ${exampleJson}`;
                                       ? 'bg-indigo-600 text-white'
                                       : 'bg-slate-300 text-slate-600'
                                 }`}>
-                                  {idx + 1}
+                                  {visibleQuestionIndexes.indexOf(idx) + 1}
                                 </span>
                                 <div>
                                   <span className="font-black text-sm block leading-tight text-slate-800">
-                                    {t(lang, 'question')} {idx + 1}
+                                    {t(lang, 'question')} {visibleQuestionIndexes.indexOf(idx) + 1}
                                   </span>
                                   {sampleQ?.text && (
                                     <div className="flex items-center gap-2">
@@ -3307,10 +3418,11 @@ ${exampleJson}`;
                     </button>
 
                     <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                      {Array.from({ length: totalQuestions }).map((_, idx) => {
-                        const bQ = quizConfig.barnQuestions[idx];
-                        const vQ = quizConfig.vuxenQuestions[idx];
-                        const location = bQ?.location || vQ?.location;
+                      {visibleQuestionIndexes.map((idx) => {
+                            const question = quizQuestionPool?.[idx]
+                              || quizConfig.barnQuestions[idx]
+                              || quizConfig.vuxenQuestions[idx];
+                        const location = question?.location;
                         const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
                         const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
 
@@ -3337,7 +3449,7 @@ ${exampleJson}`;
                                     : 'bg-black/30 text-white/40'
                             }`}
                           >
-                            {idx + 1}
+                            {visibleQuestionIndexes.indexOf(idx) + 1}
                           </button>
                         );
                       })}
@@ -3351,7 +3463,10 @@ ${exampleJson}`;
                         <h3 className="text-2xl sm:text-4xl font-black mt-2 leading-tight text-slate-800">{t(lang, 'whoWillAnswer', { num: (selectedQuestionIndex + 1).toString() })}</h3>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                        {participants.map(p => {
+                        {participants.filter(p => {
+                          const participantQuestions = p.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                          return !!participantQuestions[selectedQuestionIndex];
+                        }).map(p => {
                           const answer = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
                           const hasAnswered = !!answer;
                           return (
@@ -3405,8 +3520,7 @@ ${exampleJson}`;
                         const currentParticipant = participants.find(p => p.id === activePartId);
                         const isBarn = currentParticipant?.type === 'barn';
                         const primaryQuestions = isBarn ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
-                        const fallbackQuestions = isBarn ? quizConfig.vuxenQuestions : quizConfig.barnQuestions;
-                        const rawQ: Question = primaryQuestions[selectedQuestionIndex] || fallbackQuestions[selectedQuestionIndex] || {
+                        const rawQ: Question = primaryQuestions[selectedQuestionIndex] || {
                           id: '',
                           text: t(lang, 'noQuestionFound'),
                           type: 'options',
@@ -3416,7 +3530,7 @@ ${exampleJson}`;
                         };
                         const trans = translateQuestion(rawQ.id, rawQ.text, rawQ.options || [], lang, rawQ.originalLanguage ?? lang);
                         const baseQ: Question = { ...rawQ, text: trans.text, options: trans.options };
-                        const loc = primaryQuestions[selectedQuestionIndex]?.location || fallbackQuestions[selectedQuestionIndex]?.location;
+                        const loc = primaryQuestions[selectedQuestionIndex]?.location;
                         const activeQ: Question = { ...baseQ, location: baseQ.location ?? loc };
                         
                         return (
@@ -3606,9 +3720,6 @@ ${exampleJson}`;
                                     <span>🔤</span>
                                     <span>{t(lang, 'textQuestionType')}</span>
                                   </div>
-                                  <p className="text-xs sm:text-sm text-slate-600 font-semibold pt-2">
-                                    {t(lang, 'answeringAs', { name: currentParticipant?.name || '' })}
-                                  </p>
                                   <p className="text-xs text-sky-700 font-medium">
                                     {t(lang, 'soundexOfflineNote')}
                                   </p>
@@ -3682,33 +3793,6 @@ ${exampleJson}`;
                         );
                       })()}
                       
-                      {/* Station Navigation (Prev / Next) */}
-                      {totalQuestions > 1 && (
-                        <div className="flex items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100">
-                          <button
-                            type="button"
-                            disabled={selectedQuestionIndex <= 0}
-                            onClick={() => handleSelectQuestionIndex(selectedQuestionIndex - 1)}
-                            className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 disabled:opacity-30 disabled:pointer-events-none text-slate-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                            <span>{t(lang, 'prevStation')}</span>
-                          </button>
-                          <span className="text-xs font-black text-slate-400">
-                            {selectedQuestionIndex + 1} / {totalQuestions}
-                          </span>
-                          <button
-                            type="button"
-                            disabled={selectedQuestionIndex >= totalQuestions - 1}
-                            onClick={() => handleSelectQuestionIndex(selectedQuestionIndex + 1)}
-                            className="px-3.5 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 disabled:opacity-30 disabled:pointer-events-none text-indigo-700 font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
-                          >
-                            <span>{t(lang, 'nextStation')}</span>
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-
                       {participants.length > 1 && (
                         <button 
                           onClick={() => setSelectedParticipantId(null)}
@@ -4854,19 +4938,19 @@ ${exampleJson}`;
 
                       {/* Question List */}
                       <div className="max-h-[460px] overflow-y-auto pr-1.5 custom-scrollbar space-y-3">
-                        {(editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions)
-                          .map(qRaw => {
-                            const trans = translateQuestion(qRaw.id, qRaw.text, qRaw.options || [], lang, qRaw.originalLanguage);
-                            return { ...qRaw, text: trans.text, options: trans.options };
+                        {editorQuestionRows
+                          .map(row => {
+                            const trans = translateQuestion(row.question.id, row.question.text, row.question.options || [], lang, row.question.originalLanguage);
+                            return { ...row, question: { ...row.question, text: trans.text, options: trans.options } };
                           })
-                          .filter(q => !questionSearch || q.text.toLowerCase().includes(questionSearch.toLowerCase()))
-                          .map((q, idx) => {
+                          .filter(row => !questionSearch || row.question.text.toLowerCase().includes(questionSearch.toLowerCase()))
+                          .map(({ question: q, label, isFollowUp }) => {
                             const isSelected = selectedQuestionIds.includes(q.id);
                             const qLangs = getQuestionAvailableLanguages(q);
                             return (
                               <div 
                                 key={q.id} 
-                                className={`border rounded-2xl overflow-hidden transition-all ${
+                                className={`${isFollowUp ? 'ml-6 border-l-4 border-emerald-300' : ''} border rounded-2xl overflow-hidden transition-all ${
                                   isSelected ? 'bg-rose-50/60 border-rose-300 shadow-sm' : 'bg-slate-50 border-slate-200/70 hover:border-indigo-200'
                                 }`}
                               >
@@ -4890,16 +4974,21 @@ ${exampleJson}`;
                                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                                     </button>
 
-                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
+                                    <span className={`min-w-6 h-6 px-1 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
                                       isSelected ? 'bg-rose-100 text-rose-700' : 'bg-white border border-slate-200 text-slate-500'
                                     }`}>
-                                      {idx + 1}
+                                      {label}
                                     </span>
 
                                     <div className="flex-1 min-w-0 space-y-1.5">
                                       <div className="text-xs sm:text-sm font-bold leading-snug text-slate-800 break-words">
                                         {q.text || t(lang, 'writeQuestionPlaceholder')}
                                       </div>
+                                      {isFollowUp && (
+                                        <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                          ↳ {t(lang, 'followUpQuestionLabel')}
+                                        </span>
+                                      )}
 
                                       <div className="flex items-center gap-1 flex-wrap" title={t(lang, 'availableLanguagesLabel')}>
                                         {qLangs.slice(0, 4).map(l => (
@@ -6092,7 +6181,7 @@ ${exampleJson}`;
                 initial={{ scale: 0.95, y: 20 }}
                 animate={{ scale: 1, y: 0 }}
                 exit={{ scale: 0.95, y: 20 }}
-                className="w-full h-full sm:h-auto sm:max-h-[90vh] bg-slate-50 flex flex-col sm:rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden max-w-4xl mx-auto"
+                className="w-full h-full sm:h-auto sm:max-h-[90vh] bg-slate-50 flex flex-col sm:rounded-[3rem] shadow-2xl border border-slate-200 overflow-hidden max-w-5xl mx-auto"
               >
                 {(() => {
                   const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
@@ -6286,8 +6375,8 @@ ${exampleJson}`;
                         </div>
 
                         {/* Language Switcher Bar */}
-                        <div className="flex items-center justify-between md:justify-end gap-2 shrink-0 ml-auto">
-                          <div className="flex items-center bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner gap-1 max-w-[140px] xs:max-w-[180px] sm:max-w-none overflow-x-auto no-scrollbar scroll-smooth snap-x">
+                        <div className="flex items-center justify-between md:justify-end gap-2 min-w-0 flex-1 md:flex-none md:max-w-[55%] ml-auto">
+                          <div className="flex items-center min-w-0 w-full bg-slate-800/90 p-1.5 rounded-2xl border border-slate-700 shadow-inner gap-1">
                             <button
                               type="button"
                               onClick={goToPrevLang}
@@ -6297,7 +6386,7 @@ ${exampleJson}`;
                               <ChevronLeft className="w-4 h-4" />
                             </button>
 
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto no-scrollbar scroll-smooth snap-x">
                               {SUPPORTED_LANGUAGES.map((l) => {
                                 const isSelected = editingQuestionLang === l.code;
                                 const isOrig = l.code === (rawQ.originalLanguage || 'sv');
@@ -6910,6 +6999,8 @@ ${exampleJson}`;
                           </motion.div>
                         </AnimatePresence>
 
+                        {showQuestionMore && (
+                          <div>
                         {/* Geotagging */}
                         <div className="pt-8 mt-8 border-t border-slate-200 space-y-5">
                           <div className="flex items-center justify-between">
@@ -6985,6 +7076,60 @@ ${exampleJson}`;
                             )}
                           </div>
                         </div>
+                          </div>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => setShowQuestionMore(prev => !prev)}
+                          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl border border-slate-200 transition-all"
+                        >
+                          <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest">
+                            <ChevronDown className={`w-4 h-4 transition-transform ${showQuestionMore ? 'rotate-180' : ''}`} />
+                            {t(lang, 'geotagFollowUpSection')}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400">{showQuestionMore ? 'Dölj' : 'Visa'}</span>
+                        </button>
+
+                        {showQuestionMore && (
+                          <div className="space-y-6">
+                            {/* Manual Follow-up Configuration */}
+                            <div className="space-y-3 p-5 sm:p-6 bg-emerald-50/80 border-2 border-emerald-200 rounded-3xl">
+                              <div>
+                                <h4 className="font-black text-sm sm:text-base text-emerald-950 uppercase tracking-wide">{t(lang, 'followUpQuestionLabel')}</h4>
+                                <p className="text-xs text-emerald-800 font-medium">{t(lang, 'followUpQuestionDescription')}</p>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <select
+                                  disabled={!isAdmin}
+                                  value={rawQ.followUpQuestionId || ''}
+                                  onChange={(e) => updateQuestion(editingQuestionsCategory, rawQ.id, {
+                                    followUpQuestionId: e.target.value || undefined,
+                                    followUpMode: e.target.value ? (rawQ.followUpMode || 'always') : undefined
+                                  })}
+                                  className="w-full p-3.5 bg-white border-2 border-emerald-200 rounded-2xl font-bold text-sm text-slate-800 outline-none focus:border-emerald-500"
+                                >
+                                  <option value="">{t(lang, 'noFollowUpOption')}</option>
+                                  {questions.filter(item => item.id !== rawQ.id).map(item => (
+                                    <option key={item.id} value={item.id}>{item.text || item.id}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  disabled={!isAdmin || !rawQ.followUpQuestionId}
+                                  value={rawQ.followUpMode || 'always'}
+                                  onChange={(e) => updateQuestion(editingQuestionsCategory, rawQ.id, {
+                                    followUpMode: e.target.value as Question['followUpMode']
+                                  })}
+                                  className="w-full p-3.5 bg-white border-2 border-emerald-200 rounded-2xl font-bold text-sm text-slate-800 outline-none focus:border-emerald-500"
+                                >
+                                  <option value="always">{t(lang, 'followUpAlwaysOption')}</option>
+                                  <option value="correct">{t(lang, 'followUpCorrectOption')}</option>
+                                  <option value="incorrect">{t(lang, 'followUpIncorrectOption')}</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       {/* Editor Footer */}
@@ -7495,7 +7640,7 @@ ${exampleJson}`;
 
         {/* Confirmation Modals */}
         <AnimatePresence>
-          {(questionToDelete || participantToDelete || showResetConfirm || showClearConfirm || showBulkDeleteConfirm) && (
+          {(questionToDelete || participantToDelete || showResetConfirm || showClearConfirm || showBulkDeleteConfirm || dbConfirmation) && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -7508,18 +7653,25 @@ ${exampleJson}`;
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                 className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl text-center space-y-6"
               >
-                <div className="w-20 h-20 bg-rose-100 rounded-3xl flex items-center justify-center mx-auto">
-                  <Trash2 className="text-rose-500 w-10 h-10" />
+                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto ${dbConfirmation?.action === 'overwrite' ? 'bg-indigo-100' : 'bg-rose-100'}`}>
+                  {dbConfirmation?.action === 'overwrite' ? (
+                    <Save className="text-indigo-500 w-10 h-10" />
+                  ) : (
+                    <Trash2 className="text-rose-500 w-10 h-10" />
+                  )}
                 </div>
                 
                 <div className="space-y-2">
                   <h3 className="text-2xl font-black text-slate-800 leading-tight">{t(lang, 'areYouSure')}</h3>
                   <p className="text-slate-500 font-medium">
-                    {questionToDelete && t(lang, 'deleteQuestionConfirm')}
-                    {participantToDelete && t(lang, 'deleteParticipantConfirm').replace('{name}', participantToDelete.name)}
-                    {showBulkDeleteConfirm && t(lang, 'deleteBulkQuestionsConfirm').replace('{count}', selectedQuestionIds.length.toString())}
-                    {showResetConfirm && t(lang, 'resetQuizConfirm')}
-                    {showClearConfirm && t(lang, 'clearAllDataConfirm')}
+                    {dbConfirmation?.action === 'overwrite' && t(lang, 'overwriteQuizConfirm')}
+                    {dbConfirmation?.action === 'delete' && t(lang, 'deleteQuizConfirm')}
+                    {dbConfirmation?.action === 'clear' && t(lang, 'clearDbConfirm')}
+                    {!dbConfirmation && questionToDelete && t(lang, 'deleteQuestionConfirm')}
+                    {!dbConfirmation && participantToDelete && t(lang, 'deleteParticipantConfirm').replace('{name}', participantToDelete.name)}
+                    {!dbConfirmation && showBulkDeleteConfirm && t(lang, 'deleteBulkQuestionsConfirm').replace('{count}', selectedQuestionIds.length.toString())}
+                    {!dbConfirmation && showResetConfirm && t(lang, 'resetQuizConfirm')}
+                    {!dbConfirmation && showClearConfirm && t(lang, 'clearAllDataConfirm')}
                   </p>
                 </div>
 
@@ -7541,14 +7693,21 @@ ${exampleJson}`;
                         localStorage.removeItem('family_quiz_lock_mode');
                         setShowClearConfirm(false);
                       }
+                      if (dbConfirmation) confirmDbAction();
                     }}
                     className={`w-full py-4 text-white rounded-2xl font-black text-sm uppercase shadow-lg transition-all active:scale-95 ${
                       showResetConfirm 
                         ? 'bg-rose-600 shadow-rose-200 hover:bg-rose-700' 
+                        : dbConfirmation?.action === 'overwrite'
+                          ? 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'
                         : 'bg-rose-500 shadow-rose-200 hover:bg-rose-600'
                     }`}
                   >
-                    {showResetConfirm ? t(lang, 'confirmResetBtn') : t(lang, 'yesDelete')}
+                    {dbConfirmation?.action === 'overwrite'
+                      ? t(lang, 'overwriteQuizBtn')
+                      : showResetConfirm
+                        ? t(lang, 'confirmResetBtn')
+                        : t(lang, 'yesDelete')}
                   </button>
                   <button 
                     onClick={() => {
@@ -7557,6 +7716,7 @@ ${exampleJson}`;
                       setShowBulkDeleteConfirm(false);
                       setShowResetConfirm(false);
                       setShowClearConfirm(false);
+                      setDbConfirmation(null);
                     }}
                     className={`w-full py-3 rounded-2xl font-black text-xs uppercase transition-all active:scale-95 ${
                       showResetConfirm 

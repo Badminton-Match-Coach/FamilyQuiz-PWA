@@ -2973,15 +2973,7 @@ ${exampleJson}`;
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         const target = e.currentTarget;
-                        if (!target.dataset.triedFallback) {
-                          target.dataset.triedFallback = '1';
-                          target.src = `${import.meta.env.BASE_URL}icon.svg`;
-                        } else if (target.dataset.triedFallback === '1') {
-                          target.dataset.triedFallback = '2';
-                          target.src = '/icon.png';
-                        } else {
-                          target.style.display = 'none';
-                        }
+                        target.style.display = 'none';
                       }}
                     />
                   )}

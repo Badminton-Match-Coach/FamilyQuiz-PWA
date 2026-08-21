@@ -2954,47 +2954,51 @@ ${exampleJson}`;
                   aria-label="Quiz"
                 >
                   {quizConfig.logoUrl ? (
-                    <img
-                      src={quizConfig.logoUrl}
-                      alt={`${quizConfig.title} logo`}
-                      referrerPolicy="no-referrer"
-                      className="h-full w-auto max-w-full object-contain"
-                      onError={(e) => {
-                        const target = e.currentTarget as HTMLImageElement;
-                        if (target.dataset.triedFallback !== 'app') {
-                          target.dataset.triedFallback = 'app';
-                          target.src = `${import.meta.env.BASE_URL}icon.png`;
-                          return;
-                        }
-                        if (target.dataset.triedFallback !== 'app2') {
-                          target.dataset.triedFallback = 'app2';
-                          target.src = `${import.meta.env.BASE_URL}favicon.png`;
-                          return;
-                        }
-                        target.removeAttribute('src');
-                      }}
-                    />
+                    <>
+                      <img
+                        src={quizConfig.logoUrl}
+                        alt={`${quizConfig.title} logo`}
+                        referrerPolicy="no-referrer"
+                        className="h-full w-auto max-w-full object-contain"
+                        onError={(e) => {
+                          const target = e.currentTarget as HTMLImageElement;
+                          const fallback = target.nextElementSibling as HTMLImageElement | null;
+                          target.style.display = 'none';
+                          if (fallback) {
+                            fallback.style.display = 'block';
+                          }
+                        }}
+                      />
+                      <img
+                        src={`${import.meta.env.BASE_URL}icon.png`}
+                        alt="FamilyQuiz fallback icon"
+                        referrerPolicy="no-referrer"
+                        className="hidden h-full w-full object-cover"
+                      />
+                    </>
                   ) : (
-                    <img
-                      src={`${import.meta.env.BASE_URL}icon.png`}
-                      alt="FamilyQuiz Icon"
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        const target = e.currentTarget as HTMLImageElement;
-                        if (target.dataset.triedFallback !== '1') {
-                          target.dataset.triedFallback = '1';
-                          target.src = `${import.meta.env.BASE_URL}favicon.png`;
-                          return;
-                        }
-                        if (target.dataset.triedFallback !== '2') {
-                          target.dataset.triedFallback = '2';
-                          target.src = `${import.meta.env.BASE_URL}icon.jpg`;
-                          return;
-                        }
-                        target.removeAttribute('src');
-                      }}
-                    />
+                    <>
+                      <img
+                        src={`${import.meta.env.BASE_URL}icon.png`}
+                        alt="FamilyQuiz Icon"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.currentTarget as HTMLImageElement;
+                          const fallback = target.nextElementSibling as HTMLImageElement | null;
+                          target.style.display = 'none';
+                          if (fallback) {
+                            fallback.style.display = 'block';
+                          }
+                        }}
+                      />
+                      <img
+                        src={`${import.meta.env.BASE_URL}icon.png`}
+                        alt="FamilyQuiz fallback icon"
+                        referrerPolicy="no-referrer"
+                        className="hidden h-full w-full object-cover"
+                      />
+                    </>
                   )}
                 </button>
                 <div className="min-w-0 flex-1">

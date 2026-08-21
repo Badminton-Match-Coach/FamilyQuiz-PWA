@@ -29,9 +29,9 @@
       "purpose": "any maskable"
     },
     {
-      "src": "./icon.jpg",
+      "src": "./icon.png",
       "sizes": "512x512",
-      "type": "image/jpeg"
+      "type": "image/png"
     }
   ]
 }

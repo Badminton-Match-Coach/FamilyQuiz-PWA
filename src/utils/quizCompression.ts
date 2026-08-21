@@ -35,6 +35,7 @@ interface MinifiedQuestion {
   o?: string[];
   c?: number[];
   l?: [number, number];
+  h?: boolean; // hideLocationOnMap (treasure hunt)
   m?: number;
   f?: string;
   w?: 'always' | 'correct' | 'incorrect';
@@ -72,6 +73,7 @@ function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
       Math.round(q.location.lng * precision) / precision
     ];
   }
+  if (q.hideLocationOnMap || q.location?.hideOnMap) min.h = true;
   if (typeof q.maxPoints === 'number') min.m = q.maxPoints;
   if (q.followUpQuestionId) min.f = q.followUpQuestionId;
   if (q.followUpMode && q.followUpMode !== 'always') min.w = q.followUpMode;
@@ -116,7 +118,8 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
     text: min.q || '',
     options: min.o || (min.y === 'points' || min.y === 'text' ? [] : ['1', 'X', '2']),
     correctAnswers: min.c || (min.y === 'points' || min.y === 'text' ? [] : [0]),
-    location: min.l ? { lat: min.l[0], lng: min.l[1] } : undefined,
+    location: min.l ? { lat: min.l[0], lng: min.l[1], hideOnMap: min.h || undefined } : undefined,
+    hideLocationOnMap: min.h || undefined,
     maxPoints: min.m,
     followUpQuestionId: min.f,
     followUpMode: min.w || 'always',

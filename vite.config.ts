@@ -1,13 +1,24 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import javascriptObfuscator from 'rollup-plugin-javascript-obfuscator';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
     // Relative URLs allow the build to work on GitHub Pages project sites.
     base: './',
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      javascriptObfuscator({
+        compact: true,
+        controlFlowFlattening: false,
+        identifierNamesGenerator: 'hexadecimal',
+        renameGlobals: false,
+        stringArray: false,
+      }),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

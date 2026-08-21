@@ -18,6 +18,7 @@ export interface Location {
   lat: number;
   lng: number;
   name?: string;
+  hideOnMap?: boolean;
 }
 
 export type QuestionType = 'options' | 'points' | 'text';
@@ -34,6 +35,7 @@ export interface Question {
   followUpQuestionId?: string;
   followUpMode?: 'always' | 'correct' | 'incorrect';
   location?: Location;
+  hideLocationOnMap?: boolean; // When true: question position is hidden from participants on the map (treasure hunt)
   originalLanguage?: Language; // Language code when created (e.g. 'sv', 'fr', 'en', 'es')
   translations?: Record<string, { text: string; options: string[]; correctTextAnswer?: string }>;
 }

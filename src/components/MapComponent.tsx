@@ -679,9 +679,10 @@ export const AdminMapPicker: React.FC<AdminMapPickerProps> = ({
         `${index + 1}`
       );
 
+      const isHidden = !!q.hideLocationOnMap || !!q.location.hideOnMap;
       const m = L.marker([q.location.lat, q.location.lng], { icon })
         .addTo(map)
-        .bindPopup(`<b>${type === 'barn' ? 'Barn' : 'Vuxen'} #${index + 1}</b><br/>${q.text}`);
+        .bindPopup(`<b>${type === 'barn' ? 'Barn' : 'Vuxen'} #${index + 1}${isHidden ? ' 🕵️‍♂️ (Skattjakt/Dold)' : ''}</b><br/>${q.text}`);
 
       existingMarkers.push(m);
     });
@@ -734,7 +735,19 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
   const walkedLineRef = useRef<L.Polyline | null>(null);
   const geofenceCirclesRef = useRef<L.Circle[]>([]);
 
-  const geotagged = questions.filter((item) => item.q.location);
+  // Geotagged questions filter:
+  // Visible on map: all geotagged questions EXCEPT those where hideLocationOnMap is true and not yet answered!
+  const visibleGeotagged = useMemo(() => {
+    return questions.filter(
+      (item) => item.q.location && (!item.q.hideLocationOnMap && !item.q.location?.hideOnMap || item.isAnswered)
+    );
+  }, [questions]);
+
+  const hiddenTreasureCount = useMemo(() => {
+    return questions.filter(
+      (item) => item.q.location && (item.q.hideLocationOnMap || item.q.location?.hideOnMap) && !item.isAnswered
+    ).length;
+  }, [questions]);
 
   const walkedDistanceMeters = useMemo(() => {
     if (!walkedPath || walkedPath.length < 2) return 0;
@@ -749,7 +762,7 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
     if (userLocation) {
       allCoords.push([userLocation.lat, userLocation.lng]);
     }
-    geotagged.forEach(({ q }) => {
+    visibleGeotagged.forEach(({ q }) => {
       if (q.location) {
         allCoords.push([q.location.lat, q.location.lng]);
       }
@@ -775,8 +788,8 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
     if (!mapRef.current) return;
 
     if (!leafletMap.current) {
-      const defaultLat = userLocation?.lat || geotagged[0]?.q.location?.lat || 59.3293;
-      const defaultLng = userLocation?.lng || geotagged[0]?.q.location?.lng || 18.0686;
+      const defaultLat = userLocation?.lat || visibleGeotagged[0]?.q.location?.lat || 59.3293;
+      const defaultLng = userLocation?.lng || visibleGeotagged[0]?.q.location?.lng || 18.0686;
 
       const map = L.map(mapRef.current).setView([defaultLat, defaultLng], 15);
 
@@ -871,9 +884,9 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
       trailLineRef.current = null;
     }
 
-    // Draw trail connection line if >= 2 geotagged stations
-    if (geotagged.length >= 2) {
-      const trailCoords: [number, number][] = geotagged.map((item) => [item.q.location!.lat, item.q.location!.lng]);
+    // Draw trail connection line if >= 2 visible geotagged stations
+    if (visibleGeotagged.length >= 2) {
+      const trailCoords: [number, number][] = visibleGeotagged.map((item) => [item.q.location!.lat, item.q.location!.lng]);
       trailLineRef.current = L.polyline(trailCoords, {
         color: '#6366f1',
         weight: 4,
@@ -882,7 +895,7 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
       }).addTo(map);
     }
 
-    geotagged.forEach(({ q, index, isAnswered }) => {
+    visibleGeotagged.forEach(({ q, index, isAnswered }) => {
       if (!q.location) return;
 
       const latlng: [number, number] = [q.location.lat, q.location.lng];
@@ -983,7 +996,7 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
     return () => {
       markers.forEach((m) => m.remove());
     };
-  }, [questions, userType, userLocation, unlockDistance]);
+  }, [visibleGeotagged, userType, userLocation, unlockDistance]);
 
   return (
     <div className="relative isolate z-0 w-full h-80 sm:h-96 rounded-3xl overflow-hidden border-4 border-white shadow-xl">
@@ -1056,10 +1069,16 @@ export const ParticipantMap: React.FC<ParticipantMapProps> = ({
             <span>{t(lang, 'walkedPathLegend')}</span>
           </div>
         )}
-        {geotagged.length >= 2 && (
+        {visibleGeotagged.length >= 2 && (
           <div className="flex items-center gap-1.5 text-indigo-600">
             <span className="w-3.5 h-1 rounded-full bg-indigo-500 border border-indigo-600 border-dashed" />
             <span>{t(lang, 'plannedRouteLegend')}</span>
+          </div>
+        )}
+        {hiddenTreasureCount > 0 && (
+          <div className="flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+            <span>🕵️‍♂️</span>
+            <span>{hiddenTreasureCount} {t(lang, 'treasureHuntBadge')}</span>
           </div>
         )}
         <div className="flex items-center gap-1.5">

@@ -43,7 +43,8 @@ import {
   FolderOpen,
   HardDrive,
   Mail,
-  ArrowUpDown
+  ArrowUpDown,
+  GripVertical
 } from 'lucide-react';
 import { Participant, QuizConfig, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { defaultQuiz } from './data/defaultQuiz';
@@ -93,6 +94,13 @@ const STORAGE_KEY_CACHED_APP_URL = 'family_quiz_cached_app_url';
 const DEFAULT_PARTICIPANT_UNIQUE_ID = 'default-participant-reserved';
 const DEFAULT_QUIZ_ID = 'default-quiz-template';
 const FALLBACK_APP_URL = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
+
+export const getOptionLabel = (oIdx: number, totalCount?: number): string => {
+  if (totalCount === 3) {
+    return oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : String(oIdx + 1);
+  }
+  return String(oIdx + 1);
+};
 
 function getInitialCachedAppUrl(): string {
   if (typeof window !== 'undefined') {
@@ -371,11 +379,14 @@ export default function App() {
     const unlockDistance = Math.max(5, quizConfig.geotagUnlockDistance || 20);
 
     if (location) {
+      const isTreasure = !!question?.hideLocationOnMap || !!location?.hideOnMap;
       if (!userLocation) {
         setLockNotice({
           questionIndex: idx,
           distanceMeters: null,
-          message: 'Denna fråga har en geotag på kartan. Slå på din GPS-position för att kunna låsa upp och svara på den!',
+          message: isTreasure
+            ? t(lang, 'treasureHuntLockMessage')
+            : 'Denna fråga har en geotag på kartan. Slå på din GPS-position för att kunna låsa upp och svara på den!',
         });
         return;
       }
@@ -384,8 +395,10 @@ export default function App() {
       if (dist > unlockDistance) {
         setLockNotice({
           questionIndex: idx,
-          distanceMeters: dist,
-          message: `Du är ${formatDistance(dist)} från stationen. Du behöver gå närmare (inom ${unlockDistance} meter) för att låsa upp fråga ${idx + 1}!`,
+          distanceMeters: isTreasure ? null : dist,
+          message: isTreasure
+            ? t(lang, 'treasureHuntLockMessage')
+            : `Du är ${formatDistance(dist)} från stationen. Du behöver gå närmare (inom ${unlockDistance} meter) för att låsa upp fråga ${idx + 1}!`,
         });
         return;
       }
@@ -442,6 +455,13 @@ export default function App() {
   const [dbNotification, setDbNotification] = useState<string | null>(null);
   const [isSavingToDb, setIsSavingToDb] = useState(false);
   const dbFileInputRef = useRef<HTMLInputElement>(null);
+  const [draggedQuestionRow, setDraggedQuestionRow] = useState<{
+    id: string;
+    isFollowUp: boolean;
+    rootQuestionId: string;
+  } | null>(null);
+  const [dragOverQuestionId, setDragOverQuestionId] = useState<string | null>(null);
+  const [dropIndicatorPosition, setDropIndicatorPosition] = useState<'before' | 'after' | null>(null);
 
   const sortedSavedQuizzes = useMemo(() => {
     return [...savedQuizzes].sort((a, b) => {
@@ -1430,19 +1450,64 @@ ${exampleJson}`;
       childrenByParentId.set(question.id, children);
     }
 
-    const rows: { question: Question; label: string; isFollowUp: boolean }[] = [];
-    const addRowAndChildren = (question: Question, label: string, isFollowUp: boolean, visited: Set<string>) => {
-      if (visited.has(question.id)) return;
-      const nextVisited = new Set(visited).add(question.id);
-      rows.push({ question, label, isFollowUp });
-      (childrenByParentId.get(question.id) || []).forEach((child, childIndex) => {
-        addRowAndChildren(child, `${label}:${childIndex + 1}`, true, nextVisited);
-      });
-    };
+    const mainQuestions = questions.filter(question => !followUpTargetIds.has(question.id));
+    const rows: {
+      question: Question;
+      label: string;
+      isFollowUp: boolean;
+      parentQuestionId?: string;
+      rootQuestionId: string;
+      groupIndex: number;
+      totalGroups: number;
+      subIndex: number;
+      totalSubInGroup: number;
+    }[] = [];
 
-    questions
-      .filter(question => !followUpTargetIds.has(question.id))
-      .forEach((question, index) => addRowAndChildren(question, `${index + 1}`, false, new Set()));
+    mainQuestions.forEach((rootQ, rootIdx) => {
+      // Calculate total chained followups under this root
+      const groupChildren: Question[] = [];
+      const collectChildren = (q: Question, visited: Set<string>) => {
+        const children = childrenByParentId.get(q.id) || [];
+        for (const child of children) {
+          if (!visited.has(child.id)) {
+            visited.add(child.id);
+            groupChildren.push(child);
+            collectChildren(child, visited);
+          }
+        }
+      };
+      collectChildren(rootQ, new Set([rootQ.id]));
+
+      let currentChildCounter = 0;
+      const addRowAndChildren = (
+        question: Question,
+        label: string,
+        isFollowUp: boolean,
+        visited: Set<string>,
+        parentQuestionId?: string,
+        subIndex: number = 0
+      ) => {
+        if (visited.has(question.id)) return;
+        const nextVisited = new Set(visited).add(question.id);
+        rows.push({
+          question,
+          label,
+          isFollowUp,
+          parentQuestionId,
+          rootQuestionId: rootQ.id,
+          groupIndex: rootIdx,
+          totalGroups: mainQuestions.length,
+          subIndex,
+          totalSubInGroup: groupChildren.length
+        });
+        (childrenByParentId.get(question.id) || []).forEach((child, childIndex) => {
+          currentChildCounter++;
+          addRowAndChildren(child, `${label}:${childIndex + 1}`, true, nextVisited, question.id, currentChildCounter);
+        });
+      };
+
+      addRowAndChildren(rootQ, `${rootIdx + 1}`, false, new Set(), undefined, 0);
+    });
 
     return rows;
   }, [editingQuestionsCategory, quizConfig]);
@@ -1965,6 +2030,155 @@ ${exampleJson}`;
     });
   };
 
+  const getQuestionGroups = (category: UserType) => {
+    const questions = category === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    const followUpTargetIds = new Set(
+      questions
+        .map(q => q.followUpQuestionId)
+        .filter((id): id is string => !!id)
+    );
+
+    const mainQuestions = questions.filter(q => !followUpTargetIds.has(q.id));
+    
+    return mainQuestions.map(root => {
+      const followUps: Question[] = [];
+      const visited = new Set<string>([root.id]);
+      let currId = root.followUpQuestionId;
+      while (currId && !visited.has(currId)) {
+        visited.add(currId);
+        const child = questions.find(q => q.id === currId);
+        if (!child) break;
+        followUps.push(child);
+        currId = child.followUpQuestionId;
+      }
+      return { root, followUps };
+    });
+  };
+
+  const reorderMainQuestions = (category: UserType, sourceRootId: string, targetRootId: string, position: 'before' | 'after' = 'before') => {
+    if (!isAdmin || sourceRootId === targetRootId) return;
+    const groups = getQuestionGroups(category);
+    const sourceIdx = groups.findIndex(g => g.root.id === sourceRootId);
+    const targetIdx = groups.findIndex(g => g.root.id === targetRootId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const [movedGroup] = groups.splice(sourceIdx, 1);
+    const newTargetIdx = groups.findIndex(g => g.root.id === targetRootId);
+    const insertIdx = position === 'after' ? newTargetIdx + 1 : newTargetIdx;
+    groups.splice(insertIdx, 0, movedGroup);
+
+    const newQuestions: Question[] = [];
+    for (const g of groups) {
+      newQuestions.push(g.root, ...g.followUps);
+    }
+
+    setQuizConfig(prev => category === 'barn' 
+      ? { ...prev, barnQuestions: newQuestions }
+      : { ...prev, vuxenQuestions: newQuestions }
+    );
+  };
+
+  const reorderFollowUpQuestions = (category: UserType, rootQuestionId: string, sourceFollowUpId: string, targetFollowUpId: string, position: 'before' | 'after' = 'before') => {
+    if (!isAdmin || sourceFollowUpId === targetFollowUpId) return;
+    const groups = getQuestionGroups(category);
+    const group = groups.find(g => g.root.id === rootQuestionId);
+    if (!group || group.followUps.length < 2) return;
+
+    const sourceIdx = group.followUps.findIndex(q => q.id === sourceFollowUpId);
+    const targetIdx = group.followUps.findIndex(q => q.id === targetFollowUpId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const [moved] = group.followUps.splice(sourceIdx, 1);
+    const newTargetIdx = group.followUps.findIndex(q => q.id === targetFollowUpId);
+    const insertIdx = position === 'after' ? newTargetIdx + 1 : newTargetIdx;
+    group.followUps.splice(insertIdx, 0, moved);
+
+    if (group.followUps.length > 0) {
+      group.root = { ...group.root, followUpQuestionId: group.followUps[0].id };
+      for (let i = 0; i < group.followUps.length; i++) {
+        const nextId = i < group.followUps.length - 1 ? group.followUps[i + 1].id : undefined;
+        group.followUps[i] = { ...group.followUps[i], followUpQuestionId: nextId };
+      }
+    }
+
+    const newQuestions: Question[] = [];
+    for (const g of groups) {
+      newQuestions.push(g.root, ...g.followUps);
+    }
+
+    setQuizConfig(prev => category === 'barn' 
+      ? { ...prev, barnQuestions: newQuestions }
+      : { ...prev, vuxenQuestions: newQuestions }
+    );
+  };
+
+  const moveMainQuestionStep = (category: UserType, rootId: string, direction: 'up' | 'down') => {
+    if (!isAdmin) return;
+    const groups = getQuestionGroups(category);
+    const idx = groups.findIndex(g => g.root.id === rootId);
+    if (idx === -1) return;
+    if (direction === 'up' && idx > 0) {
+      const temp = groups[idx];
+      groups[idx] = groups[idx - 1];
+      groups[idx - 1] = temp;
+    } else if (direction === 'down' && idx < groups.length - 1) {
+      const temp = groups[idx];
+      groups[idx] = groups[idx + 1];
+      groups[idx + 1] = temp;
+    } else {
+      return;
+    }
+
+    const newQuestions: Question[] = [];
+    for (const g of groups) {
+      newQuestions.push(g.root, ...g.followUps);
+    }
+
+    setQuizConfig(prev => category === 'barn' 
+      ? { ...prev, barnQuestions: newQuestions }
+      : { ...prev, vuxenQuestions: newQuestions }
+    );
+  };
+
+  const moveFollowUpStep = (category: UserType, rootId: string, followUpId: string, direction: 'up' | 'down') => {
+    if (!isAdmin) return;
+    const groups = getQuestionGroups(category);
+    const group = groups.find(g => g.root.id === rootId);
+    if (!group) return;
+    const idx = group.followUps.findIndex(q => q.id === followUpId);
+    if (idx === -1) return;
+
+    if (direction === 'up' && idx > 0) {
+      const temp = group.followUps[idx];
+      group.followUps[idx] = group.followUps[idx - 1];
+      group.followUps[idx - 1] = temp;
+    } else if (direction === 'down' && idx < group.followUps.length - 1) {
+      const temp = group.followUps[idx];
+      group.followUps[idx] = group.followUps[idx + 1];
+      group.followUps[idx + 1] = temp;
+    } else {
+      return;
+    }
+
+    if (group.followUps.length > 0) {
+      group.root = { ...group.root, followUpQuestionId: group.followUps[0].id };
+      for (let i = 0; i < group.followUps.length; i++) {
+        const nextId = i < group.followUps.length - 1 ? group.followUps[i + 1].id : undefined;
+        group.followUps[i] = { ...group.followUps[i], followUpQuestionId: nextId };
+      }
+    }
+
+    const newQuestions: Question[] = [];
+    for (const g of groups) {
+      newQuestions.push(g.root, ...g.followUps);
+    }
+
+    setQuizConfig(prev => category === 'barn' 
+      ? { ...prev, barnQuestions: newQuestions }
+      : { ...prev, vuxenQuestions: newQuestions }
+    );
+  };
+
   const [questionToDelete, setQuestionToDelete] = useState<{ category: UserType; id: string } | null>(null);
   const [participantToDelete, setParticipantToDelete] = useState<Participant | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -1996,7 +2210,6 @@ ${exampleJson}`;
   // Bulk question selection state
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
-  const [numberSelectionInput, setNumberSelectionInput] = useState('');
 
   // Quiz Library state
   const [quizLibrary, setQuizLibrary] = useState<any[]>([]);
@@ -2124,7 +2337,6 @@ ${exampleJson}`;
   // Clear selected question IDs when switching active editing category
   useEffect(() => {
     setSelectedQuestionIds([]);
-    setNumberSelectionInput('');
   }, [editingQuestionsCategory]);
 
   const toggleSelectQuestion = (id: string) => {
@@ -2141,36 +2353,6 @@ ${exampleJson}`;
     } else {
       setSelectedQuestionIds(questions.map(q => q.id));
     }
-  };
-
-  const selectQuestionsByNumbers = () => {
-    if (!editingQuestionsCategory || !numberSelectionInput.trim()) return;
-    const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
-    
-    const parts = numberSelectionInput.split(',').map(s => s.trim());
-    const idsToSelect = new Set<string>(selectedQuestionIds);
-
-    parts.forEach(part => {
-      if (part.includes('-')) {
-        const rangeParts = part.split('-').map(s => parseInt(s.trim(), 10));
-        if (rangeParts.length === 2 && !isNaN(rangeParts[0]) && !isNaN(rangeParts[1])) {
-          const start = Math.min(rangeParts[0], rangeParts[1]);
-          const end = Math.max(rangeParts[0], rangeParts[1]);
-          for (let i = start; i <= end; i++) {
-            if (i >= 1 && i <= questions.length) {
-              idsToSelect.add(questions[i - 1].id);
-            }
-          }
-        }
-      } else {
-        const num = parseInt(part, 10);
-        if (!isNaN(num) && num >= 1 && num <= questions.length) {
-          idsToSelect.add(questions[num - 1].id);
-        }
-      }
-    });
-
-    setSelectedQuestionIds(Array.from(idsToSelect));
   };
 
   const confirmDeleteSelectedQuestions = () => {
@@ -3332,7 +3514,7 @@ ${exampleJson}`;
                                             ? `🎯 ${t(lang, 'pointQuestion')}` 
                                             : sampleQ?.type === 'text'
                                             ? `🔤 ${sampleQ.correctTextAnswer || ''}`
-                                            : `${t(lang, 'correctAnswer')}: ${(sampleQ?.correctAnswers || []).map(ans => ans === 0 ? '1' : ans === 1 ? 'X' : '2').join(', ')}`}
+                                            : `${t(lang, 'correctAnswer')}: ${(sampleQ?.correctAnswers || []).map(ans => getOptionLabel(ans, sampleQ?.options?.length)).join(', ')}`}
                                         </span>
                                       )}
                                     </div>
@@ -3570,45 +3752,68 @@ ${exampleJson}`;
 
                               {activeQ.location && (
                                 <div className="mt-4 space-y-3">
-                                  <div className="p-3.5 bg-indigo-50/90 border-2 border-indigo-200/80 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-indigo-950 shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-9 h-9 bg-indigo-600 text-white rounded-xl flex items-center justify-center shrink-0 shadow-sm">
-                                        <MapPin className="w-5 h-5" />
-                                      </div>
-                                      <div>
-                                        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">{t(lang, 'geotaggedStations')}</p>
-                                        <div className="pt-0.5">
-                                          <CompassDirectionBadge 
-                                            userLocation={userLocation}
-                                            targetLocation={activeQ.location}
-                                            unlockDistance={quizConfig.geotagUnlockDistance || 20}
-                                            lang={lang}
-                                          />
+                                  {(() => {
+                                    const isTreasure = !!activeQ.hideLocationOnMap || !!activeQ.location?.hideOnMap;
+                                    return (
+                                      <div className={`p-3.5 border-2 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm ${
+                                        isTreasure 
+                                          ? 'bg-amber-50/90 border-amber-200/90 text-amber-950' 
+                                          : 'bg-indigo-50/90 border-indigo-200/80 text-indigo-950'
+                                      }`}>
+                                        <div className="flex items-center gap-3">
+                                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
+                                            isTreasure ? 'bg-amber-600 text-white text-lg' : 'bg-indigo-600 text-white'
+                                          }`}>
+                                            {isTreasure ? '🕵️‍♂️' : <MapPin className="w-5 h-5" />}
+                                          </div>
+                                          <div>
+                                            <p className={`text-[10px] font-black uppercase tracking-widest ${
+                                              isTreasure ? 'text-amber-700' : 'text-indigo-600'
+                                            }`}>
+                                              {isTreasure ? t(lang, 'treasureHuntQuestionViewTitle') : t(lang, 'geotaggedStations')}
+                                            </p>
+                                            <div className="pt-0.5">
+                                              {isTreasure ? (
+                                                <span className="text-xs font-bold text-amber-900">
+                                                  {t(lang, 'treasureHuntQuestionViewDesc')}
+                                                </span>
+                                              ) : (
+                                                <CompassDirectionBadge 
+                                                  userLocation={userLocation}
+                                                  targetLocation={activeQ.location}
+                                                  unlockDistance={quizConfig.geotagUnlockDistance || 20}
+                                                  lang={lang}
+                                                />
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => setShowQuestionMiniMap(prev => !prev)}
+                                            className="text-xs font-black bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                                          >
+                                            <Compass className={`w-3.5 h-3.5 ${isTreasure ? 'text-amber-600' : 'text-indigo-600'}`} />
+                                            <span>{showQuestionMiniMap ? t(lang, 'hideMiniMap') : t(lang, 'showMiniMap')}</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSelectedQuestionIndex(null);
+                                              setSelectedParticipantId(null);
+                                            }}
+                                            className={`text-xs font-black text-white px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all ${
+                                              isTreasure ? 'bg-amber-600 hover:bg-amber-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                                            }`}
+                                          >
+                                            <Map className="w-3.5 h-3.5" />
+                                            <span>{t(lang, 'allQuestionsAndMap')}</span>
+                                          </button>
                                         </div>
                                       </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-                                      <button
-                                        type="button"
-                                        onClick={() => setShowQuestionMiniMap(prev => !prev)}
-                                        className="text-xs font-black bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                                      >
-                                        <Compass className="w-3.5 h-3.5 text-indigo-600" />
-                                        <span>{showQuestionMiniMap ? t(lang, 'hideMiniMap') : t(lang, 'showMiniMap')}</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedQuestionIndex(null);
-                                          setSelectedParticipantId(null);
-                                        }}
-                                        className="text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                                      >
-                                        <Map className="w-3.5 h-3.5" />
-                                        <span>{t(lang, 'allQuestionsAndMap')}</span>
-                                      </button>
-                                    </div>
-                                  </div>
+                                    );
+                                  })()}
 
                                   {showQuestionMiniMap && (
                                     <MiniStationMap
@@ -4055,7 +4260,7 @@ ${exampleJson}`;
                                       isCorrectAnswer ? 'bg-emerald-200/50 text-emerald-700' : 
                                       (isUserAnswer && !isCorrectAnswer) ? 'bg-rose-200/50 text-rose-700' : 'bg-black/5 text-slate-400'
                                     }`}>
-                                      {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : '2'}
+                                      {getOptionLabel(oIdx, question.options?.length)}
                                     </span>
                                     <span className="font-medium">{opt}</span>
                                   </div>
@@ -4527,7 +4732,7 @@ ${exampleJson}`;
                                               <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
                                                 (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
                                               }`}>
-                                                {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                                {getOptionLabel(oIdx, q.options?.length)}
                                               </span>
                                               <span className="flex-1">{opt}</span>
                                               {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
@@ -4607,7 +4812,7 @@ ${exampleJson}`;
                                               <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
                                                 (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
                                               }`}>
-                                                {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                                {getOptionLabel(oIdx, q.options?.length)}
                                               </span>
                                               <span className="flex-1">{opt}</span>
                                               {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
@@ -4888,9 +5093,17 @@ ${exampleJson}`;
                                 : t(lang, 'selectAllBtn')}
                             </button>
                             {selectedQuestionIds.length > 0 && (
-                              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
-                                {t(lang, 'selectedCount', { count: selectedQuestionIds.length.toString() })}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
+                                  {t(lang, 'selectedCount', { count: selectedQuestionIds.length.toString() })}
+                                </span>
+                                <button 
+                                  onClick={() => setSelectedQuestionIds([])}
+                                  className="px-2 py-1 text-slate-400 hover:text-slate-600 text-xs font-bold shrink-0"
+                                >
+                                  {t(lang, 'clearSelectionBtn')}
+                                </button>
+                              </div>
                             )}
                           </div>
 
@@ -4904,37 +5117,17 @@ ${exampleJson}`;
                             </button>
                           )}
                         </div>
-
-                        <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60">
-                          <input 
-                            type="text"
-                            placeholder={t(lang, 'selectByNumbersPlaceholder')}
-                            value={numberSelectionInput}
-                            onChange={(e) => setNumberSelectionInput(e.target.value)}
-                            className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 font-medium"
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                selectQuestionsByNumbers();
-                              }
-                            }}
-                          />
-                          <button 
-                            onClick={selectQuestionsByNumbers}
-                            className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-900 transition-all shrink-0 active:scale-95"
-                          >
-                            {t(lang, 'selectNumbersBtn')}
-                          </button>
-                          {selectedQuestionIds.length > 0 && (
-                            <button 
-                              onClick={() => setSelectedQuestionIds([])}
-                              className="px-2 py-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold shrink-0"
-                            >
-                              {t(lang, 'clearSelectionBtn')}
-                            </button>
-                          )}
-                        </div>
                       </div>
+
+                      {/* Drag & Drop Hint Banner */}
+                      {isAdmin && (
+                        <div className="flex items-center gap-2 px-3.5 py-2 bg-slate-100/90 rounded-xl text-[11px] font-bold text-slate-600 border border-slate-200/80">
+                          <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span className="truncate">{t(lang, 'dragToReorder')}</span>
+                          <span className="hidden sm:inline text-slate-400">•</span>
+                          <span className="hidden sm:inline text-[10px] text-slate-500 font-medium truncate">{t(lang, 'dragFollowUpReorderNotice')}</span>
+                        </div>
+                      )}
 
                       {/* Question List */}
                       <div className="max-h-[460px] overflow-y-auto pr-1.5 custom-scrollbar space-y-3">
@@ -4944,106 +5137,252 @@ ${exampleJson}`;
                             return { ...row, question: { ...row.question, text: trans.text, options: trans.options } };
                           })
                           .filter(row => !questionSearch || row.question.text.toLowerCase().includes(questionSearch.toLowerCase()))
-                          .map(({ question: q, label, isFollowUp }) => {
+                          .map((row) => {
+                            const { question: q, label, isFollowUp, rootQuestionId, groupIndex, totalGroups, subIndex, totalSubInGroup } = row;
                             const isSelected = selectedQuestionIds.includes(q.id);
                             const qLangs = getQuestionAvailableLanguages(q);
+                            const isDraggingThis = draggedQuestionRow?.id === q.id;
+                            const isDropTarget = dragOverQuestionId === q.id;
+                            
+                            const isDragTargetValid = (() => {
+                              if (!draggedQuestionRow) return false;
+                              if (draggedQuestionRow.id === q.id) return false;
+                              if (draggedQuestionRow.isFollowUp) {
+                                return isFollowUp && rootQuestionId === draggedQuestionRow.rootQuestionId;
+                              } else {
+                                return !isFollowUp;
+                              }
+                            })();
+
                             return (
                               <div 
-                                key={q.id} 
-                                className={`${isFollowUp ? 'ml-6 border-l-4 border-emerald-300' : ''} border rounded-2xl overflow-hidden transition-all ${
-                                  isSelected ? 'bg-rose-50/60 border-rose-300 shadow-sm' : 'bg-slate-50 border-slate-200/70 hover:border-indigo-200'
-                                }`}
+                                key={q.id}
+                                draggable={isAdmin}
+                                onDragStart={(e) => {
+                                  if (!isAdmin) return;
+                                  setDraggedQuestionRow({
+                                    id: q.id,
+                                    isFollowUp,
+                                    rootQuestionId
+                                  });
+                                  e.dataTransfer.effectAllowed = 'move';
+                                  e.dataTransfer.setData('text/plain', q.id);
+                                }}
+                                onDragOver={(e) => {
+                                  if (!isAdmin || !draggedQuestionRow) return;
+                                  if (isDragTargetValid) {
+                                    e.preventDefault();
+                                    e.dataTransfer.dropEffect = 'move';
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const midpoint = rect.top + rect.height / 2;
+                                    const position = e.clientY < midpoint ? 'before' : 'after';
+                                    if (dragOverQuestionId !== q.id || dropIndicatorPosition !== position) {
+                                      setDragOverQuestionId(q.id);
+                                      setDropIndicatorPosition(position);
+                                    }
+                                  } else {
+                                    e.dataTransfer.dropEffect = 'none';
+                                  }
+                                }}
+                                onDragLeave={(e) => {
+                                  if (dragOverQuestionId === q.id) {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    if (
+                                      e.clientX < rect.left ||
+                                      e.clientX >= rect.right ||
+                                      e.clientY < rect.top ||
+                                      e.clientY >= rect.bottom
+                                    ) {
+                                      setDragOverQuestionId(null);
+                                      setDropIndicatorPosition(null);
+                                    }
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  if (!isAdmin || !draggedQuestionRow || !isDragTargetValid) return;
+                                  e.preventDefault();
+                                  const position = dropIndicatorPosition || 'before';
+                                  if (draggedQuestionRow.isFollowUp) {
+                                    reorderFollowUpQuestions(editingQuestionsCategory, rootQuestionId, draggedQuestionRow.id, q.id, position);
+                                  } else {
+                                    reorderMainQuestions(editingQuestionsCategory, draggedQuestionRow.id, q.id, position);
+                                  }
+                                  setDraggedQuestionRow(null);
+                                  setDragOverQuestionId(null);
+                                  setDropIndicatorPosition(null);
+                                }}
+                                onDragEnd={() => {
+                                  setDraggedQuestionRow(null);
+                                  setDragOverQuestionId(null);
+                                  setDropIndicatorPosition(null);
+                                }}
+                                className={`relative transition-all ${
+                                  isDraggingThis ? 'opacity-40 scale-[0.99]' : 'opacity-100'
+                                } ${isFollowUp ? 'ml-6' : ''}`}
                               >
+                                {isDropTarget && isDragTargetValid && dropIndicatorPosition === 'before' && (
+                                  <div className="absolute -top-1.5 left-0 right-0 h-1 bg-indigo-500 rounded-full z-20 shadow-sm animate-pulse" />
+                                )}
+                                {isDropTarget && isDragTargetValid && dropIndicatorPosition === 'after' && (
+                                  <div className="absolute -bottom-1.5 left-0 right-0 h-1 bg-indigo-500 rounded-full z-20 shadow-sm animate-pulse" />
+                                )}
+
                                 <div 
-                                  className="w-full p-3.5 sm:p-4 flex items-center justify-between hover:bg-slate-100/60 transition-colors cursor-pointer"
-                                  onClick={() => openQuestionEditor(q.id)}
+                                  className={`${isFollowUp ? 'border-l-4 border-emerald-400' : ''} border rounded-2xl overflow-hidden transition-all ${
+                                    isSelected 
+                                      ? 'bg-rose-50/60 border-rose-300 shadow-sm' 
+                                      : isDropTarget && isDragTargetValid
+                                      ? 'bg-indigo-50/80 border-indigo-400 shadow-md ring-2 ring-indigo-200'
+                                      : 'bg-slate-50 border-slate-200/70 hover:border-indigo-200'
+                                  }`}
                                 >
-                                  <div className="flex items-start gap-2.5 text-left min-w-0 pr-2">
-                                    <button 
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        toggleSelectQuestion(q.id);
-                                      }}
-                                      className={`w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 ${
-                                        isSelected 
-                                          ? 'bg-rose-500 border-rose-500 text-white shadow-sm' 
-                                          : 'bg-white border-slate-300 text-transparent hover:border-indigo-400'
-                                      }`}
-                                    >
-                                      <Check className="w-3.5 h-3.5 stroke-[3]" />
-                                    </button>
-
-                                    <span className={`min-w-6 h-6 px-1 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
-                                      isSelected ? 'bg-rose-100 text-rose-700' : 'bg-white border border-slate-200 text-slate-500'
-                                    }`}>
-                                      {label}
-                                    </span>
-
-                                    <div className="flex-1 min-w-0 space-y-1.5">
-                                      <div className="text-xs sm:text-sm font-bold leading-snug text-slate-800 break-words">
-                                        {q.text || t(lang, 'writeQuestionPlaceholder')}
-                                      </div>
-                                      {isFollowUp && (
-                                        <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                          ↳ {t(lang, 'followUpQuestionLabel')}
-                                        </span>
+                                  <div 
+                                    className="w-full p-3 sm:p-3.5 flex items-center justify-between hover:bg-slate-100/60 transition-colors cursor-pointer"
+                                    onClick={() => openQuestionEditor(q.id)}
+                                  >
+                                    <div className="flex items-start gap-2 text-left min-w-0 pr-2">
+                                      {/* Drag Handle & Step Buttons */}
+                                      {isAdmin && (
+                                        <div 
+                                          className="flex items-center gap-0.5 shrink-0 self-center py-1 pr-1 text-slate-400 hover:text-slate-700 cursor-grab active:cursor-grabbing touch-none select-none"
+                                          title={isFollowUp ? t(lang, 'dragFollowUpReorderNotice') : t(lang, 'dragToReorder')}
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <GripVertical className="w-4 h-4 text-slate-400 hover:text-indigo-600 transition-colors" />
+                                          <div className="flex flex-col -space-y-0.5">
+                                            <button
+                                              type="button"
+                                              disabled={isFollowUp ? subIndex <= 1 : groupIndex === 0}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (isFollowUp) {
+                                                  moveFollowUpStep(editingQuestionsCategory, rootQuestionId, q.id, 'up');
+                                                } else {
+                                                  moveMainQuestionStep(editingQuestionsCategory, rootQuestionId, 'up');
+                                                }
+                                              }}
+                                              className="p-0.5 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors"
+                                              title={t(lang, 'moveQuestionUp')}
+                                            >
+                                              <svg className="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24"><path d="M12 4l-8 8h16z"/></svg>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={isFollowUp ? subIndex >= totalSubInGroup : groupIndex === totalGroups - 1}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (isFollowUp) {
+                                                  moveFollowUpStep(editingQuestionsCategory, rootQuestionId, q.id, 'down');
+                                                } else {
+                                                  moveMainQuestionStep(editingQuestionsCategory, rootQuestionId, 'down');
+                                                }
+                                              }}
+                                              className="p-0.5 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400 transition-colors"
+                                              title={t(lang, 'moveQuestionDown')}
+                                            >
+                                              <svg className="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24"><path d="M12 20l8-8H4z"/></svg>
+                                            </button>
+                                          </div>
+                                        </div>
                                       )}
 
-                                      <div className="flex items-center gap-1 flex-wrap" title={t(lang, 'availableLanguagesLabel')}>
-                                        {qLangs.slice(0, 4).map(l => (
-                                          <span
-                                            key={l.code}
-                                            className="text-[11px] px-1 py-0.5 rounded-md bg-white border border-slate-200 shadow-2xs"
-                                            title={`${l.name} (${l.code === (q.originalLanguage || 'sv') ? t(lang, 'questionOriginalLang') : t(lang, 'translationsAvailable')})`}
-                                          >
-                                            {l.flag}
-                                          </span>
-                                        ))}
-                                        {qLangs.length > 4 && (
-                                          <span 
-                                            className="text-[9px] font-black text-slate-600 bg-slate-200 px-1 py-0.5 rounded-md"
-                                            title={qLangs.slice(4).map(l => `${l.flag} ${l.name}`).join(', ')}
-                                          >
-                                            +{qLangs.length - 4}
+                                      <button 
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleSelectQuestion(q.id);
+                                        }}
+                                        className={`w-5 h-5 sm:w-6 sm:h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0 self-center ${
+                                          isSelected 
+                                            ? 'bg-rose-500 border-rose-500 text-white shadow-sm' 
+                                            : 'bg-white border-slate-300 text-transparent hover:border-indigo-400'
+                                        }`}
+                                      >
+                                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                      </button>
+
+                                      <span className={`min-w-6 h-6 px-1 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 self-center ${
+                                        isSelected ? 'bg-rose-100 text-rose-700' : isFollowUp ? 'bg-emerald-100 border border-emerald-200 text-emerald-800' : 'bg-white border border-slate-200 text-slate-600'
+                                      }`}>
+                                        {label}
+                                      </span>
+
+                                      <div className="flex-1 min-w-0 space-y-1.5">
+                                        <div className="text-xs sm:text-sm font-bold leading-snug text-slate-800 break-words">
+                                          {q.text || t(lang, 'writeQuestionPlaceholder')}
+                                        </div>
+                                        {isFollowUp && (
+                                          <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                            ↳ {t(lang, 'followUpQuestionLabel')}
                                           </span>
                                         )}
+
+                                        <div className="flex items-center gap-1 flex-wrap" title={t(lang, 'availableLanguagesLabel')}>
+                                          {qLangs.slice(0, 4).map(l => (
+                                            <span
+                                              key={l.code}
+                                              className="text-[11px] px-1 py-0.5 rounded-md bg-white border border-slate-200 shadow-2xs"
+                                              title={`${l.name} (${l.code === (q.originalLanguage || 'sv') ? t(lang, 'questionOriginalLang') : t(lang, 'translationsAvailable')})`}
+                                            >
+                                              {l.flag}
+                                            </span>
+                                          ))}
+                                          {qLangs.length > 4 && (
+                                            <span 
+                                              className="text-[9px] font-black text-slate-600 bg-slate-200 px-1 py-0.5 rounded-md"
+                                              title={qLangs.slice(4).map(l => `${l.flag} ${l.name}`).join(', ')}
+                                            >
+                                              +{qLangs.length - 4}
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
+
+                                      {q.location && (
+                                        <span 
+                                          className={`p-1.5 rounded-lg shrink-0 flex items-center gap-1 text-[10px] font-black self-center transition-all ${
+                                            q.hideLocationOnMap || q.location.hideOnMap
+                                              ? 'bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs'
+                                              : 'bg-indigo-100 text-indigo-700'
+                                          }`}
+                                          title={q.hideLocationOnMap || q.location.hideOnMap ? t(lang, 'treasureHuntBadge') : t(lang, 'geotaggedLabel')}
+                                        >
+                                          {q.hideLocationOnMap || q.location.hideOnMap ? (
+                                            <>
+                                              <span>🕵️‍♂️</span>
+                                              <span className="hidden sm:inline">{t(lang, 'treasureHuntBadge')}</span>
+                                            </>
+                                          ) : (
+                                            <MapPin className="w-3.5 h-3.5 stroke-[2.5]" />
+                                          )}
+                                        </span>
+                                      )}
                                     </div>
 
-                                    {q.location && (
-                                      <span 
-                                        className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg shrink-0 flex items-center justify-center"
-                                        title={t(lang, 'geotaggedLabel')}
-                                      >
-                                        <MapPin className="w-3.5 h-3.5 stroke-[2.5]" />
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    {isAdmin && (
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {isAdmin && (
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteQuestion(editingQuestionsCategory, q.id);
+                                          }}
+                                          className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                          title={t(lang, 'deleteQuestionBtn')}
+                                        >
+                                          <Trash2 className="w-4 h-4" />
+                                        </button>
+                                      )}
                                       <button 
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          deleteQuestion(editingQuestionsCategory, q.id);
+                                          openQuestionEditor(q.id);
                                         }}
-                                        className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                        title={t(lang, 'deleteQuestionBtn')}
+                                        className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                        title={t(lang, 'openQuestionBtn')}
                                       >
-                                        <Trash2 className="w-4 h-4" />
+                                        <Maximize2 className="w-4 h-4" />
                                       </button>
-                                    )}
-                                    <button 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openQuestionEditor(q.id);
-                                      }}
-                                      className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                      title={t(lang, 'openQuestionBtn')}
-                                    >
-                                      <Maximize2 className="w-4 h-4" />
-                                    </button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -6892,7 +7231,7 @@ ${exampleJson}`;
                                         } ${!isAdmin ? 'opacity-80' : ''}`}
                                         title={t(lang, 'clickToSetCorrect')}
                                       >
-                                        {oIdx === 0 ? '1' : oIdx === 1 ? 'X' : oIdx === 2 ? '2' : (oIdx + 1)}
+                                        {getOptionLabel(oIdx, q.options?.length)}
                                       </button>
                                       
                                       <div className="flex-1 relative flex items-center gap-2 sm:gap-3">
@@ -7075,6 +7414,43 @@ ${exampleJson}`;
                               </div>
                             )}
                           </div>
+
+                          {rawQ.location && (
+                            <div className="p-4 bg-amber-50/90 border-2 border-amber-200 rounded-2xl space-y-2">
+                              <label className="flex items-start gap-3 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  disabled={!isAdmin}
+                                  checked={!!rawQ.hideLocationOnMap || !!rawQ.location?.hideOnMap}
+                                  onChange={(e) => {
+                                    if (!isAdmin) return;
+                                    const checked = e.target.checked;
+                                    updateQuestion(editingQuestionsCategory, q.id, {
+                                      hideLocationOnMap: checked,
+                                      location: rawQ.location ? { ...rawQ.location, hideOnMap: checked } : undefined,
+                                    });
+                                  }}
+                                  className="w-5 h-5 rounded mt-0.5 accent-amber-600 cursor-pointer"
+                                />
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-black text-amber-950 flex items-center gap-1.5">
+                                      <span>🕵️‍♂️</span>
+                                      <span>{t(lang, 'hideLocationOnMapLabel')}</span>
+                                    </span>
+                                    {(rawQ.hideLocationOnMap || rawQ.location?.hideOnMap) && (
+                                      <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md">
+                                        {t(lang, 'treasureHuntActiveBadge')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-amber-900 font-medium mt-1 leading-relaxed">
+                                    {t(lang, 'hideLocationOnMapDescription')}
+                                  </p>
+                                </div>
+                              </label>
+                            </div>
+                          )}
                         </div>
                           </div>
                         )}
@@ -7572,70 +7948,85 @@ ${exampleJson}`;
 
         {/* Lock Notice Modal for Geofenced Questions */}
         <AnimatePresence>
-          {lockNotice && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
-            >
+          {lockNotice && (() => {
+            const targetQ = quizQuestionPool?.[lockNotice.questionIndex]
+              || quizConfig.barnQuestions[lockNotice.questionIndex]
+              || quizConfig.vuxenQuestions[lockNotice.questionIndex];
+            const isTreasure = !!targetQ?.hideLocationOnMap || !!targetQ?.location?.hideOnMap;
+
+            return (
               <motion.div 
-                initial={{ scale: 0.9, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 20 }}
-                className="bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center space-y-5 border-4 border-amber-300"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
               >
-                <div className="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-3xl shadow-inner">
-                  🔒
-                </div>
-                
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-200">
-                    Geotaggad station
-                  </span>
-                  <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
-                    Fråga {lockNotice.questionIndex + 1} är låst!
-                  </h3>
-                  <p className="text-xs sm:text-sm font-medium text-slate-600 leading-relaxed pt-1">
-                    {lockNotice.message}
-                  </p>
-                </div>
-
-                {lockNotice.distanceMeters !== null && (
-                  <div className="bg-amber-50 border border-amber-200/80 p-3.5 rounded-2xl text-xs font-bold text-amber-900 flex items-center justify-around">
-                    <div>
-                      <span className="block text-[9px] text-amber-700 font-black uppercase">Din distans</span>
-                      <span className="text-sm font-black text-amber-900">{formatDistance(lockNotice.distanceMeters)}</span>
-                    </div>
-                    <div className="text-amber-400 font-black text-lg">➔</div>
-                    <div>
-                      <span className="block text-[9px] text-amber-700 font-black uppercase">Krävs</span>
-                      <span className="text-sm font-black text-emerald-700">Inom {quizConfig.geotagUnlockDistance || 20} m</span>
-                    </div>
+                <motion.div 
+                  initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                  className={`bg-white rounded-[2.5rem] p-6 sm:p-8 max-w-sm w-full shadow-2xl text-center space-y-5 border-4 ${
+                    isTreasure ? 'border-amber-400' : 'border-amber-300'
+                  }`}
+                >
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto text-3xl shadow-inner ${
+                    isTreasure ? 'bg-amber-100 text-amber-800' : 'bg-amber-100 text-amber-600'
+                  }`}>
+                    {isTreasure ? '🕵️‍♂️' : '🔒'}
                   </div>
-                )}
+                  
+                  <div className="space-y-2">
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${
+                      isTreasure 
+                        ? 'text-amber-800 bg-amber-100 border-amber-300' 
+                        : 'text-amber-600 bg-amber-50 border-amber-200'
+                    }`}>
+                      {isTreasure ? t(lang, 'treasureHuntBadge') : 'Geotaggad station'}
+                    </span>
+                    <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
+                      Fråga {lockNotice.questionIndex + 1} är låst!
+                    </h3>
+                    <p className="text-xs sm:text-sm font-medium text-slate-600 leading-relaxed pt-1">
+                      {lockNotice.message}
+                    </p>
+                  </div>
 
-                <div className="flex flex-col gap-2 pt-1">
-                  <button 
-                    onClick={() => {
-                      locateUser();
-                    }}
-                    disabled={isLocating}
-                    className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase shadow-md shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Locate className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
-                    <span>{isLocating ? 'Hämtar position...' : 'Uppdatera min GPS 📍'}</span>
-                  </button>
-                  <button 
-                    onClick={() => setLockNotice(null)}
-                    className="w-full py-3 text-slate-500 font-bold text-xs uppercase hover:text-slate-700 transition-colors"
-                  >
-                    Stäng
-                  </button>
-                </div>
+                  {lockNotice.distanceMeters !== null && !isTreasure && (
+                    <div className="bg-amber-50 border border-amber-200/80 p-3.5 rounded-2xl text-xs font-bold text-amber-900 flex items-center justify-around">
+                      <div>
+                        <span className="block text-[9px] text-amber-700 font-black uppercase">Din distans</span>
+                        <span className="text-sm font-black text-amber-900">{formatDistance(lockNotice.distanceMeters)}</span>
+                      </div>
+                      <div className="text-amber-400 font-black text-lg">➔</div>
+                      <div>
+                        <span className="block text-[9px] text-amber-700 font-black uppercase">Krävs</span>
+                        <span className="text-sm font-black text-emerald-700">Inom {quizConfig.geotagUnlockDistance || 20} m</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-2 pt-1">
+                    <button 
+                      onClick={() => {
+                        locateUser();
+                      }}
+                      disabled={isLocating}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black text-xs uppercase shadow-md shadow-indigo-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Locate className={`w-4 h-4 ${isLocating ? 'animate-spin' : ''}`} />
+                      <span>{isLocating ? 'Hämtar position...' : 'Uppdatera min GPS 📍'}</span>
+                    </button>
+                    <button 
+                      onClick={() => setLockNotice(null)}
+                      className="w-full py-3 text-slate-500 font-bold text-xs uppercase hover:text-slate-700 transition-colors"
+                    >
+                      Stäng
+                    </button>
+                  </div>
+                </motion.div>
               </motion.div>
-            </motion.div>
-          )}
+            );
+          })()}
         </AnimatePresence>
 
         {/* Confirmation Modals */}

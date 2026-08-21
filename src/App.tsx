@@ -2182,7 +2182,57 @@ ${exampleJson}`;
   const [questionToDelete, setQuestionToDelete] = useState<{ category: UserType; id: string } | null>(null);
   const [participantToDelete, setParticipantToDelete] = useState<Participant | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showCreateNewQuizConfirm, setShowCreateNewQuizConfirm] = useState(false);
   const [dbConfirmation, setDbConfirmation] = useState<{ action: 'overwrite' | 'delete' | 'clear'; recordId?: string } | null>(null);
+  const quizTitleInputRef = useRef<HTMLInputElement>(null);
+
+  const confirmCreateNewQuiz = () => {
+    const newQuizId = crypto.randomUUID();
+    const newBlankQuiz: QuizConfig = {
+      quizId: newQuizId,
+      title: '',
+      password: '',
+      logoUrl: undefined,
+      barnQuestions: [],
+      vuxenQuestions: [],
+      geotagUnlockDistance: 20,
+      requireSequentialAnswers: false,
+    };
+
+    setQuizConfig(newBlankQuiz);
+    localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(newBlankQuiz));
+
+    setNewQuizTitle('');
+    setNewQuizPassword('');
+    setNewQuizLogoUrl('');
+    setAnswers([]);
+    localStorage.setItem(STORAGE_KEY_ANSWERS, JSON.stringify([]));
+    setWalkedPath([]);
+    localStorage.removeItem(STORAGE_KEY_WALKED_PATH);
+    setSelectedQuestionIndex(null);
+    setSelectedQuestionIds([]);
+    setEditingParticipantId(null);
+    setQuestionToDelete(null);
+    setParticipantToDelete(null);
+    setIsPasswordCorrect(false);
+    setPasswordInput('');
+    setFacitPasswordInput('');
+    setIsFacitUnlocked(false);
+    setIsQuizModeLocked(false);
+    localStorage.removeItem('family_quiz_lock_mode');
+    setIsAdmin(true);
+
+    setShowCreateNewQuizConfirm(false);
+    setConfigTab('general');
+
+    // Switch to General tab and focus the Quiz Title input field
+    setTimeout(() => {
+      if (quizTitleInputRef.current) {
+        quizTitleInputRef.current.focus();
+        quizTitleInputRef.current.select();
+      }
+    }, 150);
+  };
 
   const confirmDbAction = async () => {
     const confirmation = dbConfirmation;
@@ -2907,26 +2957,28 @@ ${exampleJson}`;
                     <img
                       src={quizConfig.logoUrl}
                       alt={`${quizConfig.title} logo`}
+                      referrerPolicy="no-referrer"
                       className="h-full w-auto max-w-full object-contain"
                       onError={(e) => {
                         const target = e.currentTarget;
                         target.dataset.triedFallback = 'app';
-                        target.src = './icon.svg';
+                        target.src = `${import.meta.env.BASE_URL}icon.png`;
                       }}
                     />
                   ) : (
                     <img
-                      src="./icon.svg"
+                      src={`${import.meta.env.BASE_URL}icon.png`}
                       alt="FamilyQuiz Icon"
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                       onError={(e) => {
                         const target = e.currentTarget;
                         if (!target.dataset.triedFallback) {
                           target.dataset.triedFallback = '1';
-                          target.src = './icon.png';
+                          target.src = `${import.meta.env.BASE_URL}icon.svg`;
                         } else if (target.dataset.triedFallback === '1') {
                           target.dataset.triedFallback = '2';
-                          target.src = '/icon.svg';
+                          target.src = '/icon.png';
                         } else {
                           target.style.display = 'none';
                         }
@@ -3207,7 +3259,7 @@ ${exampleJson}`;
               <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 bg-white/10 backdrop-blur-md rounded-[2rem] border border-white/20 text-white space-y-4">
                 <div className="space-y-3">
                   <div className="w-16 h-16 sm:w-20 sm:h-20 bg-transparent text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-white/30">
-                    <img src="/HelFamilj.png" alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                    <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
                   </div>
                   <div>
                     <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-md">
@@ -4361,7 +4413,7 @@ ${exampleJson}`;
                     </div>
 
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
-                      <img src="/HelFamilj.png" alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                      <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
                     </div>
                     <h2 className="text-3xl sm:text-5xl font-black text-slate-800 mb-2">{t(lang, 'scoreboard')}</h2>
                     <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] sm:text-sm mb-6 sm:mb-10">{t(lang, 'clickParticipantForDetails')}</p>
@@ -4913,6 +4965,17 @@ ${exampleJson}`;
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
+                      {isAdmin && (
+                        <button 
+                          type="button"
+                          onClick={() => setShowCreateNewQuizConfirm(true)}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase flex items-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
+                          title={t(lang, 'createNewQuizBtn')}
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span className="hidden sm:inline">{t(lang, 'createNewQuizBtn')}</span>
+                        </button>
+                      )}
                       <button 
                         onClick={() => setShowSettingsHelp(true)}
                         className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center hover:bg-indigo-100 transition-colors active:scale-95 shadow-sm border border-indigo-200/50"
@@ -5945,6 +6008,27 @@ ${exampleJson}`;
                   {/* TAB 3: GENERAL & CONFIG */}
                   {configTab === 'general' && (
                     <div className="space-y-6">
+                      {/* Create New Quiz Action Banner */}
+                      {isAdmin && (
+                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 p-4 rounded-2xl flex flex-col xs:flex-row items-start xs:items-center justify-between gap-3 shadow-sm">
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <h4 className="font-black text-xs uppercase tracking-wider text-emerald-950">{t(lang, 'createNewQuizBtn')}</h4>
+                            </div>
+                            <p className="text-xs text-emerald-700 font-medium leading-relaxed">{t(lang, 'createNewQuizDesc')}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowCreateNewQuizConfirm(true)}
+                            className="w-full xs:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>{t(lang, 'createNewQuizBtn')}</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* Quiz Title */}
                       <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
                         <div className="flex items-center gap-2">
@@ -5954,6 +6038,7 @@ ${exampleJson}`;
                         <div className="space-y-3">
                           <div className="flex gap-2">
                             <input 
+                              ref={quizTitleInputRef}
                               type="text" 
                               placeholder={t(lang, 'quizTitlePlaceholder')}
                               className={`flex-1 p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
@@ -8031,7 +8116,7 @@ ${exampleJson}`;
 
         {/* Confirmation Modals */}
         <AnimatePresence>
-          {(questionToDelete || participantToDelete || showResetConfirm || showClearConfirm || showBulkDeleteConfirm || dbConfirmation) && (
+          {(questionToDelete || participantToDelete || showResetConfirm || showClearConfirm || showBulkDeleteConfirm || showCreateNewQuizConfirm || dbConfirmation) && (
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -8044,8 +8129,16 @@ ${exampleJson}`;
                 exit={{ scale: 0.9, opacity: 0, y: 20 }}
                 className="bg-white rounded-[2.5rem] p-8 max-w-sm w-full shadow-2xl text-center space-y-6"
               >
-                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto ${dbConfirmation?.action === 'overwrite' ? 'bg-indigo-100' : 'bg-rose-100'}`}>
-                  {dbConfirmation?.action === 'overwrite' ? (
+                <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mx-auto ${
+                  showCreateNewQuizConfirm 
+                    ? 'bg-amber-100' 
+                    : dbConfirmation?.action === 'overwrite' 
+                      ? 'bg-indigo-100' 
+                      : 'bg-rose-100'
+                }`}>
+                  {showCreateNewQuizConfirm ? (
+                    <Sparkles className="text-amber-600 w-10 h-10" />
+                  ) : dbConfirmation?.action === 'overwrite' ? (
                     <Save className="text-indigo-500 w-10 h-10" />
                   ) : (
                     <Trash2 className="text-rose-500 w-10 h-10" />
@@ -8053,7 +8146,9 @@ ${exampleJson}`;
                 </div>
                 
                 <div className="space-y-2">
-                  <h3 className="text-2xl font-black text-slate-800 leading-tight">{t(lang, 'areYouSure')}</h3>
+                  <h3 className="text-2xl font-black text-slate-800 leading-tight">
+                    {showCreateNewQuizConfirm ? t(lang, 'createNewQuizBtn') : t(lang, 'areYouSure')}
+                  </h3>
                   <p className="text-slate-500 font-medium">
                     {dbConfirmation?.action === 'overwrite' && t(lang, 'overwriteQuizConfirm')}
                     {dbConfirmation?.action === 'delete' && t(lang, 'deleteQuizConfirm')}
@@ -8063,12 +8158,17 @@ ${exampleJson}`;
                     {!dbConfirmation && showBulkDeleteConfirm && t(lang, 'deleteBulkQuestionsConfirm').replace('{count}', selectedQuestionIds.length.toString())}
                     {!dbConfirmation && showResetConfirm && t(lang, 'resetQuizConfirm')}
                     {!dbConfirmation && showClearConfirm && t(lang, 'clearAllDataConfirm')}
+                    {!dbConfirmation && showCreateNewQuizConfirm && t(lang, 'createNewQuizConfirm')}
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-3">
                   <button 
                     onClick={() => {
+                      if (showCreateNewQuizConfirm) {
+                        confirmCreateNewQuiz();
+                        return;
+                      }
                       if (questionToDelete) confirmDeleteQuestion();
                       if (participantToDelete) {
                         removeParticipant(participantToDelete.id);
@@ -8087,18 +8187,22 @@ ${exampleJson}`;
                       if (dbConfirmation) confirmDbAction();
                     }}
                     className={`w-full py-4 text-white rounded-2xl font-black text-sm uppercase shadow-lg transition-all active:scale-95 ${
-                      showResetConfirm 
-                        ? 'bg-rose-600 shadow-rose-200 hover:bg-rose-700' 
-                        : dbConfirmation?.action === 'overwrite'
-                          ? 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'
-                        : 'bg-rose-500 shadow-rose-200 hover:bg-rose-600'
+                      showCreateNewQuizConfirm
+                        ? 'bg-emerald-600 shadow-emerald-200 hover:bg-emerald-700'
+                        : showResetConfirm 
+                          ? 'bg-rose-600 shadow-rose-200 hover:bg-rose-700' 
+                          : dbConfirmation?.action === 'overwrite'
+                            ? 'bg-indigo-600 shadow-indigo-200 hover:bg-indigo-700'
+                          : 'bg-rose-500 shadow-rose-200 hover:bg-rose-600'
                     }`}
                   >
-                    {dbConfirmation?.action === 'overwrite'
-                      ? t(lang, 'overwriteQuizBtn')
-                      : showResetConfirm
-                        ? t(lang, 'confirmResetBtn')
-                        : t(lang, 'yesDelete')}
+                    {showCreateNewQuizConfirm
+                      ? t(lang, 'confirmCreateNewQuizBtn')
+                      : dbConfirmation?.action === 'overwrite'
+                        ? t(lang, 'overwriteQuizBtn')
+                        : showResetConfirm
+                          ? t(lang, 'confirmResetBtn')
+                          : t(lang, 'yesDelete')}
                   </button>
                   <button 
                     onClick={() => {
@@ -8107,6 +8211,7 @@ ${exampleJson}`;
                       setShowBulkDeleteConfirm(false);
                       setShowResetConfirm(false);
                       setShowClearConfirm(false);
+                      setShowCreateNewQuizConfirm(false);
                       setDbConfirmation(null);
                     }}
                     className={`w-full py-3 rounded-2xl font-black text-xs uppercase transition-all active:scale-95 ${

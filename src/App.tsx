@@ -2960,9 +2960,18 @@ ${exampleJson}`;
                       referrerPolicy="no-referrer"
                       className="h-full w-auto max-w-full object-contain"
                       onError={(e) => {
-                        const target = e.currentTarget;
-                        target.dataset.triedFallback = 'app';
-                        target.src = `${import.meta.env.BASE_URL}icon.png`;
+                        const target = e.currentTarget as HTMLImageElement;
+                        if (target.dataset.triedFallback !== 'app') {
+                          target.dataset.triedFallback = 'app';
+                          target.src = `${import.meta.env.BASE_URL}icon.png`;
+                          return;
+                        }
+                        if (target.dataset.triedFallback !== 'app2') {
+                          target.dataset.triedFallback = 'app2';
+                          target.src = `${import.meta.env.BASE_URL}favicon.png`;
+                          return;
+                        }
+                        target.removeAttribute('src');
                       }}
                     />
                   ) : (
@@ -2972,8 +2981,18 @@ ${exampleJson}`;
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                       onError={(e) => {
-                        const target = e.currentTarget;
-                        target.style.display = 'none';
+                        const target = e.currentTarget as HTMLImageElement;
+                        if (target.dataset.triedFallback !== '1') {
+                          target.dataset.triedFallback = '1';
+                          target.src = `${import.meta.env.BASE_URL}favicon.png`;
+                          return;
+                        }
+                        if (target.dataset.triedFallback !== '2') {
+                          target.dataset.triedFallback = '2';
+                          target.src = `${import.meta.env.BASE_URL}icon.jpg`;
+                          return;
+                        }
+                        target.removeAttribute('src');
                       }}
                     />
                   )}

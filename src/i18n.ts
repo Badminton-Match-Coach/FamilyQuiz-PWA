@@ -200,6 +200,36 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     se: 'Raba sihkarvuođakopiija', et: 'Ava varukoopia', lv: 'Atvērt dublējumu', lt: 'Atidaryti atsarginę kopiją',
     uk: 'Відкрити резервну копію', de: 'Sicherungskopie öffnen', fr: 'Ouvrir une copie', it: 'Apri copia di backup', es: 'Abrir copia de seguridad'
   },
+  fetchCatalogBtn: {
+    sv: 'HÄMTA KATALOG', en: 'Fetch catalog', nl: 'Catalogus ophalen', be: 'Catalogus ophalen',
+    no: 'Hent katalog', da: 'Hent katalog', fi: 'Hae katalogi', is: 'Sækja skrá',
+    se: 'Viežžat kataloga', et: 'Laadi kataloog', lv: 'Ielādēt katalogu', lt: 'Gauti katalogą',
+    uk: 'Отримати каталог', de: 'Katalog abrufen', fr: 'Récupérer le catalogue', it: 'Recupera catalogo', es: 'Obtener catálogo'
+  },
+  changeCatalogBtn: {
+    sv: 'ÄNDRA KATALOG', en: 'Change catalog', nl: 'Catalogus wijzigen', be: 'Catalogus wijzigen',
+    no: 'Endre katalog', da: 'Skift katalog', fi: 'Vaihda katalogi', is: 'Breyta skrá',
+    se: 'Rievdadit kataloga', et: 'Muuda kataloogi', lv: 'Mainīt katalogu', lt: 'Keisti katalogą',
+    uk: 'Змінити каталог', de: 'Katalog ändern', fr: 'Changer le catalogue', it: 'Cambia catalogo', es: 'Cambiar catálogo'
+  },
+  catalogSourceLabel: {
+    sv: 'Katalogkälla', en: 'Catalog source', nl: 'Catalogusbron', be: 'Catalogusbron',
+    no: 'Katalogkilde', da: 'Katalogkilde', fi: 'Katalogin lähde', is: 'Katalógugjafi',
+    se: 'Kataloga-gáldu', et: 'Kataloogi allikas', lv: 'Kataloga avots', lt: 'Katalogo šaltinis',
+    uk: 'Джерело каталогу', de: 'Katalogquelle', fr: 'Source du catalogue', it: 'Fonte catalogo', es: 'Fuente del catálogo'
+  },
+  catalogUrlPlaceholder: {
+    sv: 'Klistra in katalog-URL', en: 'Paste catalog URL', nl: 'Plak catalogus-URL', be: 'Plak catalogus-URL',
+    no: 'Lim inn katalog-URL', da: 'Indsæt katalog-URL', fi: 'Liitä katalogin URL', is: 'Líma inn URL skráar',
+    se: 'Liimmet kataloga URL', et: 'Kleebi kataloogi URL', lv: 'Ielīmējiet kataloga URL', lt: 'Įklijuokite katalogo URL',
+    uk: 'Вставте URL каталогу', de: 'Katalog-URL einfügen', fr: 'Coller l’URL du catalogue', it: 'Incolla URL catalogo', es: 'Pegar URL del catálogo'
+  },
+  resetCatalogBtn: {
+    sv: 'ÅTERSTÄLL KATALOG', en: 'Reset catalog', nl: 'Catalogus resetten', be: 'Catalogus resetten',
+    no: 'Tilbakestill katalog', da: 'Nulstil katalog', fi: 'Tyhjennä katalogi', is: 'Núllstilla skrá',
+    se: 'Resette kataloga', et: 'Lähtesta kataloog', lv: 'Atiestatīt katalogu', lt: 'Atstatyti katalogą',
+    uk: 'Скинути каталог', de: 'Katalog zurücksetzen', fr: 'Réinitialiser le catalogue', it: 'Reimposta catalogo', es: 'Restablecer catálogo'
+  },
   recentQuizSection: {
     sv: 'Senast använt / sparad quiz', en: 'Recent / saved quiz', nl: 'Recent / opgeslagen quiz', be: 'Recent / opgeslagen quiz',
     no: 'Nylig brukt / lagret quiz', da: 'Senest brugte / gemte quiz', fi: 'Viimeksi käytetty / tallennettu visa', is: 'Nýlega notað / vistað quiz',

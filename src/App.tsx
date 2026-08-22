@@ -46,7 +46,7 @@ import {
   ArrowUpDown,
   GripVertical
 } from 'lucide-react';
-import { Participant, QuizConfig, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
+import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { defaultQuiz } from './data/defaultQuiz';
 import { 
   AdminMapPicker, 
@@ -60,7 +60,7 @@ import {
   calculateWalkingTimeMinutes,
   calculatePathDistance 
 } from './components/MapComponent';
-import { generateQuizClient, getStoredApiKey, setStoredApiKey, validateTextAnswerWithGemini } from './geminiClient';
+import { generateQuizClient, getStoredApiKey, setStoredApiKey, validateTextAnswerWithGemini, findLocationCoordinatesWithGemini } from './geminiClient';
 import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion, unpackLanguage } from './i18n';
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
 import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/soundex';
@@ -451,6 +451,7 @@ export default function App() {
   const [showQuestionMore, setShowQuestionMore] = useState(false);
   const [configTab, setConfigTab] = useState<'questions' | 'ai' | 'db' | 'general' | 'library'>('questions');
   const [savedQuizzes, setSavedQuizzes] = useState<SavedQuizRecord[]>([]);
+  const [showAllSavedQuizzes, setShowAllSavedQuizzes] = useState(false);
   const [dbSortBy, setDbSortBy] = useState<'date-desc' | 'date-asc' | 'name-asc'>('date-desc');
   const [dbNotification, setDbNotification] = useState<string | null>(null);
   const [isSavingToDb, setIsSavingToDb] = useState(false);
@@ -462,6 +463,11 @@ export default function App() {
   } | null>(null);
   const [dragOverQuestionId, setDragOverQuestionId] = useState<string | null>(null);
   const [dropIndicatorPosition, setDropIndicatorPosition] = useState<'before' | 'after' | null>(null);
+
+  const latestSavedQuiz = useMemo(() => {
+    if (savedQuizzes.length === 0) return null;
+    return [...savedQuizzes].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  }, [savedQuizzes]);
 
   const sortedSavedQuizzes = useMemo(() => {
     return [...savedQuizzes].sort((a, b) => {
@@ -569,16 +575,16 @@ export default function App() {
       const res = await shareIndexedDBJSON();
       if (res.shared) {
         if (res.method === 'download') {
-          setDbNotification('Databasen har laddats ner som JSON! 📥');
+          setDbNotification('Säkerhetskopian har sparats som fil! 📥');
         } else if (res.method === 'clipboard') {
-          setDbNotification('Databasens JSON har kopierats till urklipp! 📋');
+          setDbNotification('Säkerhetskopian har kopierats till urklipp! 📋');
         } else {
           setDbNotification(t(lang, 'exportDbSuccess'));
         }
         setTimeout(() => setDbNotification(null), 4000);
       }
     } catch (err) {
-      alert('Kunde inte dela IndexedDB');
+      alert('Kunde inte exportera säkerhetskopia');
     }
   };
 
@@ -603,7 +609,7 @@ export default function App() {
       setDbNotification(t(lang, 'importDbSuccess').replace('{count}', String(count)));
       setTimeout(() => setDbNotification(null), 4000);
     } catch (err: any) {
-      alert(err.message || 'Fel vid import av JSON-fil');
+      alert(err.message || 'Fel vid import av säkerhetskopia');
     } finally {
       if (e.target) e.target.value = '';
     }
@@ -884,6 +890,12 @@ export default function App() {
         originalLanguage: primaryLang
       };
 
+      if (aiGeotagLandmarks) {
+        base.latitude = isAdult ? 59.3268 : 59.3293;
+        base.longitude = isAdult ? 18.0717 : 18.0686;
+        base.locationName = isAdult ? "Gamla Stan" : "Stockholms Slott";
+      }
+
       if (otherLangs.length > 0) {
         const transObj: Record<string, any> = {};
         // Sample with up to 3 requested translation languages to keep example clean
@@ -1117,6 +1129,28 @@ ${exampleJson}`;
       });
     }
 
+    let locationObj: Location | undefined = undefined;
+    if (q.location && typeof q.location.lat === 'number' && typeof q.location.lng === 'number') {
+      locationObj = {
+        lat: Number(q.location.lat),
+        lng: Number(q.location.lng),
+        name: q.location.name ? String(q.location.name) : undefined,
+        hideOnMap: !!q.location.hideOnMap
+      };
+    } else if (typeof q.latitude === 'number' && typeof q.longitude === 'number' && (Math.abs(q.latitude) > 0.0001 || Math.abs(q.longitude) > 0.0001)) {
+      locationObj = {
+        lat: Number(q.latitude),
+        lng: Number(q.longitude),
+        name: q.locationName ? String(q.locationName) : (q.name ? String(q.name) : undefined)
+      };
+    } else if (typeof q.lat === 'number' && typeof q.lng === 'number' && (Math.abs(q.lat) > 0.0001 || Math.abs(q.lng) > 0.0001)) {
+      locationObj = {
+        lat: Number(q.lat),
+        lng: Number(q.lng),
+        name: q.locationName ? String(q.locationName) : (q.name ? String(q.name) : undefined)
+      };
+    }
+
     return {
       id: qId,
       text,
@@ -1125,62 +1159,20 @@ ${exampleJson}`;
       followUpQuestionId: typeof q.followUpQuestionId === 'string' ? q.followUpQuestionId : undefined,
       followUpMode: q.followUpMode === 'correct' || q.followUpMode === 'incorrect' ? q.followUpMode : 'always',
       originalLanguage: origLang,
-      translations: translationsObj
+      translations: translationsObj,
+      location: locationObj
     };
   };
 
-  const handleImportPastedJson = (jsonStr: string) => {
+  const handleImportPastedJson = async (jsonStr: string) => {
     try {
       if (!jsonStr || !jsonStr.trim()) {
         alert(t(lang, 'couldNotReadInputAlert'));
         return;
       }
-
-      const parsed = robustParseQuizJson(jsonStr);
-
-      // Case A: { barnQuestions: [...], vuxenQuestions: [...] }
-      if (parsed && typeof parsed === 'object' && (parsed.barnQuestions || parsed.vuxenQuestions)) {
-        setQuizConfig(prev => ({
-          ...prev,
-          barnQuestions: parsed.barnQuestions ? [...prev.barnQuestions, ...parsed.barnQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))] : prev.barnQuestions,
-          vuxenQuestions: parsed.vuxenQuestions ? [...prev.vuxenQuestions, ...parsed.vuxenQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))] : prev.vuxenQuestions,
-        }));
-        const countLoaded = (parsed.barnQuestions?.length || 0) + (parsed.vuxenQuestions?.length || 0);
-        alert(t(lang, 'aiDoneAlert', { count: countLoaded.toString() }));
-        setPastedJsonInput('');
-        setShowSettingsModal(false);
-        return;
-      }
-
-      // Case B: Array or questions object
-      let questionArray: any[] | null = null;
-      if (Array.isArray(parsed)) {
-        questionArray = parsed;
-      } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.questions)) {
-        questionArray = parsed.questions;
-      }
-
-      if (questionArray && questionArray.length > 0) {
-        const formattedQuestions: Question[] = questionArray.map((q, idx) => formatImportedQuestion(q, idx));
-
-        applyQuestionsToConfig(formattedQuestions);
-        alert(t(lang, 'aiDoneAlert', { count: formattedQuestions.length.toString() }));
-        setPastedJsonInput('');
-        setShowSettingsModal(false);
-        return;
-      }
-
-      // Fallback: try parsing plain text numbered format
-      const fallbackQuestions = parseQuizText(jsonStr);
-      if (fallbackQuestions && fallbackQuestions.length > 0) {
-        applyQuestionsToConfig(fallbackQuestions);
-        alert(t(lang, 'aiDoneAlert', { count: fallbackQuestions.length.toString() }));
-        setPastedJsonInput('');
-        setShowSettingsModal(false);
-        return;
-      }
-
-      alert(t(lang, 'noQuestionsFoundAlert'));
+      await processImportConfig(jsonStr);
+      setPastedJsonInput('');
+      setShowSettingsModal(false);
     } catch (e) {
       alert(t(lang, 'couldNotReadInputAlert'));
     }
@@ -1699,6 +1691,19 @@ ${exampleJson}`;
         .replace(/\s*```$/i, '')
         .trim();
 
+      // Check if user provided a direct URL to a quiz file or manifest
+      if ((cleanInput.startsWith('http://') || cleanInput.startsWith('https://')) && !cleanInput.includes('quiz=') && !cleanInput.includes('z=')) {
+        try {
+          const fetchedContent = await fetchWithCorsFallback(cleanInput, false);
+          if (fetchedContent && typeof fetchedContent === 'string' && fetchedContent.trim()) {
+            cleanInput = fetchedContent.trim();
+          }
+        } catch (urlErr: any) {
+          console.warn('Failed to fetch URL directly in processImportConfig:', urlErr);
+          throw new Error(urlErr.message || 'Kunde inte hämta filen från angiven webbadress.');
+        }
+      }
+
       // Check for compressed URL format or code (e.g. ?quiz=..., #quiz=..., #z=..., ?z=..., or raw compressed string)
       let compressedCode = '';
       if (cleanInput.includes('quiz=')) {
@@ -1827,21 +1832,26 @@ ${exampleJson}`;
         }
       }
 
+      const looksLikeJson = jsonCandidate.startsWith('{') || jsonCandidate.startsWith('[') || jsonCandidate.includes('"barnQuestions"') || jsonCandidate.includes('"vuxenQuestions"');
+
       // Try parsing JSON using robust parser
       const parsed = robustParseQuizJson(jsonCandidate) || robustParseQuizJson(rawInput);
       if (parsed) {
         try {
           // Case 1: Full Quiz Config with barnQuestions and vuxenQuestions
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed.barnQuestions || parsed.vuxenQuestions)) {
-            const ensureLang = (qs: any[]) => (qs || []).map(q => ({
-              ...q,
-              originalLanguage: q.originalLanguage || lang || 'sv'
-            }));
+            const barnQs = Array.isArray(parsed.barnQuestions)
+              ? parsed.barnQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))
+              : [];
+            const vuxenQs = Array.isArray(parsed.vuxenQuestions)
+              ? parsed.vuxenQuestions.map((q: any, idx: number) => formatImportedQuestion(q, idx))
+              : [];
+
             const fullConfig: QuizConfig = {
               ...quizConfig,
               ...parsed,
-              barnQuestions: ensureLang(parsed.barnQuestions || []),
-              vuxenQuestions: ensureLang(parsed.vuxenQuestions || [])
+              barnQuestions: barnQs,
+              vuxenQuestions: vuxenQs
             };
             const validation = validateQuizConfig(fullConfig);
             if (!validation.valid) throw new Error(validation.error);
@@ -1875,9 +1885,14 @@ ${exampleJson}`;
             applyQuestionsToConfig(formattedQuestions);
             return;
           }
-        } catch (jsonErr) {
-          console.warn('JSON parsing failed, falling back to text parsing', jsonErr);
+        } catch (jsonErr: any) {
+          console.warn('JSON handling failed', jsonErr);
+          if (looksLikeJson) {
+            throw new Error(jsonErr?.message || 'Felaktig JSON-struktur i quizet.');
+          }
         }
+      } else if (looksLikeJson) {
+        throw new Error('Kunde inte tolka JSON-strukturen. Kontrollera att filen är giltig JSON.');
       }
       
       // Otherwise, parse as plain text
@@ -2261,52 +2276,362 @@ ${exampleJson}`;
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
-  // Quiz Library state
+  // Quiz Library state & External Catalog support
+  const DEFAULT_CATALOG_URL = `${import.meta.env.BASE_URL}quizzes/`;
+  const STORAGE_KEY_CATALOG_URL = 'family_quiz_catalog_url';
+
+  const normalizeCatalogUrl = (input?: any): { baseUrl: string; manifestUrl: string; isCustom: boolean } => {
+    let trimmed = typeof input === 'string' ? input.trim() : '';
+    if (!trimmed || trimmed === '[object Object]' || trimmed === DEFAULT_CATALOG_URL || trimmed === '/quizzes/' || trimmed === 'quizzes/' || trimmed === './quizzes/') {
+      return { baseUrl: DEFAULT_CATALOG_URL, manifestUrl: `${DEFAULT_CATALOG_URL}manifest.json`, isCustom: false };
+    }
+    // If user provided link to index.html or index.htm
+    if (trimmed.endsWith('index.html')) {
+      trimmed = trimmed.slice(0, trimmed.length - 'index.html'.length);
+    } else if (trimmed.endsWith('index.htm')) {
+      trimmed = trimmed.slice(0, trimmed.length - 'index.htm'.length);
+    }
+
+    if (trimmed.endsWith('manifest.json')) {
+      const baseUrl = trimmed.slice(0, trimmed.length - 'manifest.json'.length);
+      return { baseUrl, manifestUrl: trimmed, isCustom: true };
+    }
+    if (!trimmed.endsWith('/')) {
+      trimmed += '/';
+    }
+    return { baseUrl: trimmed, manifestUrl: `${trimmed}manifest.json`, isCustom: true };
+  };
+
+  const [catalogUrl, setCatalogUrl] = useState<string>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_CATALOG_URL);
+    if (!saved || saved === '[object Object]' || saved === 'undefined' || saved === 'null') {
+      localStorage.removeItem(STORAGE_KEY_CATALOG_URL);
+      return DEFAULT_CATALOG_URL;
+    }
+    return saved;
+  });
+  const [customCatalogInput, setCustomCatalogInput] = useState<string>('');
+  const [showCatalogConfig, setShowCatalogConfig] = useState<boolean>(false);
   const [quizLibrary, setQuizLibrary] = useState<any[]>([]);
   const [isLibraryLoading, setIsLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
 
-  const fetchQuizLibrary = async () => {
+  const BUILTIN_DEFAULT_QUIZZES: QuizMetadata[] = [
+    {
+      id: 'intro-sv',
+      title: 'Introduktionstips (Svenska)',
+      description: 'Klassisk tipspromenad med 3 barnfrågor och 3 vuxenfrågor.',
+      filename: 'intro_sv.json',
+      barnCount: 3,
+      vuxenCount: 3,
+      language: 'sv',
+      catalogBaseUrl: `${import.meta.env.BASE_URL}quizzes/`,
+      resolvedUrl: `${import.meta.env.BASE_URL}quizzes/intro_sv.json`
+    },
+    {
+      id: 'intro-en',
+      title: 'Introductory Quiz (English)',
+      description: 'Standard quiz trail with 3 kids questions and 3 adult questions.',
+      filename: 'intro_en.json',
+      barnCount: 3,
+      vuxenCount: 3,
+      language: 'en',
+      catalogBaseUrl: `${import.meta.env.BASE_URL}quizzes/`,
+      resolvedUrl: `${import.meta.env.BASE_URL}quizzes/intro_en.json`
+    }
+  ];
+
+  const CATALOG_REQUEST_TIMEOUT_MS = 8000;
+
+  const fetchWithTimeout = async (url: string, timeoutMs = CATALOG_REQUEST_TIMEOUT_MS): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
+  };
+
+  // Helper to fetch JSON/Text with backend proxy and CORS fallbacks for external domains
+  const fetchWithCorsFallback = async (targetUrl: string, asJson = true): Promise<any> => {
+    const parseResponseText = (text: string) => {
+      if (!asJson) return text;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    };
+
+    const tryFetchText = async (requestUrl: string): Promise<string> => {
+      const res = await fetchWithTimeout(requestUrl, CATALOG_REQUEST_TIMEOUT_MS);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      return await res.text();
+    };
+
+    // Attempt 1: Server-side proxy (/api/proxy)
+    try {
+      const serverProxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+      const text = await tryFetchText(serverProxyUrl);
+      return parseResponseText(text);
+    } catch (e) {
+      console.warn('Backend /api/proxy failed or not available, trying direct fetch:', e);
+    }
+
+    // Attempt 2: Direct browser fetch
+    try {
+      const text = await tryFetchText(targetUrl);
+      return parseResponseText(text);
+    } catch (e) {
+      console.warn('Direct fetch failed, trying CORS proxies for:', targetUrl, e);
+    }
+
+    // Attempt 3: codetabs proxy
+    try {
+      const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
+      const text = await tryFetchText(proxyUrl);
+      return parseResponseText(text);
+    } catch (e) {
+      console.warn('CodeTabs proxy failed:', e);
+    }
+
+    // Attempt 4: corsproxy.io proxy
+    try {
+      const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+      const text = await tryFetchText(proxyUrl);
+      return parseResponseText(text);
+    } catch (e) {
+      console.warn('Corsproxy failed:', e);
+    }
+
+    throw new Error('Kunde inte hämta katalogen inom tidsgränsen (kontrollera URL, CORS och nätverk)');
+  };
+
+  const fetchQuizLibrary = async (targetCatalogUrl?: any) => {
     try {
       setIsLibraryLoading(true);
       setLibraryError(null);
-      const res = await fetch(`${import.meta.env.BASE_URL}quizzes/manifest.json`);
-      if (res.ok) {
-        const data = await res.json();
-        setQuizLibrary(data);
+      const validTargetUrl = (typeof targetCatalogUrl === 'string' && targetCatalogUrl.trim() !== '' && targetCatalogUrl !== '[object Object]')
+        ? targetCatalogUrl.trim()
+        : undefined;
+      const urlToUse = validTargetUrl !== undefined ? validTargetUrl : catalogUrl;
+      const { baseUrl, manifestUrl, isCustom } = normalizeCatalogUrl(urlToUse);
+      
+      const separator = manifestUrl.includes('?') ? '&' : '?';
+      const fullManifestUrl = `${manifestUrl}${separator}_t=${Date.now()}`;
+      
+      let rawData: any;
+      if (!isCustom) {
+        const res = await fetchWithTimeout(fullManifestUrl, CATALOG_REQUEST_TIMEOUT_MS);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        rawData = await res.json();
       } else {
-        setLibraryError('Failed to fetch manifest');
+        try {
+          rawData = await fetchWithCorsFallback(fullManifestUrl, true);
+        } catch (manifestErr) {
+          // If manifest.json failed, try fetching index.html or baseUrl directly
+          console.warn('manifest.json failed, trying index.html or baseUrl:', manifestErr);
+          const indexUrl = `${baseUrl}index.html?_t=${Date.now()}`;
+          rawData = await fetchWithCorsFallback(indexUrl, true);
+        }
       }
-    } catch (err) {
-      console.error('Failed to load quiz library', err);
-      setLibraryError('Network error');
+      
+      let rawList: any[] = [];
+      if (Array.isArray(rawData)) {
+        rawList = rawData;
+      } else if (rawData && typeof rawData === 'object' && Array.isArray(rawData.quizzes)) {
+        rawList = rawData.quizzes;
+      } else if (typeof rawData === 'string') {
+        // 1. Try to extract embedded <script type="application/json" ...>...</script>
+        const scriptMatch = rawData.match(/<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (scriptMatch && scriptMatch[1]) {
+          try {
+            const parsedScriptJson = JSON.parse(scriptMatch[1].trim());
+            if (Array.isArray(parsedScriptJson)) {
+              rawList = parsedScriptJson;
+            } else if (parsedScriptJson && Array.isArray(parsedScriptJson.quizzes)) {
+              rawList = parsedScriptJson.quizzes;
+            }
+          } catch (e) {
+            console.warn('Failed to parse embedded json script in index.html:', e);
+          }
+        }
+
+        // 2. If no embedded JSON script list found, parse HTML for .json links or filenames
+        if (rawList.length === 0) {
+          const jsonMatches = rawData.match(/[\w\-_./]+\.json/g) || [];
+          const uniqueMatches = Array.from(new Set(jsonMatches)).filter(f => !f.endsWith('manifest.json'));
+          rawList = uniqueMatches.map(filename => ({
+            id: filename.replace('.json', ''),
+            title: filename.replace('.json', '').replace(/[_-]/g, ' '),
+            filename
+          }));
+        }
+      }
+
+      // If list is strings or objects, map and resolve
+      const resolvedList = await Promise.all(rawList.map(async (item: any) => {
+        const itemFilename = typeof item === 'string' ? item : (item.filename || item.file || item.url || '');
+        const isAbsolute = itemFilename.startsWith('http://') || itemFilename.startsWith('https://') || itemFilename.startsWith('/');
+        const resolvedUrl = isAbsolute ? itemFilename : `${baseUrl}${itemFilename}`;
+        
+        let title = (typeof item === 'object' && item.title) ? item.title : '';
+        let description = (typeof item === 'object' && item.description) ? item.description : '';
+        let barnCount = (typeof item === 'object' && typeof item.barnCount === 'number') ? item.barnCount : undefined;
+        let vuxenCount = (typeof item === 'object' && typeof item.vuxenCount === 'number') ? item.vuxenCount : undefined;
+        let language = (typeof item === 'object' && item.language) ? item.language : undefined;
+        let timeLimit = (typeof item === 'object' && item.timeLimit) ? item.timeLimit : undefined;
+
+        // Always inspect the quiz JSON file to extract exact question counts, language & timelimit
+        try {
+          const quizContent = !isCustom && !resolvedUrl.startsWith('http')
+            ? await (await fetchWithTimeout(resolvedUrl, CATALOG_REQUEST_TIMEOUT_MS)).json()
+            : await fetchWithCorsFallback(resolvedUrl, true);
+
+          if (quizContent && typeof quizContent === 'object') {
+            title = quizContent.title || title || itemFilename;
+            description = quizContent.description || description || '';
+            barnCount = Array.isArray(quizContent.barnQuestions) ? quizContent.barnQuestions.length : (barnCount ?? 0);
+            vuxenCount = Array.isArray(quizContent.vuxenQuestions) ? quizContent.vuxenQuestions.length : (vuxenCount ?? 0);
+            language = quizContent.language || language || (itemFilename.includes('_en') || itemFilename.includes('-en') ? 'en' : (itemFilename.includes('_sv') || itemFilename.includes('-sv') ? 'sv' : undefined));
+            timeLimit = quizContent.timeLimit || timeLimit;
+          }
+        } catch (e) {
+          console.warn(`Could not inspect quiz content for ${itemFilename}:`, e);
+        }
+
+        // Fallback for title if still missing
+        if (!title) {
+          title = itemFilename.replace(/\.json$/i, '').replace(/[_-]/g, ' ');
+        }
+
+        return {
+          id: (typeof item === 'object' && item.id) ? item.id : itemFilename,
+          title,
+          description: description || '',
+          filename: itemFilename,
+          catalogBaseUrl: baseUrl,
+          resolvedUrl,
+          barnCount: barnCount ?? 0,
+          vuxenCount: vuxenCount ?? 0,
+          language,
+          timeLimit
+        };
+      }));
+      
+      setQuizLibrary(resolvedList);
+      if (validTargetUrl !== undefined) {
+        setCatalogUrl(validTargetUrl);
+        if (validTargetUrl === DEFAULT_CATALOG_URL || !isCustom) {
+          localStorage.removeItem(STORAGE_KEY_CATALOG_URL);
+        } else {
+          localStorage.setItem(STORAGE_KEY_CATALOG_URL, validTargetUrl);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load quiz library from:', err);
+      const { isCustom } = normalizeCatalogUrl(targetCatalogUrl || catalogUrl);
+      if (!isCustom) {
+        setQuizLibrary(BUILTIN_DEFAULT_QUIZZES);
+        setLibraryError(null);
+      } else {
+        const errorMsg = err.message || 'Kunde inte läsa in katalogen';
+        setLibraryError(errorMsg);
+      }
     } finally {
       setIsLibraryLoading(false);
     }
   };
 
-  const loadLibraryQuiz = async (filename: string) => {
+  const loadLibraryQuiz = async (filenameOrItem: string | any) => {
     try {
-      const res = await fetch(`${import.meta.env.BASE_URL}quizzes/${filename}`);
-      if (!res.ok) throw new Error('File not found');
-      const content = await res.text();
+      let url = '';
+      if (typeof filenameOrItem === 'object' && filenameOrItem !== null) {
+        url = filenameOrItem.resolvedUrl || filenameOrItem.filename || '';
+      } else {
+        const str = String(filenameOrItem || '');
+        if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('/')) {
+          url = str;
+        } else {
+          const { baseUrl } = normalizeCatalogUrl(catalogUrl);
+          url = `${baseUrl}${str}`;
+        }
+      }
+      
+      const { isCustom } = normalizeCatalogUrl(catalogUrl);
+      let content = '';
+      if (!isCustom && !url.startsWith('http://') && !url.startsWith('https://')) {
+        const res = await fetchWithTimeout(url, CATALOG_REQUEST_TIMEOUT_MS);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        content = await res.text();
+      } else {
+        content = await fetchWithCorsFallback(url, false);
+      }
       processImportConfig(content);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error loading library quiz:', err);
-      alert(t(lang, 'libraryError'));
+      alert(t(lang, 'libraryError') + (err?.message ? ` (${err.message})` : ''));
     }
   };
 
+  const handleShareCatalogLink = () => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('quiz');
+      url.searchParams.delete('z');
+      url.searchParams.delete('q');
+      url.searchParams.delete('quizFile');
+      url.searchParams.delete('loadQuiz');
+      url.searchParams.set('catalog', catalogUrl);
+      url.hash = '';
+      navigator.clipboard.writeText(url.toString());
+      setDbNotification(t(lang, 'catalogLinkCopiedNotice'));
+      setTimeout(() => setDbNotification(null), 5000);
+    } catch (e) {
+      console.error('Could not copy catalog link', e);
+    }
+  };
+
+  const handleResetCatalog = async () => {
+    setCatalogUrl(DEFAULT_CATALOG_URL);
+    localStorage.removeItem(STORAGE_KEY_CATALOG_URL);
+    setCustomCatalogInput('');
+    setShowCatalogConfig(false);
+    await fetchQuizLibrary(DEFAULT_CATALOG_URL);
+  };
+
   useEffect(() => {
-    fetchQuizLibrary();
-    
-    // Check URL query parameters or URL hash for compressed quiz: ?quiz=..., #quiz=..., ?z=..., #z=..., #q=...
+    // Check URL query parameters or URL hash for catalog or compressed quiz: ?quiz=..., #quiz=..., ?z=..., #z=..., #q=...
     const checkAndLoadUrlQuiz = async () => {
       try {
         const searchParams = new URLSearchParams(window.location.search);
         const rawHash = window.location.hash || '';
         const hashStr = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
         const hashParams = new URLSearchParams(hashStr);
+
+        // Check for catalog parameter in URL: ?catalog=..., ?catalogUrl=..., ?katalog=..., #catalog=...
+        const urlCatalog = 
+          searchParams.get('catalog') || 
+          searchParams.get('catalogUrl') || 
+          searchParams.get('katalog') ||
+          hashParams.get('catalog') || 
+          hashParams.get('catalogUrl') || 
+          hashParams.get('katalog');
+
+        if (urlCatalog) {
+          const decodedCatalog = decodeURIComponent(urlCatalog).trim();
+          if (decodedCatalog) {
+            setCatalogUrl(decodedCatalog);
+            localStorage.setItem(STORAGE_KEY_CATALOG_URL, decodedCatalog);
+            await fetchQuizLibrary(decodedCatalog);
+          }
+        } else {
+          await fetchQuizLibrary();
+        }
 
         let compressedCandidate = 
           searchParams.get('quiz') || 
@@ -2360,10 +2685,14 @@ ${exampleJson}`;
           }
         }
 
-        // URL Parameter auto-load: ?quizFile=filename.txt
-        const quizFile = searchParams.get('quizFile');
+        // URL Parameter / hash auto-load: ?quizFile=filename.json, ?loadQuiz=filename.json, #loadQuiz=filename.json
+        const quizFile = searchParams.get('quizFile') || searchParams.get('loadQuiz') || hashParams.get('loadQuiz');
         if (quizFile) {
           await loadLibraryQuiz(quizFile);
+          if (window.history && window.history.replaceState) {
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState(null, '', cleanUrl);
+          }
           return true;
         }
       } catch (err) {
@@ -2571,7 +2900,81 @@ ${exampleJson}`;
   const [aiTarget, setAiTarget] = useState<'barn' | 'vuxen' | 'båda'>('båda');
   const [aiKidAgeFrom, setAiKidAgeFrom] = useState<number | string>(5);
   const [aiKidAgeTo, setAiKidAgeTo] = useState<number | string>(10);
+  const [aiGeotagLandmarks, setAiGeotagLandmarks] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const [searchPlaceQuery, setSearchPlaceQuery] = useState<{ [qId: string]: string }>({});
+  const [isSearchingPlace, setIsSearchingPlace] = useState<{ [qId: string]: boolean }>({});
+  const [isAiGeotaggingSingle, setIsAiGeotaggingSingle] = useState<{ [qId: string]: boolean }>({});
+
+  const handleSearchAndGeotagPlace = async (category: UserType, questionId: string, queryText: string) => {
+    const query = queryText.trim();
+    if (!query) {
+      alert(t(lang, 'searchPlaceInputPlaceholder'));
+      return;
+    }
+    setIsSearchingPlace(prev => ({ ...prev, [questionId]: true }));
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`, {
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+      if (!res.ok) throw new Error('Network response not ok');
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].lat && data[0].lon) {
+        const item = data[0];
+        const loc: Location = {
+          lat: parseFloat(item.lat),
+          lng: parseFloat(item.lon),
+          name: item.name || (item.display_name ? item.display_name.split(',')[0] : query)
+        };
+        handleGeotagQuestion(category, questionId, loc);
+        alert(t(lang, 'locationFoundSuccess', { name: loc.name || query }));
+      } else {
+        alert(t(lang, 'noLocationFoundAlert'));
+      }
+    } catch (err) {
+      console.error('Failed to geocode place with Nominatim:', err);
+      alert(t(lang, 'noLocationFoundAlert'));
+    } finally {
+      setIsSearchingPlace(prev => ({ ...prev, [questionId]: false }));
+    }
+  };
+
+  const handleAiGeotagSingleQuestion = async (category: UserType, questionId: string, questionText: string) => {
+    const currentApiKey = getStoredApiKey();
+    if (!currentApiKey) {
+      setUserApiKeyInput('');
+      setShowSettingsModal(true);
+      alert(t(lang, 'missingApiKeyAlert'));
+      return;
+    }
+    setIsAiGeotaggingSingle(prev => ({ ...prev, [questionId]: true }));
+    try {
+      const result = await findLocationCoordinatesWithGemini(questionText, currentApiKey);
+      if (result) {
+        const loc: Location = {
+          lat: result.lat,
+          lng: result.lng,
+          name: result.name
+        };
+        handleGeotagQuestion(category, questionId, loc);
+        alert(t(lang, 'locationFoundSuccess', { name: result.name }));
+      } else {
+        alert(t(lang, 'noLocationFoundAlert'));
+      }
+    } catch (err: any) {
+      if (err.message === 'MISSING_API_KEY') {
+        setShowSettingsModal(true);
+        alert(t(lang, 'missingApiKeyAlert'));
+      } else {
+        alert(t(lang, 'generationError') + err.message);
+      }
+    } finally {
+      setIsAiGeotaggingSingle(prev => ({ ...prev, [questionId]: false }));
+    }
+  };
 
   const generateWithAi = async () => {
     if (!aiTopic) return alert(t(lang, 'enterTopicAlert'));
@@ -2594,6 +2997,7 @@ ${exampleJson}`;
         ageFrom: Number(aiKidAgeFrom) || 5,
         ageTo: Number(aiKidAgeTo) || 10,
         apiKey: currentApiKey,
+        geotagLandmarks: aiGeotagLandmarks,
       });
 
       setQuizConfig(prev => ({
@@ -2603,7 +3007,15 @@ ${exampleJson}`;
       }));
 
       const totalGenerated = (data.barnQuestions?.length || 0) + (data.vuxenQuestions?.length || 0);
-      alert(t(lang, 'aiDoneAlert', { count: totalGenerated.toString() }));
+      const barnTagged = (data.barnQuestions || []).filter(q => q.location && typeof q.location.lat === 'number').length;
+      const vuxenTagged = (data.vuxenQuestions || []).filter(q => q.location && typeof q.location.lat === 'number').length;
+      const totalTagged = barnTagged + vuxenTagged;
+
+      if (totalTagged > 0) {
+        alert(t(lang, 'aiDoneAlert', { count: totalGenerated.toString() }) + ` (${totalTagged} ${t(lang, 'geotaggedLabel').toLowerCase()} 📍)`);
+      } else {
+        alert(t(lang, 'aiDoneAlert', { count: totalGenerated.toString() }));
+      }
       setAiTopic('');
     } catch (err: any) {
       if (err.message === 'MISSING_API_KEY') {
@@ -5654,6 +6066,26 @@ ${exampleJson}`;
                             </div>
                           </div>
 
+                          {/* Auto-geotag landmarks toggle */}
+                          <div className="p-3.5 bg-indigo-50/70 border border-indigo-100 rounded-2xl">
+                            <label className="flex items-start gap-3 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                checked={aiGeotagLandmarks}
+                                onChange={(e) => setAiGeotagLandmarks(e.target.checked)}
+                                className="w-5 h-5 rounded mt-0.5 accent-indigo-600 cursor-pointer"
+                              />
+                              <div className="space-y-0.5">
+                                <span className="text-xs font-black text-indigo-950 block">
+                                  {t(lang, 'aiGeotagLandmarksLabel')}
+                                </span>
+                                <p className="text-[11px] text-indigo-800/80 font-medium leading-relaxed">
+                                  {t(lang, 'aiGeotagLandmarksDesc')}
+                                </p>
+                              </div>
+                            </label>
+                          </div>
+
                           <div className="flex flex-col sm:flex-row gap-2">
                               <button 
                                 onClick={generateWithAi}
@@ -5807,77 +6239,189 @@ ${exampleJson}`;
                         )}
                       </AnimatePresence>
 
-                      {/* Saved Quizzes Section */}
-                      <div className="space-y-3">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+                      {/* SENASTE / NUVARANDE QUIZ SECTION (ALLTID SYNLIG OVANFÖR DÖLJ-KNAPPEN) */}
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between px-1">
                           <div className="flex items-center gap-2">
-                            <h3 className="font-black text-xs uppercase tracking-widest text-slate-400">
-                              {t(lang, 'savedQuizzesHeading')} ({savedQuizzes.length})
+                            <Sparkles className="w-4 h-4 text-indigo-600" />
+                            <h3 className="font-black text-xs uppercase tracking-widest text-slate-500">
+                              {t(lang, 'recentQuizSection')}
                             </h3>
-                            {savedQuizzes.length > 0 && (
-                              <button
-                                onClick={handleClearAllDB}
-                                className="text-[11px] font-bold text-rose-500 hover:text-rose-700 underline ml-1"
-                              >
-                                {t(lang, 'clearDbBtn')}
-                              </button>
-                            )}
                           </div>
-
-                          {savedQuizzes.length > 1 && (
-                            <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
-                              <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
-                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                {t(lang, 'sortByLabel')}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setDbSortBy('date-desc')}
-                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                  dbSortBy === 'date-desc'
-                                    ? 'bg-white text-indigo-600 shadow-xs'
-                                    : 'text-slate-500 hover:text-slate-800'
-                                }`}
-                              >
-                                {t(lang, 'sortDateDesc')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDbSortBy('date-asc')}
-                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                  dbSortBy === 'date-asc'
-                                    ? 'bg-white text-indigo-600 shadow-xs'
-                                    : 'text-slate-500 hover:text-slate-800'
-                                }`}
-                              >
-                                {t(lang, 'sortDateAsc')}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDbSortBy('name-asc')}
-                                className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                  dbSortBy === 'name-asc'
-                                    ? 'bg-white text-indigo-600 shadow-xs'
-                                    : 'text-slate-500 hover:text-slate-800'
-                                }`}
-                              >
-                                {t(lang, 'sortNameAsc')}
-                              </button>
-                            </div>
+                          {latestSavedQuiz && (
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                              {t(lang, 'latestSavedBadge')}
+                            </span>
                           )}
                         </div>
 
-                        {savedQuizzes.length === 0 ? (
-                          <div className="p-8 rounded-3xl bg-slate-50 border border-slate-200/70 text-center space-y-2">
-                            <div className="w-12 h-12 bg-slate-200/60 text-slate-400 rounded-2xl flex items-center justify-center mx-auto">
-                              <Database className="w-6 h-6" />
+                        {latestSavedQuiz ? (
+                          <div className="p-4 rounded-3xl bg-white border-2 border-indigo-200/90 shadow-sm space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-black text-slate-800 text-base leading-snug">{latestSavedQuiz.title}</h4>
+                                  {quizConfig.title?.trim() === latestSavedQuiz.title?.trim() && (
+                                    <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                      {t(lang, 'currentlyLoadedBadge')}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-slate-400 font-medium mt-1">
+                                  {new Date(latestSavedQuiz.updatedAt).toLocaleDateString()} {new Date(latestSavedQuiz.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                                <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2.5 py-1 rounded-full">
+                                  🧒 {latestSavedQuiz.barnCount}
+                                </span>
+                                <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2.5 py-1 rounded-full">
+                                  🧔 {latestSavedQuiz.vuxenCount}
+                                </span>
+                                {latestSavedQuiz.hasLocations && (
+                                  <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2.5 py-1 rounded-full flex items-center gap-0.5">
+                                    <MapPin className="w-3 h-3 inline" /> GPS
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <p className="text-sm font-bold text-slate-600">{t(lang, 'noSavedQuizzes')}</p>
-                            <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                              Spara dina tipspromenader direkt i din webbläsares interna IndexedDB så att du kan hämta dem när du vill utan internet.
-                            </p>
+
+                            <div className="flex flex-wrap items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
+                              <button
+                                onClick={handleSaveCurrentQuizToDB}
+                                disabled={isSavingToDb}
+                                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                              >
+                                <Save className="w-3.5 h-3.5 text-indigo-200" />
+                                <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleLoadQuizFromDB(latestSavedQuiz)}
+                                className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5" />
+                                <span>{t(lang, 'loadQuizBtn')}</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleOverwriteQuizInDB(latestSavedQuiz.id)}
+                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                <span>{t(lang, 'overwriteQuizBtn')}</span>
+                              </button>
+                            </div>
                           </div>
                         ) : (
+                          <div className="p-4 rounded-3xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-black text-slate-800 text-sm">{quizConfig.title || 'Nuvarande quiz'}</h4>
+                                <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+                                  {t(lang, 'currentlyLoadedBadge')}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                                🧒 {quizConfig.barnQuestions?.length || 0} barnfrågor • 🧔 {quizConfig.vuxenQuestions?.length || 0} vuxenfrågor
+                              </p>
+                            </div>
+                            <button
+                              onClick={handleSaveCurrentQuizToDB}
+                              disabled={isSavingToDb}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:scale-95"
+                            >
+                              <Save className="w-4 h-4 text-indigo-200" />
+                              <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* TOGGLE: DÖLJ / VISA ALLA SPARADE QUIZ KNAPP */}
+                        {savedQuizzes.length > 0 && (
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setShowAllSavedQuizzes(!showAllSavedQuizzes)}
+                              className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200/90 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 shadow-xs border border-slate-200/70"
+                            >
+                              {showAllSavedQuizzes ? (
+                                <>
+                                  <ChevronUp className="w-4 h-4 text-indigo-600" />
+                                  <span>{t(lang, 'hideSavedQuizzes')} ({savedQuizzes.length})</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="w-4 h-4 text-indigo-600" />
+                                  <span>{t(lang, 'showSavedQuizzes')} ({savedQuizzes.length})</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Saved Quizzes Full List (Collapsible via showAllSavedQuizzes) */}
+                      {showAllSavedQuizzes && (
+                        <div className="space-y-3 pt-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-black text-xs uppercase tracking-widest text-slate-400">
+                                {t(lang, 'savedQuizzesHeading')} ({savedQuizzes.length})
+                              </h3>
+                              {savedQuizzes.length > 0 && (
+                                <button
+                                  onClick={handleClearAllDB}
+                                  className="text-[11px] font-bold text-rose-500 hover:text-rose-700 underline ml-1"
+                                >
+                                  {t(lang, 'clearDbBtn')}
+                                </button>
+                              )}
+                            </div>
+
+                            {savedQuizzes.length > 1 && (
+                              <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
+                                <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
+                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                  {t(lang, 'sortByLabel')}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('date-desc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'date-desc'
+                                      ? 'bg-white text-indigo-600 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortDateDesc')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('date-asc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'date-asc'
+                                      ? 'bg-white text-indigo-600 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortDateAsc')}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDbSortBy('name-asc')}
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                    dbSortBy === 'name-asc'
+                                      ? 'bg-white text-indigo-600 shadow-xs'
+                                      : 'text-slate-500 hover:text-slate-800'
+                                  }`}
+                                >
+                                  {t(lang, 'sortNameAsc')}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
                           <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
                             {sortedSavedQuizzes.map((item) => (
                               <div 
@@ -5934,8 +6478,8 @@ ${exampleJson}`;
                               </div>
                             ))}
                           </div>
-                        )}
-                      </div>
+                        </div>
+                      )}
 
                       {/* SECTION: PRESET CATALOG QUIZZES (Bibliotek) */}
                       <div className="space-y-3 pt-4 border-t border-slate-100">
@@ -5953,20 +6497,118 @@ ${exampleJson}`;
                           )}
                         </div>
 
+                        {/* Catalog Source Selector */}
+                        <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 flex flex-col gap-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-slate-500">{t(lang, 'catalogSourceLabel')}:</span>
+                              <span className={`text-[11px] font-black px-2 py-0.5 rounded-full truncate max-w-[200px] sm:max-w-[280px] ${
+                                normalizeCatalogUrl(catalogUrl).isCustom 
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  : 'bg-indigo-100 text-indigo-700'
+                              }`} title={catalogUrl}>
+                                {normalizeCatalogUrl(catalogUrl).isCustom ? catalogUrl : t(lang, 'defaultCatalogLabel')}
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                <button
+                                  type="button"
+                                  onClick={handleShareCatalogLink}
+                                  className="p-1.5 bg-white hover:bg-slate-100 text-indigo-600 rounded-lg border border-slate-200 text-xs font-bold transition-all shadow-2xs active:scale-95"
+                                  title={t(lang, 'shareCatalogLinkBtn')}
+                                >
+                                  <Share2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowCatalogConfig(!showCatalogConfig);
+                                  if (!customCatalogInput && normalizeCatalogUrl(catalogUrl).isCustom) {
+                                    setCustomCatalogInput(catalogUrl);
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 text-[10px] font-black uppercase transition-all shadow-2xs active:scale-95 flex items-center gap-1"
+                              >
+                                <span>{showCatalogConfig ? 'Stäng' : t(lang, 'changeCatalogBtn')}</span>
+                                <ChevronDown className={`w-3 h-3 transition-transform ${showCatalogConfig ? 'rotate-180' : ''}`} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {showCatalogConfig && (
+                            <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                              <div className="flex flex-col sm:flex-row items-center gap-2">
+                                <input
+                                  type="url"
+                                  value={customCatalogInput}
+                                  onChange={(e) => setCustomCatalogInput(e.target.value)}
+                                  placeholder={t(lang, 'catalogUrlPlaceholder')}
+                                  className="w-full text-xs p-2.5 bg-white border border-slate-200 rounded-xl font-mono focus:border-indigo-500 focus:outline-hidden"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (customCatalogInput.trim()) {
+                                      fetchQuizLibrary(customCatalogInput.trim());
+                                      setShowCatalogConfig(false);
+                                    }
+                                  }}
+                                  disabled={!customCatalogInput.trim() || isLibraryLoading}
+                                  className="w-full sm:w-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all whitespace-nowrap active:scale-95"
+                                >
+                                  {t(lang, 'fetchCatalogBtn')}
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                                <p className="text-[10px] text-slate-500">
+                                  💡 Stöder webbmappar med <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-200">manifest.json</code> och <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-200">.json</code>-quiz.
+                                </p>
+                                {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                  <button
+                                    type="button"
+                                    onClick={handleResetCatalog}
+                                    className="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline transition-colors"
+                                  >
+                                    {t(lang, 'resetCatalogBtn')}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {isLibraryLoading ? (
                           <div className="p-10 text-center text-slate-400 font-bold flex flex-col items-center gap-3">
                             <div className="w-7 h-7 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                             <p className="text-xs">{t(lang, 'loadingLibrary')}</p>
                           </div>
                         ) : libraryError ? (
-                          <div className="p-6 text-center text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 flex flex-col items-center gap-2">
-                            <p className="text-xs">{t(lang, 'libraryError')}</p>
-                            <button 
-                              onClick={fetchQuizLibrary}
-                              className="px-3.5 py-1 bg-rose-100 hover:bg-rose-200 rounded-full text-[10px] uppercase font-black transition-all active:scale-95"
-                            >
-                              {t(lang, 'retryBtn') || 'Retry'}
-                            </button>
+                          <div className="p-6 text-center bg-rose-50 rounded-2xl border border-rose-100 flex flex-col items-center gap-2.5">
+                            <p className="text-xs font-bold text-rose-700">{t(lang, 'libraryError')}</p>
+                            <p className="text-[11px] text-rose-600 font-mono max-w-md break-all bg-white/70 px-2 py-1 rounded border border-rose-200">{libraryError}</p>
+                            <div className="flex items-center gap-2 pt-1">
+                              <button 
+                                type="button"
+                                onClick={() => fetchQuizLibrary()}
+                                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] uppercase font-black transition-all active:scale-95 shadow-xs"
+                              >
+                                {t(lang, 'retryBtn') || 'Försök igen'}
+                              </button>
+                              {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                <button
+                                  type="button"
+                                  onClick={handleResetCatalog}
+                                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-xl text-[10px] uppercase font-bold border border-slate-200 transition-all active:scale-95"
+                                >
+                                  {t(lang, 'resetCatalogBtn')}
+                                </button>
+                              )}
+                            </div>
                           </div>
                         ) : quizLibrary.length === 0 ? (
                           <div className="p-8 text-center text-slate-400 font-bold bg-slate-50 rounded-2xl border border-slate-200/60">
@@ -5975,21 +6617,49 @@ ${exampleJson}`;
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[45vh] overflow-y-auto pr-1 custom-scrollbar">
-                            {quizLibrary.map(item => (
-                              <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
-                                <div className="flex-1">
-                                  <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
-                                  <p className="text-[11px] text-slate-500 font-medium line-clamp-2 mt-1 leading-relaxed">{item.description}</p>
+                            {quizLibrary.map(item => {
+                              const totalQuestions = (item.barnCount || 0) + (item.vuxenCount || 0);
+                              return (
+                                <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
+                                  <div className="flex-1 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                                      <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
+                                      {item.language && (
+                                        <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2 py-0.5 rounded-md border border-indigo-100 uppercase">
+                                          {item.language === 'sv' ? '🇸🇪 SV' : item.language === 'en' ? '🇬🇧 EN' : item.language.toUpperCase()}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 font-medium line-clamp-2 leading-relaxed">{item.description}</p>
+                                    
+                                    {/* Question counts badge bar */}
+                                    <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
+                                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                        🧒 {item.barnCount || 0} barn
+                                      </span>
+                                      <span className="inline-flex items-center gap-1 bg-pink-50 text-pink-900 border border-pink-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                        🧔 {item.vuxenCount || 0} vuxna
+                                      </span>
+                                      <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                        📋 {totalQuestions} frågor
+                                      </span>
+                                      {item.timeLimit ? (
+                                        <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                          ⏱️ {item.timeLimit}s
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <button 
+                                    onClick={() => loadLibraryQuiz(item.filename)}
+                                    className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2"
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>{t(lang, 'loadQuizBtn')}</span>
+                                  </button>
                                 </div>
-                                <button 
-                                  onClick={() => loadLibraryQuiz(item.filename)}
-                                  className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>{t(lang, 'loadQuizBtn')}</span>
-                                </button>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -7438,137 +8108,196 @@ ${exampleJson}`;
                           </motion.div>
                         </AnimatePresence>
 
-                        {showQuestionMore && (
-                          <div>
-                        {/* Geotagging */}
-                        <div className="pt-8 mt-8 border-t border-slate-200 space-y-5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
-                                <MapPin className="w-6 h-6" />
-                              </div>
-                              <div>
-                                <h4 className="font-black text-sm text-slate-800 uppercase tracking-widest">{t(lang, 'geotagTitle')}</h4>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'geotagDesc')}</p>
-                              </div>
-                            </div>
-                            {isAdmin && rawQ.location && (
-                              <button 
-                                type="button"
-                                onClick={() => updateQuestion(editingQuestionsCategory, q.id, { location: undefined })}
-                                className="px-4 py-2 bg-rose-50 text-rose-600 text-[10px] font-black rounded-xl border border-rose-100 hover:bg-rose-100 transition-all uppercase tracking-widest"
-                              >
-                                {t(lang, 'removeGeotagBtn')}
-                              </button>
-                            )}
-                          </div>
-
-                          {isAdmin && (
-                            <div className="rounded-3xl overflow-hidden border-4 border-slate-50 shadow-lg">
-                              <AdminMapPicker 
-                                initialLocation={rawQ.location}
-                                fallbackCenter={lastTaggedLocation || userLocation}
-                                onSelectLocation={(loc) => handleGeotagQuestion(editingQuestionsCategory, q.id, loc)}
-                                questionsWithLocations={
-                                  editingQuestionsCategory === 'barn'
-                                    ? quizConfig.barnQuestions.map((item, index) => ({ q: item, index, type: 'barn' as const }))
-                                    : quizConfig.vuxenQuestions.map((item, index) => ({ q: item, index, type: 'vuxen' as const }))
-                                }
-                                activeQuestionId={q.id}
-                              />
-                            </div>
-                          )}
-
-                          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                            {isAdmin ? (
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  if (!navigator.geolocation) {
-                                    alert(t(lang, 'noGpsSupport'));
-                                    return;
-                                  }
-                                  navigator.geolocation.getCurrentPosition((pos) => {
-                                    handleGeotagQuestion(editingQuestionsCategory, q.id, {
-                                      lat: pos.coords.latitude,
-                                      lng: pos.coords.longitude
-                                    });
-                                  }, (err) => {
-                                    alert(t(lang, 'couldNotGetPosition') + ': ' + err.message);
-                                  });
-                                }}
-                                className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 transition-all active:scale-95 uppercase tracking-widest"
-                              >
-                                <Locate className="w-4 h-4" />
-                                <span>{t(lang, 'setCurrentPosition')}</span>
-                              </button>
-                            ) : (
-                              <div className="text-xs font-bold text-slate-400 bg-slate-50 px-4 py-2 rounded-xl">
-                                {rawQ.location ? t(lang, 'geotaggedLabel') : t(lang, 'notGeotaggedLabel')}
-                              </div>
-                            )}
-
-                            {rawQ.location && (
-                              <div className="px-4 py-2 bg-slate-900 text-white/90 text-[10px] font-mono rounded-xl shadow-inner">
-                                {rawQ.location.lat.toFixed(6)}, {rawQ.location.lng.toFixed(6)}
-                              </div>
-                            )}
-                          </div>
-
-                          {rawQ.location && (
-                            <div className="p-4 bg-amber-50/90 border-2 border-amber-200 rounded-2xl space-y-2">
-                              <label className="flex items-start gap-3 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  disabled={!isAdmin}
-                                  checked={!!rawQ.hideLocationOnMap || !!rawQ.location?.hideOnMap}
-                                  onChange={(e) => {
-                                    if (!isAdmin) return;
-                                    const checked = e.target.checked;
-                                    updateQuestion(editingQuestionsCategory, q.id, {
-                                      hideLocationOnMap: checked,
-                                      location: rawQ.location ? { ...rawQ.location, hideOnMap: checked } : undefined,
-                                    });
-                                  }}
-                                  className="w-5 h-5 rounded mt-0.5 accent-amber-600 cursor-pointer"
-                                />
-                                <div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-black text-amber-950 flex items-center gap-1.5">
-                                      <span>🕵️‍♂️</span>
-                                      <span>{t(lang, 'hideLocationOnMapLabel')}</span>
-                                    </span>
-                                    {(rawQ.hideLocationOnMap || rawQ.location?.hideOnMap) && (
-                                      <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md">
-                                        {t(lang, 'treasureHuntActiveBadge')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-xs text-amber-900 font-medium mt-1 leading-relaxed">
-                                    {t(lang, 'hideLocationOnMapDescription')}
-                                  </p>
-                                </div>
-                              </label>
-                            </div>
-                          )}
+                        {/* Toggle button ABOVE Geotag & Follow-up */}
+                        <div className="pt-6 mt-6 border-t border-slate-200">
+                          <button
+                            type="button"
+                            onClick={() => setShowQuestionMore(prev => !prev)}
+                            className="w-full flex items-center justify-between gap-3 px-5 py-3.5 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 rounded-2xl border border-slate-200/90 shadow-2xs transition-all cursor-pointer select-none"
+                          >
+                            <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-800">
+                              <ChevronDown className={`w-4 h-4 text-indigo-600 transition-transform duration-200 ${showQuestionMore ? 'rotate-180' : ''}`} />
+                              {t(lang, 'geotagFollowUpSection')}
+                            </span>
+                            <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-indigo-700 shadow-2xs">
+                              {showQuestionMore ? '▲ Dölj' : '▼ Visa'}
+                            </span>
+                          </button>
                         </div>
-                          </div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => setShowQuestionMore(prev => !prev)}
-                          className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl border border-slate-200 transition-all"
-                        >
-                          <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest">
-                            <ChevronDown className={`w-4 h-4 transition-transform ${showQuestionMore ? 'rotate-180' : ''}`} />
-                            {t(lang, 'geotagFollowUpSection')}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-400">{showQuestionMore ? 'Dölj' : 'Visa'}</span>
-                        </button>
 
                         {showQuestionMore && (
-                          <div className="space-y-6">
+                          <div className="space-y-8 pt-2">
+                            {/* Geotagging */}
+                            <div className="p-5 sm:p-6 bg-indigo-50/40 border-2 border-indigo-100 rounded-3xl space-y-5">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center shadow-2xs">
+                                    <MapPin className="w-6 h-6" />
+                                  </div>
+                                  <div>
+                                    <h4 className="font-black text-sm text-slate-800 uppercase tracking-widest">{t(lang, 'geotagTitle')}</h4>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{t(lang, 'geotagDesc')}</p>
+                                  </div>
+                                </div>
+                                {isAdmin && rawQ.location && (
+                                  <button 
+                                    type="button"
+                                    onClick={() => updateQuestion(editingQuestionsCategory, q.id, { location: undefined })}
+                                    className="px-4 py-2 bg-rose-50 text-rose-600 text-[10px] font-black rounded-xl border border-rose-100 hover:bg-rose-100 transition-all uppercase tracking-widest"
+                                  >
+                                    {t(lang, 'removeGeotagBtn')}
+                                  </button>
+                                )}
+                              </div>
+
+                              {isAdmin && (
+                                <div className="space-y-3">
+                                  <div className="flex flex-col sm:flex-row gap-2">
+                                    <div className="relative flex-1">
+                                      <input
+                                        type="text"
+                                        placeholder={t(lang, 'searchPlaceInputPlaceholder')}
+                                        value={searchPlaceQuery[q.id] !== undefined ? searchPlaceQuery[q.id] : (rawQ.location?.name || '')}
+                                        onChange={(e) => setSearchPlaceQuery(prev => ({ ...prev, [q.id]: e.target.value }))}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            const qText = searchPlaceQuery[q.id] !== undefined ? searchPlaceQuery[q.id] : (rawQ.location?.name || q.text);
+                                            handleSearchAndGeotagPlace(editingQuestionsCategory, q.id, qText);
+                                          }
+                                        }}
+                                        className="w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-indigo-500 shadow-2xs"
+                                      />
+                                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                                    </div>
+                                    <div className="flex gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={isSearchingPlace[q.id]}
+                                        onClick={() => {
+                                          const qText = searchPlaceQuery[q.id] !== undefined ? searchPlaceQuery[q.id] : (rawQ.location?.name || q.text);
+                                          handleSearchAndGeotagPlace(editingQuestionsCategory, q.id, qText);
+                                        }}
+                                        className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                                      >
+                                        {isSearchingPlace[q.id] ? (
+                                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        ) : (
+                                          <MapPin className="w-3.5 h-3.5" />
+                                        )}
+                                        <span>{t(lang, 'searchAndGeotagBtn')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        disabled={isAiGeotaggingSingle[q.id]}
+                                        onClick={() => {
+                                          const placeOrText = searchPlaceQuery[q.id] || q.text;
+                                          handleAiGeotagSingleQuestion(editingQuestionsCategory, q.id, placeOrText);
+                                        }}
+                                        className="px-3.5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                                        title="Låt Gemini AI hitta platsens koordinater automatiskt utifrån frågan eller platsnamnet"
+                                      >
+                                        {isAiGeotaggingSingle[q.id] ? (
+                                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        ) : (
+                                          <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                        )}
+                                        <span>{t(lang, 'aiGeotagSingleBtn')}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  <div className="rounded-3xl overflow-hidden border-4 border-slate-50 shadow-lg">
+                                    <AdminMapPicker 
+                                      initialLocation={rawQ.location}
+                                      fallbackCenter={lastTaggedLocation || userLocation}
+                                      onSelectLocation={(loc) => handleGeotagQuestion(editingQuestionsCategory, q.id, loc)}
+                                      questionsWithLocations={
+                                        editingQuestionsCategory === 'barn'
+                                          ? quizConfig.barnQuestions.map((item, index) => ({ q: item, index, type: 'barn' as const }))
+                                          : quizConfig.vuxenQuestions.map((item, index) => ({ q: item, index, type: 'vuxen' as const }))
+                                      }
+                                      activeQuestionId={q.id}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                                {isAdmin ? (
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      if (!navigator.geolocation) {
+                                        alert(t(lang, 'noGpsSupport'));
+                                        return;
+                                      }
+                                      navigator.geolocation.getCurrentPosition((pos) => {
+                                        handleGeotagQuestion(editingQuestionsCategory, q.id, {
+                                          lat: pos.coords.latitude,
+                                          lng: pos.coords.longitude
+                                        });
+                                      }, (err) => {
+                                        alert(t(lang, 'couldNotGetPosition') + ': ' + err.message);
+                                      });
+                                    }}
+                                    className="w-full sm:w-auto px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 transition-all active:scale-95 uppercase tracking-widest cursor-pointer"
+                                  >
+                                    <Locate className="w-4 h-4" />
+                                    <span>{t(lang, 'setCurrentPosition')}</span>
+                                  </button>
+                                ) : (
+                                  <div className="text-xs font-bold text-slate-400 bg-slate-50 px-4 py-2 rounded-xl">
+                                    {rawQ.location ? t(lang, 'geotaggedLabel') : t(lang, 'notGeotaggedLabel')}
+                                  </div>
+                                )}
+
+                                {rawQ.location && (
+                                  <div className="px-4 py-2 bg-slate-900 text-white/90 text-[10px] font-mono rounded-xl shadow-inner">
+                                    {rawQ.location.lat.toFixed(6)}, {rawQ.location.lng.toFixed(6)}
+                                  </div>
+                                )}
+                              </div>
+
+                              {rawQ.location && (
+                                <div className="p-4 bg-amber-50/90 border-2 border-amber-200 rounded-2xl space-y-2">
+                                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                                    <input
+                                      type="checkbox"
+                                      disabled={!isAdmin}
+                                      checked={!!rawQ.hideLocationOnMap || !!rawQ.location?.hideOnMap}
+                                      onChange={(e) => {
+                                        if (!isAdmin) return;
+                                        const checked = e.target.checked;
+                                        updateQuestion(editingQuestionsCategory, q.id, {
+                                          hideLocationOnMap: checked,
+                                          location: rawQ.location ? { ...rawQ.location, hideOnMap: checked } : undefined,
+                                        });
+                                      }}
+                                      className="w-5 h-5 rounded mt-0.5 accent-amber-600 cursor-pointer"
+                                    />
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-sm font-black text-amber-950 flex items-center gap-1.5">
+                                          <span>🕵️‍♂️</span>
+                                          <span>{t(lang, 'hideLocationOnMapLabel')}</span>
+                                        </span>
+                                        {(rawQ.hideLocationOnMap || rawQ.location?.hideOnMap) && (
+                                          <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md">
+                                            {t(lang, 'treasureHuntActiveBadge')}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-amber-900 font-medium mt-1 leading-relaxed">
+                                        {t(lang, 'hideLocationOnMapDescription')}
+                                      </p>
+                                    </div>
+                                  </label>
+                                </div>
+                              )}
+                            </div>
+
                             {/* Manual Follow-up Configuration */}
                             <div className="space-y-3 p-5 sm:p-6 bg-emerald-50/80 border-2 border-emerald-200 rounded-3xl">
                               <div>
@@ -7604,6 +8333,21 @@ ${exampleJson}`;
                                 </select>
                               </div>
                             </div>
+
+                            {/* Toggle button BELOW Geotag & Follow-up */}
+                            <button
+                              type="button"
+                              onClick={() => setShowQuestionMore(false)}
+                              className="w-full flex items-center justify-between gap-3 px-5 py-3 bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 rounded-2xl border border-slate-200 transition-all cursor-pointer select-none"
+                            >
+                              <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-slate-700">
+                                <ChevronDown className="w-4 h-4 text-indigo-600 rotate-180" />
+                                {t(lang, 'geotagFollowUpSection')}
+                              </span>
+                              <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-indigo-700 shadow-2xs">
+                                ▲ Dölj
+                              </span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -7688,129 +8432,259 @@ ${exampleJson}`;
                       </div>
 
                       <div className="space-y-5 max-h-[50vh] overflow-y-auto pr-1 custom-scrollbar">
-                        {/* SECTION: MINA SPARADE QUIZ (INDEXEDDB) */}
-                        {savedQuizzes.length > 0 && (
-                          <div className="space-y-2.5">
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
-                              <div className="flex items-center gap-2">
-                                <HardDrive className="w-4 h-4 text-emerald-600" />
-                                <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
-                                  {t(lang, 'mySavedQuizzesSection')}
-                                </h4>
-                                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                                  {savedQuizzes.length}
-                                </span>
+                        {/* SECTION: SENASTE / SPARADE QUIZ (INDEXEDDB) */}
+                        <div className="space-y-2.5">
+                          <div className="flex items-center justify-between px-1">
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-emerald-600" />
+                              <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
+                                {t(lang, 'recentQuizSection')}
+                              </h4>
+                            </div>
+                            {latestSavedQuiz && (
+                              <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                {t(lang, 'latestSavedBadge')}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Latest Saved or Current Quiz Card */}
+                          {latestSavedQuiz ? (
+                            <div className="p-4 rounded-3xl bg-emerald-50/50 border-2 border-emerald-200 shadow-xs space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-black text-slate-800 text-base leading-snug">{latestSavedQuiz.title}</h4>
+                                    {quizConfig.title?.trim() === latestSavedQuiz.title?.trim() && (
+                                      <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                        {t(lang, 'currentlyLoadedBadge')}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 font-medium mt-1">
+                                    {new Date(latestSavedQuiz.updatedAt).toLocaleDateString()} {new Date(latestSavedQuiz.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                                  <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2 py-0.5 rounded-md">
+                                    🧒 {latestSavedQuiz.barnCount}
+                                  </span>
+                                  <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2 py-0.5 rounded-md">
+                                    🧔 {latestSavedQuiz.vuxenCount}
+                                  </span>
+                                  {latestSavedQuiz.hasLocations && (
+                                    <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/60 px-2 py-0.5 rounded-md flex items-center gap-0.5">
+                                      <MapPin className="w-2.5 h-2.5 inline" /> GPS
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
-                              {/* Sort Controls */}
-                              <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
-                                <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
-                                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                                  {t(lang, 'sortByLabel')}
-                                </span>
+                              <div className="flex flex-wrap items-center justify-end gap-2 pt-2.5 border-t border-emerald-100">
                                 <button
-                                  type="button"
-                                  onClick={() => setDbSortBy('date-desc')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                    dbSortBy === 'date-desc'
-                                      ? 'bg-white text-emerald-700 shadow-xs'
-                                      : 'text-slate-500 hover:text-slate-800'
-                                  }`}
+                                  onClick={handleSaveCurrentQuizToDB}
+                                  disabled={isSavingToDb}
+                                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
                                 >
-                                  {t(lang, 'sortDateDesc')}
+                                  <Save className="w-3.5 h-3.5 text-emerald-200" />
+                                  <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
                                 </button>
+
                                 <button
-                                  type="button"
-                                  onClick={() => setDbSortBy('date-asc')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                    dbSortBy === 'date-asc'
-                                      ? 'bg-white text-emerald-700 shadow-xs'
-                                      : 'text-slate-500 hover:text-slate-800'
-                                  }`}
+                                  onClick={() => handleLoadQuizFromDB(latestSavedQuiz, true)}
+                                  className="px-3.5 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all active:scale-95"
                                 >
-                                  {t(lang, 'sortDateAsc')}
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>{t(lang, 'loadQuizBtn')}</span>
                                 </button>
+
                                 <button
-                                  type="button"
-                                  onClick={() => setDbSortBy('name-asc')}
-                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
-                                    dbSortBy === 'name-asc'
-                                      ? 'bg-white text-emerald-700 shadow-xs'
-                                      : 'text-slate-500 hover:text-slate-800'
-                                  }`}
+                                  onClick={() => handleDeleteQuizFromDB(latestSavedQuiz.id)}
+                                  className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all active:scale-95"
+                                  title={t(lang, 'deleteQuizBtn')}
                                 >
-                                  {t(lang, 'sortNameAsc')}
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               </div>
                             </div>
+                          ) : (
+                            <div className="p-4 rounded-3xl bg-slate-50 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-black text-slate-800 text-sm">{quizConfig.title || 'Nuvarande quiz'}</h4>
+                                  <span className="text-[10px] font-black bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full">
+                                    {t(lang, 'currentlyLoadedBadge')}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                                  🧒 {quizConfig.barnQuestions?.length || 0} barnfrågor • 🧔 {quizConfig.vuxenQuestions?.length || 0} vuxenfrågor
+                                </p>
+                              </div>
+                              <button
+                                onClick={handleSaveCurrentQuizToDB}
+                                disabled={isSavingToDb}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:scale-95"
+                              >
+                                <Save className="w-4 h-4 text-emerald-200" />
+                                <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
+                              </button>
+                            </div>
+                          )}
 
-                            <div className="grid grid-cols-1 gap-2.5">
-                              {sortedSavedQuizzes.map(item => {
-                                const itemLangs = getQuizAvailableLanguages(item.quizConfig);
-                                return (
-                                  <div key={item.id} className="p-3.5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 rounded-2xl transition-all group flex flex-col justify-between gap-3 shadow-xs">
-                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0 flex-1">
-                                      <div className="min-w-0 flex-1">
-                                        <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors truncate">{item.title}</h4>
-                                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-                                          <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
-                                            🧒 {item.barnCount}
-                                          </span>
-                                          <span className="text-[10px] font-bold text-pink-700 bg-pink-100/80 px-2 py-0.5 rounded-md">
-                                            🧔 {item.vuxenCount}
-                                          </span>
-                                          {item.hasLocations && (
-                                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
-                                              <MapPin className="w-2.5 h-2.5" /> Geotag
+                          {/* TOGGLE: DÖLJ / VISA ALLA SPARADE QUIZ KNAPP */}
+                          {savedQuizzes.length > 0 && (
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setShowAllSavedQuizzes(!showAllSavedQuizzes)}
+                                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200/90 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 shadow-2xs border border-slate-200/70"
+                              >
+                                {showAllSavedQuizzes ? (
+                                  <>
+                                    <ChevronUp className="w-4 h-4 text-emerald-700" />
+                                    <span>{t(lang, 'hideSavedQuizzes')} ({savedQuizzes.length})</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="w-4 h-4 text-emerald-700" />
+                                    <span>{t(lang, 'showSavedQuizzes')} ({savedQuizzes.length})</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* EXPANDED LIST OF SAVED QUIZZES */}
+                          {showAllSavedQuizzes && (
+                            <div className="space-y-2.5 pt-2">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-1">
+                                <div className="flex items-center gap-2">
+                                  <HardDrive className="w-4 h-4 text-emerald-600" />
+                                  <h4 className="font-black text-xs uppercase tracking-wider text-slate-700">
+                                    {t(lang, 'mySavedQuizzesSection')} ({savedQuizzes.length})
+                                  </h4>
+                                </div>
+
+                                {/* Sort Controls */}
+                                <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/60 self-start sm:self-auto shrink-0">
+                                  <span className="text-[10px] font-bold text-slate-500 px-1 flex items-center gap-1">
+                                    <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                                    {t(lang, 'sortByLabel')}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDbSortBy('date-desc')}
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                      dbSortBy === 'date-desc'
+                                        ? 'bg-white text-emerald-700 shadow-xs'
+                                        : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    {t(lang, 'sortDateDesc')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDbSortBy('date-asc')}
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                      dbSortBy === 'date-asc'
+                                        ? 'bg-white text-emerald-700 shadow-xs'
+                                        : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    {t(lang, 'sortDateAsc')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDbSortBy('name-asc')}
+                                    className={`px-2 py-0.5 rounded-lg text-[10px] font-black transition-all ${
+                                      dbSortBy === 'name-asc'
+                                        ? 'bg-white text-emerald-700 shadow-xs'
+                                        : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    {t(lang, 'sortNameAsc')}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-2.5 max-h-[40vh] overflow-y-auto pr-1">
+                                {sortedSavedQuizzes.map(item => {
+                                  const itemLangs = getQuizAvailableLanguages(item.quizConfig);
+                                  return (
+                                    <div key={item.id} className="p-3.5 bg-emerald-50/40 hover:bg-emerald-50/80 border border-emerald-200/80 rounded-2xl transition-all group flex flex-col justify-between gap-3 shadow-xs">
+                                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0 flex-1">
+                                        <div className="min-w-0 flex-1">
+                                          <h4 className="font-black text-slate-800 text-sm group-hover:text-emerald-700 transition-colors truncate">{item.title}</h4>
+                                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-100/80 px-2 py-0.5 rounded-md">
+                                              🧒 {item.barnCount}
                                             </span>
-                                          )}
-                                          <span className="text-[10px] text-slate-400 font-medium ml-auto">
-                                            {new Date(item.updatedAt).toLocaleDateString()}
-                                          </span>
+                                            <span className="text-[10px] font-bold text-pink-700 bg-pink-100/80 px-2 py-0.5 rounded-md">
+                                              🧔 {item.vuxenCount}
+                                            </span>
+                                            {item.hasLocations && (
+                                              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md flex items-center gap-0.5">
+                                                <MapPin className="w-2.5 h-2.5" /> Geotag
+                                              </span>
+                                            )}
+                                            <span className="text-[10px] text-slate-400 font-medium ml-auto">
+                                              {new Date(item.updatedAt).toLocaleDateString()}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 shrink-0">
+                                          <button 
+                                            onClick={() => handleLoadQuizFromDB(item, true)}
+                                            className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                                          >
+                                            <Download className="w-3.5 h-3.5" />
+                                            <span>{t(lang, 'loadQuizBtn')}</span>
+                                          </button>
+
+                                          <button 
+                                            onClick={() => handleDeleteQuizFromDB(item.id)}
+                                            className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all active:scale-95 shrink-0"
+                                            title={t(lang, 'deleteQuizBtn')}
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                          </button>
                                         </div>
                                       </div>
-                                      <button 
-                                        onClick={() => handleLoadQuizFromDB(item, true)}
-                                        className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[10px] uppercase tracking-wider transition-all shrink-0 flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span>{t(lang, 'loadQuizBtn')}</span>
-                                      </button>
-                                    </div>
 
-                                    {/* Language Indicators for Saved Quiz */}
-                                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-emerald-100/80">
-                                      <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
-                                        <Globe className="w-3 h-3 text-emerald-600" />
-                                        <span>{t(lang, 'availableLanguagesLabel')}:</span>
-                                      </span>
-                                      <div className="flex items-center gap-1 flex-wrap">
-                                        {itemLangs.allLanguages.slice(0, 6).map(l => (
-                                          <span
-                                            key={l.code}
-                                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-emerald-200 text-[10px] font-semibold text-slate-700 shadow-2xs"
-                                            title={l.name}
-                                          >
-                                            <span>{l.flag}</span>
-                                            <span className="font-mono text-[9px] uppercase font-bold text-slate-500">{l.code}</span>
-                                          </span>
-                                        ))}
-                                        {itemLangs.allLanguages.length > 6 && (
-                                          <span
-                                            className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800"
-                                            title={itemLangs.allLanguages.slice(6).map(l => `${l.flag} ${l.name}`).join(', ')}
-                                          >
-                                            +{itemLangs.allLanguages.length - 6} {t(lang, 'moreLangsLabel')}
-                                          </span>
-                                        )}
+                                      {/* Language Indicators for Saved Quiz */}
+                                      <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-emerald-100/80">
+                                        <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                                          <Globe className="w-3 h-3 text-emerald-600" />
+                                          <span>{t(lang, 'availableLanguagesLabel')}:</span>
+                                        </span>
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          {itemLangs.allLanguages.slice(0, 6).map(l => (
+                                            <span
+                                              key={l.code}
+                                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white border border-emerald-200 text-[10px] font-semibold text-slate-700 shadow-2xs"
+                                              title={l.name}
+                                            >
+                                              <span>{l.flag}</span>
+                                              <span className="font-mono text-[9px] uppercase font-bold text-slate-500">{l.code}</span>
+                                            </span>
+                                          ))}
+                                          {itemLangs.allLanguages.length > 6 && (
+                                            <span
+                                              className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800"
+                                              title={itemLangs.allLanguages.slice(6).map(l => `${l.flag} ${l.name}`).join(', ')}
+                                            >
+                                              +{itemLangs.allLanguages.length - 6} {t(lang, 'moreLangsLabel')}
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
                         {/* SECTION: FÄRDIGA TIPSPROMENADER (KATALOG) */}
                         <div className="space-y-2.5 pt-1">
@@ -7828,20 +8702,118 @@ ${exampleJson}`;
                             )}
                           </div>
 
+                          {/* Catalog Source Selector in Library Modal */}
+                          <div className="p-3 bg-slate-50/90 rounded-2xl border border-slate-200/80 flex flex-col gap-2">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <Globe className="w-4 h-4 text-indigo-600 shrink-0" />
+                                <span className="text-[11px] font-bold text-slate-500">{t(lang, 'catalogSourceLabel')}:</span>
+                                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full truncate max-w-[180px] sm:max-w-[260px] ${
+                                  normalizeCatalogUrl(catalogUrl).isCustom 
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-indigo-100 text-indigo-700'
+                                }`} title={catalogUrl}>
+                                  {normalizeCatalogUrl(catalogUrl).isCustom ? catalogUrl : t(lang, 'defaultCatalogLabel')}
+                                </span>
+                              </div>
+                              
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                  <button
+                                    type="button"
+                                    onClick={handleShareCatalogLink}
+                                    className="p-1.5 bg-white hover:bg-slate-100 text-indigo-600 rounded-lg border border-slate-200 text-xs font-bold transition-all shadow-2xs active:scale-95"
+                                    title={t(lang, 'shareCatalogLinkBtn')}
+                                  >
+                                    <Share2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setShowCatalogConfig(!showCatalogConfig);
+                                    if (!customCatalogInput && normalizeCatalogUrl(catalogUrl).isCustom) {
+                                      setCustomCatalogInput(catalogUrl);
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 rounded-lg border border-slate-200 text-[10px] font-black uppercase transition-all shadow-2xs active:scale-95 flex items-center gap-1"
+                                >
+                                  <span>{showCatalogConfig ? 'Stäng' : t(lang, 'changeCatalogBtn')}</span>
+                                  <ChevronDown className={`w-3 h-3 transition-transform ${showCatalogConfig ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+                            </div>
+
+                            {showCatalogConfig && (
+                              <div className="pt-2 border-t border-slate-200/60 space-y-2">
+                                <div className="flex flex-col sm:flex-row items-center gap-2">
+                                  <input
+                                    type="url"
+                                    value={customCatalogInput}
+                                    onChange={(e) => setCustomCatalogInput(e.target.value)}
+                                    placeholder={t(lang, 'catalogUrlPlaceholder')}
+                                    className="w-full text-xs p-2 bg-white border border-slate-200 rounded-xl font-mono focus:border-indigo-500 focus:outline-hidden"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (customCatalogInput.trim()) {
+                                        fetchQuizLibrary(customCatalogInput.trim());
+                                        setShowCatalogConfig(false);
+                                      }
+                                    }}
+                                    disabled={!customCatalogInput.trim() || isLibraryLoading}
+                                    className="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all whitespace-nowrap active:scale-95"
+                                  >
+                                    {t(lang, 'fetchCatalogBtn')}
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 flex-wrap pt-1">
+                                  <p className="text-[10px] text-slate-500">
+                                    💡 Ange URL till extern katalog med <code className="font-mono bg-white px-1 py-0.5 rounded border border-slate-200">manifest.json</code>.
+                                  </p>
+                                  {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                    <button
+                                      type="button"
+                                      onClick={handleResetCatalog}
+                                      className="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline transition-colors"
+                                    >
+                                      {t(lang, 'resetCatalogBtn')}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
                           {isLibraryLoading ? (
                             <div className="py-12 text-center text-slate-400 font-bold flex flex-col items-center gap-3">
                               <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                               <p className="text-xs uppercase tracking-widest">{t(lang, 'loadingLibrary')}</p>
                             </div>
                           ) : libraryError ? (
-                            <div className="p-6 text-center text-rose-500 font-bold bg-rose-50 rounded-2xl border border-rose-100 space-y-3">
-                              <p className="text-sm">{t(lang, 'libraryError')}</p>
-                              <button 
-                                onClick={fetchQuizLibrary}
-                                className="px-4 py-1.5 bg-rose-100 hover:bg-rose-200 rounded-full text-[10px] uppercase font-black transition-all"
-                              >
-                                {t(lang, 'retryBtn')}
-                              </button>
+                            <div className="p-6 text-center bg-rose-50 rounded-2xl border border-rose-100 flex flex-col items-center gap-2.5">
+                              <p className="text-sm font-bold text-rose-700">{t(lang, 'libraryError')}</p>
+                              <p className="text-xs text-rose-600 font-mono max-w-md break-all bg-white/70 px-2 py-1 rounded border border-rose-200">{libraryError}</p>
+                              <div className="flex items-center gap-2 pt-1">
+                                <button 
+                                  type="button"
+                                  onClick={() => fetchQuizLibrary()}
+                                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[10px] uppercase font-black transition-all active:scale-95 shadow-xs"
+                                >
+                                  {t(lang, 'retryBtn')}
+                                </button>
+                                {normalizeCatalogUrl(catalogUrl).isCustom && (
+                                  <button
+                                    type="button"
+                                    onClick={handleResetCatalog}
+                                    className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-xl text-[10px] uppercase font-bold border border-slate-200 transition-all active:scale-95"
+                                  >
+                                    {t(lang, 'resetCatalogBtn')}
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           ) : quizLibrary.length === 0 ? (
                             <div className="py-10 text-center text-slate-400 font-bold bg-slate-50 rounded-2xl border border-dashed border-slate-200">
@@ -7851,12 +8823,38 @@ ${exampleJson}`;
                             <div className="grid grid-cols-1 gap-2.5">
                               {quizLibrary.map(item => {
                                 const catalogLangs = getLibraryItemLanguages(item);
+                                const totalQuestions = (item.barnCount || 0) + (item.vuxenCount || 0);
                                 return (
                                   <div key={item.id} className="p-3.5 bg-white border border-slate-200 rounded-2xl hover:border-indigo-300 transition-all group flex flex-col justify-between gap-3 shadow-xs">
                                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0 flex-1">
-                                      <div className="min-w-0 flex-1">
-                                        <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors truncate">{item.title}</h4>
+                                      <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
+                                          {item.language && (
+                                            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2 py-0.5 rounded-md border border-indigo-100 uppercase">
+                                              {item.language === 'sv' ? '🇸🇪 Svenska' : item.language === 'en' ? '🇬🇧 English' : item.language.toUpperCase()}
+                                            </span>
+                                          )}
+                                        </div>
                                         <p className="text-[10px] text-slate-500 font-medium line-clamp-1">{item.description}</p>
+                                        
+                                        {/* Question count badges */}
+                                        <div className="flex items-center gap-1.5 pt-1 flex-wrap">
+                                          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                            🧒 {item.barnCount || 0} barnfrågor
+                                          </span>
+                                          <span className="inline-flex items-center gap-1 bg-pink-50 text-pink-900 border border-pink-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                            🧔 {item.vuxenCount || 0} vuxenfrågor
+                                          </span>
+                                          <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                            📋 Totalt: {totalQuestions} frågor
+                                          </span>
+                                          {item.timeLimit ? (
+                                            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-md text-[10px] font-bold">
+                                              ⏱️ {item.timeLimit}s
+                                            </span>
+                                          ) : null}
+                                        </div>
                                       </div>
                                       <button 
                                         onClick={() => loadLibraryQuiz(item.filename)}
@@ -7867,25 +8865,27 @@ ${exampleJson}`;
                                       </button>
                                     </div>
 
-                                    {/* Language Indicators for Catalog Quiz */}
-                                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
-                                      <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
-                                        <Globe className="w-3 h-3 text-indigo-500" />
-                                        <span>{t(lang, 'availableLanguagesLabel')}:</span>
-                                      </span>
-                                      <div className="flex items-center gap-1 flex-wrap">
-                                        {catalogLangs.map(l => (
-                                          <span
-                                            key={l.code}
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-[10px] font-semibold text-indigo-900"
-                                            title={l.name}
-                                          >
-                                            <span>{l.flag}</span>
-                                            <span>{l.name}</span>
-                                          </span>
-                                        ))}
+                                    {/* Language Indicators for Catalog Quiz if multi-language */}
+                                    {catalogLangs.length > 1 && (
+                                      <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-slate-100">
+                                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                                          <Globe className="w-3 h-3 text-indigo-500" />
+                                          <span>{t(lang, 'availableLanguagesLabel')}:</span>
+                                        </span>
+                                        <div className="flex items-center gap-1 flex-wrap">
+                                          {catalogLangs.map(l => (
+                                            <span
+                                              key={l.code}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-[10px] font-semibold text-indigo-900"
+                                              title={l.name}
+                                            >
+                                              <span>{l.flag}</span>
+                                              <span>{l.name}</span>
+                                            </span>
+                                          ))}
+                                        </div>
                                       </div>
-                                    </div>
+                                    )}
                                   </div>
                                 );
                               })}

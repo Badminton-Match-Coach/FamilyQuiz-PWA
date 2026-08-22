@@ -51,6 +51,19 @@ export interface QuizConfig {
   vuxenQuestions: Question[];
 }
 
+export interface QuizMetadata {
+  id: string;
+  title: string;
+  description?: string;
+  filename?: string;
+  barnCount?: number;
+  vuxenCount?: number;
+  language?: string;
+  timeLimit?: number;
+  catalogBaseUrl?: string;
+  resolvedUrl?: string;
+}
+
 export interface AnswerRecord {
   participantId: string;
   questionIndex: number;

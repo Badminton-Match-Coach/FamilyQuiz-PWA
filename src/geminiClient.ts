@@ -19,6 +19,7 @@ export async function generateQuizClient(params: {
   ageFrom?: number;
   ageTo?: number;
   apiKey?: string;
+  geotagLandmarks?: boolean;
 }) {
   const apiKey = params.apiKey || getStoredApiKey();
   if (!apiKey) {
@@ -26,7 +27,7 @@ export async function generateQuizClient(params: {
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const { topics, count, target, lang, ageFrom = 5, ageTo = 10 } = params;
+  const { topics, count, target, lang, ageFrom = 5, ageTo = 10, geotagLandmarks = false } = params;
   const currentLang = lang || 'sv';
 
   const isBarn = target === 'barn' || target === 'båda';
@@ -45,11 +46,24 @@ export async function generateQuizClient(params: {
     et: 'Estonian',
     lv: 'Latvian',
     lt: 'Lithuanian',
-    uk: 'Ukrainian'
+    uk: 'Ukrainian',
+    nl: 'Dutch',
+    is: 'Icelandic',
+    se: 'Northern Sami'
   };
   const targetLangName = langNames[currentLang] || 'Swedish';
 
-  let prompt = `Create a quiz with the theme "${topics}". The questions and answers MUST be in ${targetLangName}. Each question must have exactly 3 options and one correct index (0, 1, or 2).\n`;
+  let prompt = `Create a quiz with the theme "${topics}". The questions and answers MUST be in ${targetLangName}. Each question can have between 2 and 5 multiple choice options in the "options" array, and "correctAnswer" is the 0-based index of the correct option.\n`;
+
+  if (geotagLandmarks) {
+    prompt += `GEOTAGGING & REAL-WORLD COORDINATES REQUIREMENT:
+If the questions are about or mention specific real-world places, landmarks, monuments, museums, historical buildings, parks, stations, or geographical locations (e.g. "Eiffel Tower", "Stockholm Palace", "Big Ben", "Colosseum", "Central Park", "Skansen", "Liseberg", "Vasa Museum"):
+For each such question, you MUST provide its real-world GPS coordinates:
+- "latitude": float (WGS84 decimal degrees, e.g. 59.3268)
+- "longitude": float (WGS84 decimal degrees, e.g. 18.0717)
+- "locationName": a concise name of the landmark/location (e.g. "Stockholms slott")
+If a question is general trivia without a specific physical place, set latitude to 0 and longitude to 0 or leave them null.\n`;
+  }
 
   if (target === 'båda') {
     prompt += `Create a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old) and ${count} questions for adults (more challenging).`;
@@ -57,6 +71,17 @@ export async function generateQuizClient(params: {
     prompt += `Create a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old).`;
   } else {
     prompt += `Create a total of ${count} questions for adults (challenging but fun).`;
+  }
+
+  const questionItemProperties: any = {
+    text: { type: Type.STRING },
+    options: { type: Type.ARRAY, items: { type: Type.STRING } },
+    correctAnswer: { type: Type.INTEGER }
+  };
+  if (geotagLandmarks) {
+    questionItemProperties.latitude = { type: Type.NUMBER };
+    questionItemProperties.longitude = { type: Type.NUMBER };
+    questionItemProperties.locationName = { type: Type.STRING };
   }
 
   const properties: any = {};
@@ -67,11 +92,7 @@ export async function generateQuizClient(params: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: {
-          text: { type: Type.STRING },
-          options: { type: Type.ARRAY, items: { type: Type.STRING } },
-          correctAnswer: { type: Type.INTEGER }
-        },
+        properties: questionItemProperties,
         required: ["text", "options", "correctAnswer"]
       }
     };
@@ -83,11 +104,7 @@ export async function generateQuizClient(params: {
       type: Type.ARRAY,
       items: {
         type: Type.OBJECT,
-        properties: {
-          text: { type: Type.STRING },
-          options: { type: Type.ARRAY, items: { type: Type.STRING } },
-          correctAnswer: { type: Type.INTEGER }
-        },
+        properties: questionItemProperties,
         required: ["text", "options", "correctAnswer"]
       }
     };
@@ -109,23 +126,27 @@ export async function generateQuizClient(params: {
 
   const quizData = JSON.parse(response.text || "{}");
 
-  if (quizData.barnQuestions) {
-    quizData.barnQuestions = quizData.barnQuestions.map((q: any) => ({
+  const mapQuestion = (q: any) => {
+    const hasCoords = typeof q.latitude === 'number' && typeof q.longitude === 'number' && (Math.abs(q.latitude) > 0.0001 || Math.abs(q.longitude) > 0.0001);
+    return {
       ...q,
       id: Math.random().toString(36).substring(2, 9),
       options: q.options || [],
       correctAnswers: [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
-      originalLanguage: currentLang
-    }));
+      originalLanguage: currentLang,
+      location: hasCoords ? {
+        lat: q.latitude,
+        lng: q.longitude,
+        name: q.locationName || undefined
+      } : undefined
+    };
+  };
+
+  if (quizData.barnQuestions) {
+    quizData.barnQuestions = quizData.barnQuestions.map(mapQuestion);
   }
   if (quizData.vuxenQuestions) {
-    quizData.vuxenQuestions = quizData.vuxenQuestions.map((q: any) => ({
-      ...q,
-      id: Math.random().toString(36).substring(2, 9),
-      options: q.options || [],
-      correctAnswers: [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
-      originalLanguage: currentLang
-    }));
+    quizData.vuxenQuestions = quizData.vuxenQuestions.map(mapQuestion);
   }
 
   return quizData;
@@ -258,3 +279,51 @@ Output structure:
   };
 }
 
+/**
+ * Finds exact GPS coordinates and place name for a question or place query using Gemini.
+ */
+export async function findLocationCoordinatesWithGemini(
+  textOrPlace: string,
+  apiKeyOverride?: string
+): Promise<{ lat: number; lng: number; name: string } | null> {
+  const apiKey = apiKeyOverride || getStoredApiKey();
+  if (!apiKey) {
+    throw new Error("MISSING_API_KEY");
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt = `Identify the real-world place, landmark, building, park, museum, city, or location mentioned or referred to in the following text/question.
+Find its precise real-world GPS coordinates (WGS84 decimal latitude and longitude) and a clean place name.
+
+Text/Question: "${textOrPlace}"
+
+If a specific location or landmark can be identified, provide its coordinates. If the text has no connection to any physical place on Earth, return found: false.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.6-flash",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          found: { type: Type.BOOLEAN },
+          name: { type: Type.STRING },
+          latitude: { type: Type.NUMBER },
+          longitude: { type: Type.NUMBER }
+        },
+        required: ["found"]
+      }
+    }
+  });
+
+  const parsed = JSON.parse(response.text || "{}");
+  if (parsed.found && typeof parsed.latitude === 'number' && typeof parsed.longitude === 'number' && (Math.abs(parsed.latitude) > 0.0001 || Math.abs(parsed.longitude) > 0.0001)) {
+    return {
+      lat: parsed.latitude,
+      lng: parsed.longitude,
+      name: parsed.name || textOrPlace.substring(0, 40)
+    };
+  }
+  return null;
+}

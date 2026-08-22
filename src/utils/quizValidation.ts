@@ -21,10 +21,18 @@ const validateQuestion = (question: unknown, index: number): string | null => {
     return `Fråga ${index + 1} har en ogiltig frågetyp.`;
   }
 
-  if (!Array.isArray(question.correctAnswers) || question.correctAnswers.some(
-    answer => !Number.isInteger(answer) || answer < 0 || answer >= options.length
-  )) {
-    if (questionType !== 'text' && questionType !== 'points') {
+  // Accept both correctAnswers (array) and correctAnswer (single integer index)
+  let answersList: number[] | null = null;
+  if (Array.isArray(question.correctAnswers)) {
+    answersList = question.correctAnswers;
+  } else if (typeof question.correctAnswer === 'number') {
+    answersList = [question.correctAnswer];
+  }
+
+  if (questionType !== 'text' && questionType !== 'points') {
+    if (!answersList || answersList.length === 0 || answersList.some(
+      answer => !Number.isInteger(answer) || answer < 0 || answer >= options.length
+    )) {
       return `Fråga ${index + 1} har ogiltigt rätt svar.`;
     }
   }

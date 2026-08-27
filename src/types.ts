@@ -26,8 +26,10 @@ export type QuestionType = 'options' | 'points' | 'text';
 export interface Question {
   id: string;
   text: string;
+  imageUrl?: string; // Image for the question (URL or Data URL)
   type?: QuestionType;
   options: string[];
+  optionImages?: string[]; // Image per option (URL or Data URL)
   correctAnswers: number[]; // Indices of the correct options for 'options'
   correctTextAnswer?: string; // Correct text answer for 'text' type (e.g. "Stockholm")
   acceptedTextAnswers?: string[]; // Optional alternative accepted answers (e.g. ["Sthlm", "Hufvudstaden"])
@@ -72,4 +74,19 @@ export interface AnswerRecord {
   pointsScored?: number;
   isCorrect?: boolean;
   timestamp: number;
+}
+
+export interface SavedQuizRecord {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  barnCount: number;
+  vuxenCount: number;
+  hasLocations: boolean;
+  quizConfig: QuizConfig;
+  quizState?: {
+    participants: Participant[];
+    answers: AnswerRecord[];
+  };
 }

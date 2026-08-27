@@ -29,9 +29,14 @@
       "purpose": "any maskable"
     },
     {
-      "src": "./icon.png",
+      "src": "./icon.jpg",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/jpeg"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
     }
   ]
 }

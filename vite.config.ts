@@ -1,28 +1,21 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import javascriptObfuscator from 'rollup-plugin-javascript-obfuscator';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
   return {
-    // Relative URLs allow the build to work on GitHub Pages project sites.
+    // Use relative path for production build (e.g. GitHub Pages) and absolute for dev mode
     base: './',
-    plugins: [
-      react(),
-      tailwindcss(),
-      javascriptObfuscator({
-        compact: true,
-        controlFlowFlattening: false,
-        identifierNamesGenerator: 'hexadecimal',
-        renameGlobals: false,
-        stringArray: false,
-      }),
-    ],
+    plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
       },
+      dedupe: ['react', 'react-dom'],
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'motion/react', 'lucide-react', 'leaflet', 'lz-string', 'qrcode'],
     },
     build: {
       target: 'es2020',
@@ -33,11 +26,10 @@ export default defineConfig(() => {
           manualChunks(id) {
             if (id.includes('node_modules')) {
               if (id.includes('leaflet')) return 'vendor-leaflet';
-              if (id.includes('motion')) return 'vendor-motion';
+              if (id.includes('motion') || id.includes('react') || id.includes('scheduler')) return 'vendor-react';
               if (id.includes('lucide-react')) return 'vendor-icons';
               if (id.includes('@google/genai')) return 'vendor-ai';
-              if (id.includes('lz-string')) return 'vendor-lz';
-              if (id.includes('react') || id.includes('scheduler')) return 'vendor-react';
+              if (id.includes('lz-string') || id.includes('qrcode')) return 'vendor-utils';
               return 'vendor-misc';
             }
           },

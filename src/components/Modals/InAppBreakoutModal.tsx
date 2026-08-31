@@ -4,14 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { ExternalLink, Copy, Check, X, Compass, Smartphone } from 'lucide-react';
-import { Language, t } from '../../i18n';
+import { ExternalLink, Check, X } from 'lucide-react';
+import { Language } from '../../i18n';
 
 export interface InAppBreakoutModalProps {
-  lang: Language;
+  lang?: Language;
 }
 
-export const InAppBreakoutModal: React.FC<InAppBreakoutModalProps> = ({ lang }) => {
+export const InAppBreakoutModal: React.FC<InAppBreakoutModalProps> = ({
+  lang = navigator.language.toLowerCase().startsWith('sv') ? 'sv' : 'en'
+}) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isInApp, setIsInApp] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -19,12 +21,12 @@ export const InAppBreakoutModal: React.FC<InAppBreakoutModalProps> = ({ lang }) 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const ua = navigator.userAgent || navigator.vendor || (window as any).opera || '';
-    const isMetaInApp = /FBAN|FBAV|FB_IAB|Instagram|Messenger|Line|Twitter|Pinterest|LinkedInApp/i.test(ua);
+    const isInAppBrowser = /FBAN|FBAV|FB_IAB|Instagram|Messenger|WhatsApp|Line|Twitter|Pinterest|LinkedInApp/i.test(ua);
     
     // Also check sessionStorage if user dismissed it in this session
     const dismissed = sessionStorage.getItem('quiz_breakout_dismissed');
     
-    if (isMetaInApp && !dismissed) {
+    if (isInAppBrowser && !dismissed) {
       setIsInApp(true);
       // Automatically show reminder banner after a short delay
       const timer = setTimeout(() => setIsOpen(true), 1200);
@@ -43,7 +45,7 @@ export const InAppBreakoutModal: React.FC<InAppBreakoutModalProps> = ({ lang }) 
         setCopied(true);
         setTimeout(() => setCopied(false), 4000);
       }
-      // Try opening in external browser
+      // The complete URL retains the compressed quiz payload in its query or hash.
       window.open(currentUrl, '_blank');
     } catch {
       // ignore

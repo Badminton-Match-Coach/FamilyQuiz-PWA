@@ -103,6 +103,7 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
 
   const filteredSavedQuizzes = useMemo(() => {
     return savedQuizzes.filter(q => {
+      if (!q || typeof q.title !== 'string') return false;
       const matchesSearch = !dbSearchQuery || q.title.toLowerCase().includes(dbSearchQuery.toLowerCase());
       const matchesCat = dbFilterCategory === 'all' || 
         (dbFilterCategory === 'barn' && q.barnCount > 0) ||
@@ -123,6 +124,7 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
 
   const filteredLibraryQuizzes = useMemo(() => {
     return quizMetadataList.filter(q => {
+      if (!q || typeof q.title !== 'string') return false;
       const matchesSearch = !librarySearchQuery || 
         q.title.toLowerCase().includes(librarySearchQuery.toLowerCase()) ||
         (q.description && q.description.toLowerCase().includes(librarySearchQuery.toLowerCase()));

@@ -447,55 +447,278 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                     </div>
                   </div>
 
-                  {!selectedParticipantId && participants.length > 1 ? (
-                    <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
-                      <div className="mb-4 sm:mb-6">
-                        <span className="text-indigo-500 font-black text-lg sm:text-xl uppercase tracking-tighter">{t(lang, 'selectParticipantToAnswer')}</span>
-                        <h3 className="text-2xl sm:text-4xl font-black mt-2 leading-tight text-slate-800">{t(lang, 'whoWillAnswer', { num: (selectedQuestionIndex + 1).toString() })}</h3>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                        {participants.filter(p => {
-                          const participantQuestions = p.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
-                          return !!participantQuestions[selectedQuestionIndex];
-                        }).map(p => {
-                          const answer = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
-                          const hasAnswered = !!answer;
-                          return (
-                            <button
-                              key={p.id}
-                              onClick={() => setSelectedParticipantId(p.id)}
-                              className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all flex items-center gap-4 relative text-left ${
-                                hasAnswered 
-                                  ? 'bg-indigo-50 border-indigo-500' 
-                                  : 'bg-slate-50 border-slate-100 hover:border-indigo-300'
-                              }`}
-                            >
-                              <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-black text-white text-lg sm:text-xl shrink-0 ${
-                                p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
-                              }`}>
-                                {p.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="font-black text-lg sm:text-xl text-slate-800 truncate">{p.name}</p>
-                                <span className="text-[10px] font-black uppercase text-slate-400">{p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}</span>
-                              </div>
-                              {hasAnswered && (
-                                <div className="absolute top-2 right-2 sm:top-4 sm:right-4 bg-indigo-600 text-white text-[8px] sm:text-[10px] font-black px-2 py-0.5 sm:py-1 rounded-lg uppercase">
-                                  {t(lang, 'answeredBadge')}
+                  {!selectedParticipantId && participants.length > 1 ? (() => {
+                    const applicableParticipants = participants.filter(p => {
+                      const participantQuestions = p.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                      return !!participantQuestions[selectedQuestionIndex];
+                    });
+                    const isQuestionAnsweredByAll = applicableParticipants.length > 0 && applicableParticipants.every(p => {
+                      return answers.some(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
+                    });
+                    const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
+                    const shouldShowStationFacit = (!hasQuizPassword || isFacitUnlocked || isAdmin) && isQuestionAnsweredByAll;
+
+                    const renderStationQuestionBlock = (category: UserType) => {
+                      const questionsList = category === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                      const rawStationQ = questionsList[selectedQuestionIndex];
+                      if (!rawStationQ) return null;
+
+                      const categoryParts = applicableParticipants.filter(p => p.type === category);
+                      if (categoryParts.length === 0) return null;
+
+                      const isBarn = category === 'barn';
+                      const trans = translateQuestion(rawStationQ.id, rawStationQ.text, rawStationQ.options || [], lang, rawStationQ.originalLanguage ?? lang);
+                      const stationQ: Question = {
+                        ...rawStationQ,
+                        text: trans.text,
+                        options: trans.options
+                      };
+
+                      return (
+                        <div key={category} className="mt-4 p-4 sm:p-5 bg-slate-50 border-2 border-indigo-100 rounded-2xl sm:rounded-3xl space-y-4 text-left">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider text-white ${
+                              isBarn ? 'bg-amber-400' : 'bg-pink-400'
+                            }`}>
+                              {isBarn ? t(lang, 'kidQuestionLabel') : t(lang, 'adultQuestionLabel')}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                              {categoryParts.length} {isBarn ? (categoryParts.length === 1 ? t(lang, 'kid') : t(lang, 'kids') || 'barn') : (categoryParts.length === 1 ? t(lang, 'adult') : t(lang, 'adults') || 'vuxna')}
+                            </span>
+                          </div>
+
+                          <div>
+                            <h4 className="text-base sm:text-lg font-black text-slate-800 leading-snug">
+                              {stationQ.text}
+                            </h4>
+                            {stationQ.imageUrl && (
+                              <div className="mt-3">
+                                <div 
+                                  className="relative group rounded-2xl overflow-hidden border-2 border-slate-200 shadow-sm bg-slate-100 max-h-48 sm:max-h-60 flex items-center justify-center cursor-pointer"
+                                  onClick={() => setZoomedImageUrl(stationQ.imageUrl || null)}
+                                  title={t(lang, 'previewImage')}
+                                >
+                                  <img
+                                    src={stationQ.imageUrl}
+                                    alt={stationQ.text}
+                                    className="max-h-48 sm:max-h-60 w-full object-contain group-hover:scale-[1.01] transition-transform"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  <div className="absolute bottom-2 right-2 bg-black/65 hover:bg-black/85 text-white text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1.5 backdrop-blur-xs transition-colors">
+                                    <Maximize2 className="w-3.5 h-3.5" />
+                                    <span>{t(lang, 'previewImage')}</span>
+                                  </div>
                                 </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Correct Answer Display */}
+                          {stationQ.type === 'points' ? (
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between text-xs text-amber-950 font-bold">
+                              <span className="flex items-center gap-2">
+                                <span>🎯</span>
+                                <span>{t(lang, 'pointQuestion')}</span>
+                              </span>
+                              {stationQ.maxPoints && (
+                                <span className="bg-amber-200 text-amber-900 px-2.5 py-0.5 rounded-lg text-[10px] font-black">
+                                  Max: {stationQ.maxPoints} p
+                                </span>
                               )}
-                            </button>
-                          );
-                        })}
+                            </div>
+                          ) : stationQ.type === 'text' ? (
+                            <div className="p-3.5 bg-emerald-50 border-2 border-emerald-300 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                              <span className="font-bold text-emerald-800">✅ {t(lang, 'correctAnswer')}:</span>
+                              <span className="font-black text-emerald-950 text-sm">{stationQ.correctTextAnswer || '—'}</span>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {stationQ.options.map((opt, optIdx) => {
+                                const isCorrect = (stationQ.correctAnswers || []).includes(optIdx);
+                                return (
+                                  <div
+                                    key={optIdx}
+                                    className={`p-3 rounded-2xl text-xs font-bold border transition-all flex items-center gap-2.5 ${
+                                      isCorrect
+                                        ? 'bg-emerald-500 border-emerald-600 text-white shadow-md font-black ring-2 ring-emerald-300'
+                                        : 'bg-white border-slate-200/80 text-slate-500 opacity-60'
+                                    }`}
+                                  >
+                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                      isCorrect ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-600'
+                                    }`}>
+                                      {getOptionLabel(optIdx, stationQ.options.length)}
+                                    </span>
+                                    <span className="flex-1 min-w-0 break-words leading-tight">{opt}</span>
+                                    {isCorrect && <CheckCircle2 className="w-4 h-4 text-white shrink-0" />}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Participant responses for this question */}
+                          <div className="pt-1">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2">
+                              {t(lang, 'participantAnswersTitle')}
+                            </p>
+                            <div className="space-y-2">
+                              {categoryParts.map(p => {
+                                const pAns = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className={`p-2.5 sm:p-3 rounded-xl border flex items-center justify-between gap-3 text-xs ${
+                                      pAns?.isCorrect 
+                                        ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950' 
+                                        : stationQ.type === 'points' 
+                                          ? 'bg-amber-50/70 border-amber-200 text-amber-950' 
+                                          : 'bg-rose-50/70 border-rose-200 text-rose-950'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <div className={`w-7 h-7 rounded-full flex items-center justify-center font-black text-white text-xs shrink-0 ${
+                                        p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
+                                      }`}>
+                                        {p.name.charAt(0).toUpperCase()}
+                                      </div>
+                                      <span className="font-bold truncate">{p.name}</span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {stationQ.type === 'points' ? (
+                                        <span className="font-black text-amber-900 bg-amber-200/80 px-2.5 py-1 rounded-lg text-xs">
+                                          {pAns?.pointsScored ?? 0} p
+                                        </span>
+                                      ) : stationQ.type === 'text' ? (
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold text-slate-700 italic truncate max-w-[120px] sm:max-w-[180px]">
+                                            "{pAns?.textAnswer || '—'}"
+                                          </span>
+                                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                            pAns?.isCorrect ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
+                                          }`}>
+                                            {pAns?.isCorrect ? `✅ ${t(lang, 'correctBadge')}` : `❌ ${t(lang, 'incorrectBadge')}`}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-2">
+                                          <span className="font-bold truncate max-w-[140px] sm:max-w-[200px]">
+                                            {typeof pAns?.answerIndex === 'number'
+                                              ? `${getOptionLabel(pAns.answerIndex, stationQ.options.length)}: ${stationQ.options[pAns.answerIndex] || ''}`
+                                              : '—'}
+                                          </span>
+                                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                            pAns?.isCorrect ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
+                                          }`}>
+                                            {pAns?.isCorrect ? `✅ ${t(lang, 'correctBadge')}` : `❌ ${t(lang, 'incorrectBadge')}`}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <div className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50">
+                        <div className="mb-4 sm:mb-6">
+                          <span className="text-indigo-500 font-black text-lg sm:text-xl uppercase tracking-tighter">{t(lang, 'selectParticipantToAnswer')}</span>
+                          <h3 className="text-2xl sm:text-4xl font-black mt-2 leading-tight text-slate-800">{t(lang, 'whoWillAnswer', { num: (selectedQuestionIndex + 1).toString() })}</h3>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                          {applicableParticipants.map(p => {
+                            const answer = answers.find(a => a.participantId === p.id && a.questionIndex === selectedQuestionIndex);
+                            const hasAnswered = !!answer;
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() => setSelectedParticipantId(p.id)}
+                                className={`p-4 sm:p-6 rounded-2xl sm:rounded-3xl border-4 transition-all flex items-center gap-4 relative text-left ${
+                                  hasAnswered 
+                                    ? shouldShowStationFacit
+                                      ? answer.isCorrect || typeof answer.pointsScored === 'number'
+                                        ? 'bg-emerald-50/70 border-emerald-400 hover:border-emerald-500'
+                                        : 'bg-rose-50/70 border-rose-400 hover:border-rose-500'
+                                      : 'bg-indigo-50 border-indigo-500' 
+                                    : 'bg-slate-50 border-slate-100 hover:border-indigo-300'
+                                }`}
+                              >
+                                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-black text-white text-lg sm:text-xl shrink-0 ${
+                                  p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
+                                }`}>
+                                  {p.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-black text-lg sm:text-xl text-slate-800 truncate">{p.name}</p>
+                                  <span className="text-[10px] font-black uppercase text-slate-400">{p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}</span>
+                                </div>
+                                {hasAnswered && (
+                                  <div className={`absolute top-2 right-2 sm:top-4 sm:right-4 text-[8px] sm:text-[10px] font-black px-2 py-0.5 sm:py-1 rounded-lg uppercase flex items-center gap-1 ${
+                                    shouldShowStationFacit
+                                      ? answer.isCorrect
+                                        ? 'bg-emerald-600 text-white'
+                                        : typeof answer.pointsScored === 'number'
+                                          ? 'bg-amber-600 text-white'
+                                          : 'bg-rose-600 text-white'
+                                      : 'bg-indigo-600 text-white'
+                                  }`}>
+                                    {shouldShowStationFacit ? (
+                                      answer.isCorrect ? (
+                                        <>
+                                          <Check className="w-3 h-3 stroke-[3]" />
+                                          <span>{t(lang, 'correctBadge')}</span>
+                                        </>
+                                      ) : typeof answer.pointsScored === 'number' ? (
+                                        <span>{answer.pointsScored} p</span>
+                                      ) : (
+                                        <span>{t(lang, 'incorrectBadge')}</span>
+                                      )
+                                    ) : (
+                                      t(lang, 'answeredBadge')
+                                    )}
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Station Facit and Participant Answers (Revealed when all answered and no quiz password) */}
+                        {shouldShowStationFacit && (
+                          <div className="mt-6 pt-4 border-t border-slate-200">
+                            <div className="p-3.5 bg-emerald-50 border-2 border-emerald-400/80 rounded-2xl sm:rounded-3xl flex flex-wrap items-center justify-between gap-3 shadow-xs text-left">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xl">🎉</span>
+                                <p className="text-xs sm:text-sm font-black text-emerald-950">
+                                  {t(lang, 'stationAllAnsweredHeading')}
+                                </p>
+                              </div>
+                              <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-900 px-3 py-1 rounded-xl">
+                                {t(lang, 'correctAnswer')}
+                              </span>
+                            </div>
+
+                            {/* Render Questions for Kid / Adult */}
+                            {renderStationQuestionBlock('barn')}
+                            {renderStationQuestionBlock('vuxen')}
+                          </div>
+                        )}
+
+                        <button 
+                          onClick={() => setSelectedQuestionIndex(null)}
+                          className="mt-6 sm:mt-auto text-slate-400 font-bold hover:text-slate-600 transition-colors pt-6 text-sm text-center"
+                        >
+                          {t(lang, 'allQuestionsAndMap')}
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => setSelectedQuestionIndex(null)}
-                        className="mt-6 sm:mt-auto text-slate-400 font-bold hover:text-slate-600 transition-colors pt-6 text-sm"
-                      >
-                        {t(lang, 'allQuestionsAndMap')}
-                      </button>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <motion.div 
                       initial={{ x: 50, opacity: 0 }}
                       animate={{ x: 0, opacity: 1 }}
@@ -538,6 +761,9 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                         const { isAllAnswered } = getQuizAnswerProgress();
                         const isAutoFacitRevealed = !hasQuizPassword && isQuestionAnsweredByAll;
                         const shouldShowFacit = isFacitUnlocked || isAdmin || isAutoFacitRevealed;
+
+                        const participantAnswer = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
+                        const isParticipantAnswered = !!participantAnswer;
                         
                         return (
                           <>
@@ -597,7 +823,7 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                               )}
 
                               {/* Auto Facit Banner if all participants answered & password is blank */}
-                              {isAutoFacitRevealed && (
+                              {isAutoFacitRevealed ? (
                                 <div className="mt-4 p-3.5 bg-emerald-50 border-2 border-emerald-300 rounded-2xl flex flex-wrap items-center justify-between gap-2 shadow-xs">
                                   <div className="flex items-center gap-2">
                                     <span className="text-lg">🎉</span>
@@ -607,7 +833,17 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                     {t(lang, 'correctAnswer')}
                                   </span>
                                 </div>
-                              )}
+                              ) : isParticipantAnswered ? (
+                                <div className="mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-center justify-between gap-2 shadow-xs">
+                                  <div className="flex items-center gap-2">
+                                    <Lock className="w-4 h-4 text-indigo-600 shrink-0" />
+                                    <span className="text-xs font-bold text-indigo-950">{t(lang, 'questionAlreadyAnswered')}</span>
+                                  </div>
+                                  <span className="text-[10px] font-black uppercase bg-indigo-200 text-indigo-900 px-2.5 py-0.5 rounded-lg">
+                                    {t(lang, 'answerAlreadySubmitted')}
+                                  </span>
+                                </div>
+                              ) : null}
 
                               {activeQ.location && (
                                 <div className="mt-4 space-y-3">
@@ -714,8 +950,13 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                 <div className="flex items-center justify-center gap-3 sm:gap-6">
                                   <button
                                     type="button"
+                                    disabled={isParticipantAnswered}
                                     onClick={() => setPointsInputValue(prev => Math.max(0, prev - 1))}
-                                    className="w-14 h-14 sm:w-16 sm:h-16 bg-white border-4 border-slate-200 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl shadow-md active:scale-90 transition-all"
+                                    className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl border-4 transition-all ${
+                                      isParticipantAnswered
+                                        ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed opacity-50'
+                                        : 'bg-white border-slate-200 hover:border-indigo-400 text-slate-700 hover:text-indigo-600 shadow-md active:scale-90'
+                                    }`}
                                   >
                                     -
                                   </button>
@@ -725,8 +966,10 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                       type="number"
                                       min="0"
                                       max={activeQ.maxPoints ?? undefined}
-                                      value={pointsInputValue}
+                                      disabled={isParticipantAnswered}
+                                      value={isParticipantAnswered ? (participantAnswer?.pointsScored ?? 0) : pointsInputValue}
                                       onChange={(e) => {
+                                        if (isParticipantAnswered) return;
                                         const val = parseInt(e.target.value, 10);
                                         if (!isNaN(val)) {
                                           setPointsInputValue(Math.max(0, activeQ.maxPoints ? Math.min(activeQ.maxPoints, val) : val));
@@ -734,47 +977,67 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                           setPointsInputValue(0);
                                         }
                                       }}
-                                      className="w-28 sm:w-36 h-16 sm:h-20 bg-white border-4 border-indigo-500 rounded-3xl text-center text-3xl sm:text-5xl font-black text-indigo-950 shadow-inner outline-none"
+                                      className={`w-28 sm:w-36 h-16 sm:h-20 border-4 rounded-3xl text-center text-3xl sm:text-5xl font-black shadow-inner outline-none ${
+                                        isParticipantAnswered
+                                          ? 'bg-slate-100 border-slate-300 text-slate-600 cursor-not-allowed'
+                                          : 'bg-white border-indigo-500 text-indigo-950'
+                                      }`}
                                     />
                                     <span className="block text-[11px] font-black uppercase tracking-widest text-indigo-500 mt-1">{t(lang, 'points')}</span>
                                   </div>
 
                                   <button
                                     type="button"
+                                    disabled={isParticipantAnswered}
                                     onClick={() => setPointsInputValue(prev => activeQ.maxPoints ? Math.min(activeQ.maxPoints, prev + 1) : prev + 1)}
-                                    className="w-14 h-14 sm:w-16 sm:h-16 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl shadow-lg shadow-indigo-200 active:scale-90 transition-all"
+                                    className={`w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center font-black text-2xl sm:text-3xl transition-all ${
+                                      isParticipantAnswered
+                                        ? 'bg-slate-300 text-slate-400 cursor-not-allowed opacity-50'
+                                        : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200 active:scale-90'
+                                    }`}
                                   >
                                     +
                                   </button>
                                 </div>
 
-                                <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
-                                  {[1, 5, 10].map(step => (
+                                {!isParticipantAnswered && (
+                                  <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
+                                    {[1, 5, 10].map(step => (
+                                      <button
+                                        key={step}
+                                        type="button"
+                                        onClick={() => setPointsInputValue(prev => activeQ.maxPoints ? Math.min(activeQ.maxPoints, prev + step) : prev + step)}
+                                        className="px-3.5 py-1.5 bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-black shadow-sm active:scale-95 transition-all"
+                                      >
+                                        +{step} p
+                                      </button>
+                                    ))}
                                     <button
-                                      key={step}
                                       type="button"
-                                      onClick={() => setPointsInputValue(prev => activeQ.maxPoints ? Math.min(activeQ.maxPoints, prev + step) : prev + step)}
-                                      className="px-3.5 py-1.5 bg-white border border-indigo-200 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-black shadow-sm active:scale-95 transition-all"
+                                      onClick={() => setPointsInputValue(0)}
+                                      className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl text-xs font-black active:scale-95 transition-all"
                                     >
-                                      +{step} p
+                                      {t(lang, 'resetPoints')}
                                     </button>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() => setPointsInputValue(0)}
-                                    className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-xl text-xs font-black active:scale-95 transition-all"
-                                  >
-                                    {t(lang, 'resetPoints')}
-                                  </button>
-                                </div>
+                                  </div>
+                                )}
 
                                 <button
                                   type="button"
+                                  disabled={isParticipantAnswered}
                                   onClick={() => submitPointsAnswer(pointsInputValue)}
-                                  className="w-full py-4 sm:py-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl font-black text-base sm:text-lg uppercase shadow-xl shadow-emerald-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                  className={`w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg uppercase transition-all flex items-center justify-center gap-2 ${
+                                    isParticipantAnswered
+                                      ? 'bg-slate-300 text-slate-600 cursor-not-allowed shadow-none'
+                                      : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-xl shadow-emerald-200 active:scale-95'
+                                  }`}
                                 >
                                   <CheckCircle2 className="w-5 h-5 stroke-[3]" />
-                                  <span>{t(lang, 'savePointsBtn', { points: pointsInputValue.toString() })}</span>
+                                  <span>
+                                    {isParticipantAnswered
+                                      ? `${t(lang, 'answerAlreadySubmitted')} (${participantAnswer?.pointsScored ?? 0} p)`
+                                      : t(lang, 'savePointsBtn', { points: pointsInputValue.toString() })}
+                                  </span>
                                 </button>
                               </div>
                             ) : activeQ.type === 'text' ? (
@@ -792,16 +1055,23 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                 <div className="space-y-3 max-w-md mx-auto">
                                   <input
                                     type="text"
-                                    value={textInputValue}
-                                    onChange={(e) => setTextInputValue(e.target.value)}
+                                    disabled={isParticipantAnswered}
+                                    value={isParticipantAnswered ? (participantAnswer?.textAnswer || '') : textInputValue}
+                                    onChange={(e) => {
+                                      if (!isParticipantAnswered) setTextInputValue(e.target.value);
+                                    }}
                                     onKeyDown={(e) => {
-                                      if (e.key === 'Enter' && textInputValue.trim()) {
+                                      if (!isParticipantAnswered && e.key === 'Enter' && textInputValue.trim()) {
                                         submitTextAnswer(textInputValue);
                                       }
                                     }}
                                     placeholder={t(lang, 'textAnswerPlaceholder')}
-                                    className="w-full p-4 sm:p-5 bg-white border-4 border-sky-400 focus:border-sky-600 rounded-2xl text-center text-lg sm:text-xl font-black text-slate-800 shadow-inner outline-none transition-all placeholder:text-slate-300 placeholder:font-bold"
-                                    autoFocus
+                                    className={`w-full p-4 sm:p-5 border-4 rounded-2xl text-center text-lg sm:text-xl font-black shadow-inner outline-none transition-all placeholder:text-slate-300 placeholder:font-bold ${
+                                      isParticipantAnswered
+                                        ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed'
+                                        : 'bg-white border-sky-400 focus:border-sky-600 text-slate-800'
+                                    }`}
+                                    autoFocus={!isParticipantAnswered}
                                   />
 
                                   {shouldShowFacit && activeQ.correctTextAnswer && (
@@ -814,12 +1084,18 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
 
                                 <button
                                   type="button"
-                                  disabled={!textInputValue.trim()}
+                                  disabled={isParticipantAnswered || !textInputValue.trim()}
                                   onClick={() => submitTextAnswer(textInputValue)}
-                                  className="w-full py-4 sm:py-5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-black text-base sm:text-lg uppercase shadow-xl shadow-sky-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                  className={`w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg uppercase transition-all flex items-center justify-center gap-2 ${
+                                    isParticipantAnswered
+                                      ? 'bg-slate-300 text-slate-600 cursor-not-allowed shadow-none'
+                                      : 'bg-sky-500 hover:bg-sky-600 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-xl shadow-sky-200 active:scale-95'
+                                  }`}
                                 >
                                   <CheckCircle2 className="w-5 h-5 stroke-[3]" />
-                                  <span>{t(lang, 'submitTextAnswerBtn')}</span>
+                                  <span>
+                                    {isParticipantAnswered ? t(lang, 'answerAlreadySubmitted') : t(lang, 'submitTextAnswerBtn')}
+                                  </span>
                                 </button>
                               </div>
                             ) : (
@@ -827,18 +1103,27 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                 {activeQ.options.map((opt, idx) => {
                                   const colors = ['border-rose-500 bg-rose-50 text-rose-600 hover:bg-rose-100', 'border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100', 'border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100', 'border-sky-500 bg-sky-50 text-sky-600 hover:bg-sky-100'];
                                   const color = colors[idx % colors.length];
-                                  const isCurrentAnswer = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex)?.answerIndex === idx;
+                                  const isCurrentAnswer = participantAnswer?.answerIndex === idx;
                                   const isCorrectAnswer = (activeQ?.correctAnswers || []).includes(idx);
                                   const optImg = activeQ.optionImages?.[idx] || rawQ.optionImages?.[idx];
 
                                   return (
                                     <button
                                       key={idx}
-                                      onClick={() => submitAnswer(idx)}
-                                      className={`p-3.5 sm:p-5 rounded-[1.5rem] sm:rounded-[2rem] border-4 flex flex-col sm:flex-row items-center justify-between text-left text-base sm:text-lg font-black transition-all active:scale-95 shadow-[0_4px_0_0_rgba(0,0,0,0.1)] sm:shadow-[0_6px_0_0_rgba(0,0,0,0.1)] hover:shadow-none hover:translate-y-1 gap-3 ${color} ${
-                                        isCurrentAnswer ? 'ring-4 ring-indigo-600 ring-offset-4' : ''
+                                      disabled={isParticipantAnswered}
+                                      onClick={() => !isParticipantAnswered && submitAnswer(idx)}
+                                      className={`p-3.5 sm:p-5 rounded-[1.5rem] sm:rounded-[2rem] border-4 flex flex-col sm:flex-row items-center justify-between text-left text-base sm:text-lg font-black transition-all gap-3 ${
+                                        isParticipantAnswered
+                                          ? isCurrentAnswer
+                                            ? 'ring-4 ring-indigo-600 ring-offset-4 bg-indigo-100/90 border-indigo-500 text-indigo-950 cursor-default shadow-md'
+                                            : shouldShowFacit && isCorrectAnswer
+                                              ? 'ring-4 ring-emerald-500 ring-offset-4 bg-emerald-100 border-emerald-600 text-emerald-700 cursor-default shadow-md'
+                                              : 'bg-slate-100/80 border-slate-200 text-slate-400 opacity-50 cursor-not-allowed shadow-none'
+                                          : `active:scale-95 shadow-[0_4px_0_0_rgba(0,0,0,0.1)] sm:shadow-[0_6px_0_0_rgba(0,0,0,0.1)] hover:shadow-none hover:translate-y-1 ${color}`
                                       } ${
-                                        shouldShowFacit && isCorrectAnswer 
+                                        !isParticipantAnswered && isCurrentAnswer ? 'ring-4 ring-indigo-600 ring-offset-4' : ''
+                                      } ${
+                                        !isParticipantAnswered && shouldShowFacit && isCorrectAnswer 
                                           ? 'ring-4 ring-emerald-500 ring-offset-4 bg-emerald-100 border-emerald-600 text-emerald-700' 
                                           : ''
                                       }`}
@@ -866,11 +1151,28 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
                                         )}
                                         <span className="flex-1 min-w-0 break-words leading-tight">{opt}</span>
                                       </div>
-                                      {shouldShowFacit && isCorrectAnswer && (
+                                      {isParticipantAnswered ? (
+                                        shouldShowFacit ? (
+                                          isCorrectAnswer ? (
+                                            <div className="bg-emerald-600 text-white p-1.5 rounded-xl self-end sm:self-center shrink-0 shadow-sm flex items-center gap-1">
+                                              <Check className="w-4 h-4 stroke-[3]" />
+                                            </div>
+                                          ) : isCurrentAnswer ? (
+                                            <div className="bg-rose-600 text-white p-1.5 rounded-xl self-end sm:self-center shrink-0 shadow-sm flex items-center gap-1">
+                                              <X className="w-4 h-4 stroke-[3]" />
+                                            </div>
+                                          ) : null
+                                        ) : isCurrentAnswer ? (
+                                          <div className="bg-indigo-600 text-white px-2 py-1 rounded-xl text-[10px] font-black uppercase self-end sm:self-center shrink-0 shadow-sm flex items-center gap-1">
+                                            <Check className="w-3 h-3 stroke-[3]" />
+                                            <span>{t(lang, 'answerAlreadySubmitted')}</span>
+                                          </div>
+                                        ) : null
+                                      ) : shouldShowFacit && isCorrectAnswer ? (
                                         <div className="bg-emerald-600 text-white p-1.5 rounded-xl self-end sm:self-center shrink-0 shadow-sm">
                                           <Check className="w-5 h-5 stroke-[3]" />
                                         </div>
-                                      )}
+                                      ) : null}
                                     </button>
                                   );
                                 })}

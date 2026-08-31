@@ -112,6 +112,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
   const quizTitleInputRef = useRef<HTMLInputElement>(null);
   const [newQuizLogoUrl, setNewQuizLogoUrl] = useState(quizConfig.logoUrl || '');
   const [newQuizPassword, setNewQuizPassword] = useState(quizConfig.password || '');
+  const [saveConfirmationMessage, setSaveConfirmationMessage] = useState<string | null>(null);
   return (
     <>
                     <div className="space-y-6">
@@ -161,7 +162,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                               <button 
                                 onClick={() => {
                                   setQuizConfig({ ...quizConfig, title: newQuizTitle });
-                                  alert(t(lang, 'titleUpdatedAlert'));
+                                  setSaveConfirmationMessage(t(lang, 'titleUpdatedAlert'));
                                 }}
                                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
                               >
@@ -192,7 +193,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                   onClick={async () => {
                                     const cachedLogoUrl = await cacheLogoAsDataUrl(newQuizLogoUrl.trim() || undefined);
                                     setQuizConfig({ ...quizConfig, logoUrl: cachedLogoUrl });
-                                    alert(t(lang, 'logoUpdatedAlert'));
+                                    setSaveConfirmationMessage(t(lang, 'logoUpdatedAlert'));
                                   }}
                                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
                                 >
@@ -227,7 +228,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                             <button 
                               onClick={() => {
                                 setQuizConfig({ ...quizConfig, password: newQuizPassword });
-                                alert(t(lang, 'passwordUpdatedAlert'));
+                                setSaveConfirmationMessage(t(lang, 'passwordUpdatedAlert'));
                               }}
                               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
                             >
@@ -538,7 +539,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 const safeVal = Math.max(5, newGeotagDistance || 20);
                                 setNewGeotagDistance(safeVal);
                                 setQuizConfig({ ...quizConfig, geotagUnlockDistance: safeVal });
-                                alert(t(lang, 'geotagDistanceUpdatedAlert'));
+                                setSaveConfirmationMessage(t(lang, 'geotagDistanceUpdatedAlert'));
                               }}
                               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95 shrink-0"
                             >
@@ -693,6 +694,52 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                       </div>
                     )}
                   </AnimatePresence>
+      <AnimatePresence>
+        {saveConfirmationMessage && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSaveConfirmationMessage(null)}
+              className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl"
+            >
+              <div className="bg-emerald-600 p-7 text-white sm:p-8">
+                <button
+                  type="button"
+                  aria-label={t(lang, 'close')}
+                  onClick={() => setSaveConfirmationMessage(null)}
+                  className="absolute right-6 top-6 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
+                  <CheckCircle2 className="h-8 w-8" />
+                </div>
+                <h2 className="text-2xl font-black">{saveConfirmationMessage}</h2>
+              </div>
+              <div className="space-y-5 p-7 sm:p-8">
+                <p className="text-sm font-medium leading-relaxed text-slate-500">
+                  {lang === 'sv' ? 'Ändringen har sparats.' : 'Your change has been saved.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setSaveConfirmationMessage(null)}
+                  className="w-full rounded-2xl bg-slate-800 py-4 font-black uppercase tracking-widest text-white shadow-md transition-all hover:bg-slate-900 active:scale-95"
+                >
+                  {t(lang, 'confirm')}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 };

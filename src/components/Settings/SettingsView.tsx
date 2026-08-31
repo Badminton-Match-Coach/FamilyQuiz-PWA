@@ -544,9 +544,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <RouteGeoTagModal
           isOpen={showRouteGeoTagModal}
           onClose={() => setShowRouteGeoTagModal(false)}
-          questions={editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions}
+          barnQuestions={quizConfig.barnQuestions}
+          vuxenQuestions={quizConfig.vuxenQuestions}
           userLocation={userLocation}
-          onApplyLocations={handleApplyBatchRouteLocations}
+          onApplyGeoTags={handleApplyBatchRouteLocations}
           lang={lang}
         />
       )}

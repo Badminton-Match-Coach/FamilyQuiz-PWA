@@ -52,14 +52,8 @@ export interface GeneralSettingsTabProps {
   directLinkLockOrderMode: boolean;
   setDirectLinkLockOrderMode: (v: boolean | ((prev: boolean) => boolean)) => void;
   shareDirectQuizUrl: () => Promise<void>;
-  shareConfig: () => Promise<void>;
-  shareAppUrl: () => Promise<void>;
   copiedDirectUrlCode: boolean;
   setCopiedDirectUrlCode: (v: boolean) => void;
-  copiedConfigCode: boolean;
-  setCopiedConfigCode: (v: boolean) => void;
-  copiedAppUrlCode: boolean;
-  setCopiedAppUrlCode: (v: boolean) => void;
   directUrlLength: number;
   newQuizTitle: string;
   setNewQuizTitle: (v: string) => void;
@@ -93,14 +87,8 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
   directLinkLockOrderMode,
   setDirectLinkLockOrderMode,
   shareDirectQuizUrl,
-  shareConfig,
-  shareAppUrl,
   copiedDirectUrlCode,
   setCopiedDirectUrlCode,
-  copiedConfigCode,
-  setCopiedConfigCode,
-  copiedAppUrlCode,
-  setCopiedAppUrlCode,
   directUrlLength,
   newQuizTitle,
   setNewQuizTitle,
@@ -324,50 +312,6 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                             )}
                           </button>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                            <button 
-                              onClick={shareConfig}
-                              className={`flex items-center justify-center gap-2.5 p-3 rounded-2xl border transition-all font-black text-[11px] uppercase shadow-2xs active:scale-95 ${
-                                copiedConfigCode 
-                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
-                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'
-                              }`}
-                            >
-                              {copiedConfigCode ? (
-                                <>
-                                  <Check className="w-4 h-4 text-emerald-600 stroke-[3]" />
-                                  <span>{t(lang, 'codeCopiedToClipboard')}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Share2 className="w-4 h-4" />
-                                  <span>{t(lang, 'copyCodeBtn')}</span>
-                                </>
-                              )}
-                            </button>
-
-                            <button 
-                              onClick={shareAppUrl}
-                              className={`flex items-center justify-center gap-2.5 p-3 rounded-2xl border transition-all font-black text-[11px] uppercase shadow-2xs active:scale-95 ${
-                                copiedAppUrlCode 
-                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300 ring-2 ring-emerald-200' 
-                                : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
-                              }`}
-                            >
-                              {copiedAppUrlCode ? (
-                                <>
-                                  <Check className="w-4 h-4 text-emerald-600 stroke-[3]" />
-                                  <span>{t(lang, 'copiedNotice')}</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Share2 className="w-4 h-4" />
-                                  <span>{t(lang, 'copyAppUrlBtn')}</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-
                           {/* Clipboard Notice Box for Direct Link */}
                           <AnimatePresence>
                             {copiedDirectUrlCode && (
@@ -391,62 +335,6 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 <button 
                                   onClick={() => setCopiedDirectUrlCode(false)}
                                   className="text-indigo-100 hover:text-white p-1 font-black text-sm shrink-0"
-                                >
-                                  ✕
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-
-                          {/* Clipboard Notice Box for Quiz Code */}
-                          <AnimatePresence>
-                            {copiedConfigCode && (
-                              <motion.div 
-                                initial={{ opacity: 0, y: -8, scale: 0.98 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                                className="p-4 bg-emerald-500 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
-                                    <Check className="w-5 h-5 text-white stroke-[3]" />
-                                  </div>
-                                  <div>
-                                    <p className="font-black text-xs sm:text-sm">{t(lang, 'quizCodeCopiedTitle')}</p>
-                                    <p className="text-[11px] text-emerald-100 font-medium">{t(lang, 'quizCodeCopiedDesc')}</p>
-                                  </div>
-                                </div>
-                                <button 
-                                  onClick={() => setCopiedConfigCode(false)}
-                                  className="text-emerald-100 hover:text-white p-1 font-black text-sm shrink-0"
-                                >
-                                  ✕
-                                </button>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-
-                          {/* Clipboard Notice Box for App URL */}
-                          <AnimatePresence>
-                            {copiedAppUrlCode && (
-                              <motion.div 
-                                initial={{ opacity: 0, y: -8, scale: 0.98 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -8, scale: 0.98 }}
-                                className="p-4 bg-amber-500 text-white rounded-2xl shadow-lg flex items-center justify-between gap-3"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center shrink-0">
-                                    <Check className="w-5 h-5 text-white stroke-[3]" />
-                                  </div>
-                                  <div>
-                                    <p className="font-black text-xs sm:text-sm">{t(lang, 'appUrlCopiedTitle')}</p>
-                                    <p className="text-[11px] text-amber-100 font-medium">{t(lang, 'appUrlCopiedDesc')}</p>
-                                  </div>
-                                </div>
-                                <button 
-                                  onClick={() => setCopiedAppUrlCode(false)}
-                                  className="text-amber-100 hover:text-white p-1 font-black text-sm shrink-0"
                                 >
                                   ✕
                                 </button>

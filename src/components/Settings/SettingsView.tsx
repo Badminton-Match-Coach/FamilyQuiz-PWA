@@ -463,6 +463,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {configTab === 'db' && (
             <DatabaseAndLibraryTab
               lang={lang}
+              quizConfig={quizConfig}
               savedQuizzes={savedQuizzes}
               handleSaveCurrentQuizToDB={handleSaveCurrentQuizToDB}
               isSavingToDb={isSavingToDb}

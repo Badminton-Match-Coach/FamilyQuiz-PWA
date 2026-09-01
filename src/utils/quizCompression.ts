@@ -178,7 +178,7 @@ export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?:
     }
   }
   const suffix = options?.lockMode ? '&lock=1' : '';
-  return `${baseUrl}#${code}${suffix}`;
+  return `${baseUrl}?${code}${suffix}`;
 }
 
 /**

@@ -52,6 +52,7 @@ interface MinifiedQuizConfig {
   p?: string;
   d?: number;
   s?: boolean;
+  x?: 'strict' | 'normal' | 'lenient';
   b: MinifiedQuestion[];
   v: MinifiedQuestion[];
 }
@@ -152,6 +153,9 @@ export function compressQuizToUrlCode(config: QuizConfig, options?: { compactFor
     minified.d = config.geotagUnlockDistance;
   }
   if (config.requireSequentialAnswers) minified.s = true;
+  if (config.textMatchStrictness && config.textMatchStrictness !== 'normal') {
+    minified.x = config.textMatchStrictness;
+  }
 
   const jsonStr = JSON.stringify(minified);
   // compressToEncodedURIComponent produces [a-zA-Z0-9 -_.!~*'()] string safe for URL hashes without encoding
@@ -162,7 +166,7 @@ export function compressQuizToUrlCode(config: QuizConfig, options?: { compactFor
 /**
  * Generates the full clickable direct-open URL for a quiz.
  */
-export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?: boolean; compactForQr?: boolean }): string {
+export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?: boolean; compactForQr?: boolean; walkId?: string }): string {
   const code = compressQuizToUrlCode(config, options);
   let baseUrl = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
   if (typeof window !== 'undefined') {
@@ -177,7 +181,10 @@ export function generateQuizDirectUrl(config: QuizConfig, options?: { lockMode?:
       baseUrl = `${window.location.origin}${window.location.pathname}`;
     }
   }
-  const suffix = options?.lockMode ? '&lock=1' : '';
+  let suffix = options?.lockMode ? '&lock=1' : '';
+  if (options?.walkId) {
+    suffix += `&w=${options.walkId}`;
+  }
   return `${baseUrl}?${code}${suffix}`;
 }
 
@@ -216,6 +223,7 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
       password: min.p || '',
       geotagUnlockDistance: min.d || 20,
       requireSequentialAnswers: min.s === true,
+      textMatchStrictness: min.x || 'normal',
       barnQuestions: (min.b || []).map((q, idx) => unminifyQuestion(q, idx)),
       vuxenQuestions: (min.v || []).map((q, idx) => unminifyQuestion(q, idx))
     };

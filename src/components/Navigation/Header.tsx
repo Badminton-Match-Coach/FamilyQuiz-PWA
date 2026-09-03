@@ -33,11 +33,12 @@ export interface HeaderProps {
   isQuizModeLocked: boolean;
   isFacitUnlocked: boolean;
   isAdmin: boolean;
+  getQuizAnswerProgress: () => { totalRequired: number; answeredCount: number; isAllAnswered: boolean };
   setShowConfigInput: (show: boolean) => void;
   setConfigTab: (tab: 'general' | 'questions' | 'ai' | 'db' | 'library') => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header = React.memo<HeaderProps>(({
   lang,
   quizConfig,
   view,
@@ -52,9 +53,14 @@ export const Header: React.FC<HeaderProps> = ({
   isQuizModeLocked,
   isFacitUnlocked,
   isAdmin,
+  getQuizAnswerProgress,
   setShowConfigInput,
   setConfigTab
 }) => {
+  const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
+  const { isAllAnswered } = getQuizAnswerProgress();
+  const canShowMenus = !isQuizModeLocked || isFacitUnlocked || isAdmin || (!hasQuizPassword && isAllAnswered);
+
   return (
     <header className="flex flex-col gap-3 mb-3 sm:mb-5 bg-white/10 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl">
       <div className="flex flex-col gap-5">
@@ -195,7 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{t(lang, 'resultsTab')}</span>
           </button>
 
-          {(!isQuizModeLocked || isFacitUnlocked || isAdmin) && (
+          {canShowMenus && (
             <button
               onClick={() => setView('config')}
               className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
@@ -209,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {(!isQuizModeLocked || isFacitUnlocked || isAdmin) && (
+          {canShowMenus && (
             <button 
               onClick={() => {
                 setShowConfigInput(true);
@@ -226,4 +232,4 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
     </header>
   );
-};
+});

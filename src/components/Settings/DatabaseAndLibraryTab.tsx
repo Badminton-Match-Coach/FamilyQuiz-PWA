@@ -135,7 +135,9 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
 
   const sortedLibraryQuizzes = useMemo(() => {
     return [...filteredLibraryQuizzes].sort((a, b) => {
-      if (librarySortBy === 'name-asc') return a.title.localeCompare(b.title);
+      const aTitle = a.title || '';
+      const bTitle = b.title || '';
+      if (librarySortBy === 'name-asc') return aTitle.localeCompare(bTitle);
       if (librarySortBy === 'count-desc') return ((b.barnCount || 0) + (b.vuxenCount || 0)) - ((a.barnCount || 0) + (a.vuxenCount || 0));
       return 0;
     });
@@ -237,8 +239,8 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                             <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="font-black text-slate-800 text-base leading-snug">{latestSavedQuiz.title}</h4>
-                                  {quizConfig.title?.trim() === latestSavedQuiz.title?.trim() && (
+                                  <h4 className="font-black text-slate-800 text-base leading-snug">{latestSavedQuiz.title || 'Okänd'}</h4>
+                                  {quizConfig?.title?.trim() === (latestSavedQuiz.title || '').trim() && (
                                     <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
                                       {t(lang, 'currentlyLoadedBadge')}
                                     </span>
@@ -407,9 +409,9 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
-                                    <h4 className="font-black text-slate-800 text-base leading-snug">{item.title}</h4>
+                                    <h4 className="font-black text-slate-800 text-base leading-snug">{item.title || 'Okänd'}</h4>
                                     <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                                      {new Date(item.updatedAt).toLocaleDateString()} {new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {item.updatedAt ? `${new Date(item.updatedAt).toLocaleDateString()} ${new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
                                     </p>
                                   </div>
                                   <div className="flex items-center gap-1.5 shrink-0">
@@ -522,14 +524,14 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                                 <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
                                   <div className="flex-1 space-y-1.5">
                                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                                      <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title}</h4>
+                                      <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title || 'Okänd'}</h4>
                                       {item.language && (
                                         <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2 py-0.5 rounded-md border border-indigo-100 uppercase">
                                           {item.language === 'sv' ? '🇸🇪 SV' : item.language === 'en' ? '🇬🇧 EN' : item.language.toUpperCase()}
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-[11px] text-slate-500 font-medium line-clamp-2 leading-relaxed">{item.description}</p>
+                                    <p className="text-[11px] text-slate-500 font-medium line-clamp-2 leading-relaxed">{item.description || ''}</p>
                                     
                                     <div className="flex items-center gap-1.5 pt-1.5 flex-wrap">
                                       <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] font-bold">

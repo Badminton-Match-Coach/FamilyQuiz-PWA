@@ -4,14 +4,16 @@
  */
 
 import React from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Settings,
   Lock,
   Plus,
   HelpCircle,
   Sparkles,
-  Database
+  Database,
+  X,
+  Trash2
 } from 'lucide-react';
 import { Language, t } from '../../i18n';
 import { QuizConfig, UserType, QuizMetadata, Location } from '../../types';
@@ -118,14 +120,8 @@ export interface SettingsViewProps {
   directLinkLockOrderMode: boolean;
   setDirectLinkLockOrderMode: (v: boolean | ((prev: boolean) => boolean)) => void;
   shareDirectQuizUrl: () => Promise<void>;
-  shareConfig: () => Promise<void>;
-  shareAppUrl: () => Promise<void>;
   copiedDirectUrlCode: boolean;
   setCopiedDirectUrlCode: (v: boolean) => void;
-  copiedConfigCode: boolean;
-  setCopiedConfigCode: (v: boolean) => void;
-  copiedAppUrlCode: boolean;
-  setCopiedAppUrlCode: (v: boolean) => void;
   directUrlLength: number;
   newQuizTitle: string;
   setNewQuizTitle: (v: string) => void;
@@ -134,9 +130,10 @@ export interface SettingsViewProps {
   newGeotagDistance: number;
   setNewGeotagDistance: (v: number) => void;
   handleApplyBatchRouteLocations: (locs: { id: string; location: Location }[]) => void;
+  walkId?: string;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({
+export const SettingsView = React.memo<SettingsViewProps>(({
   lang,
   quizConfig,
   setQuizConfig,
@@ -229,14 +226,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   directLinkLockOrderMode,
   setDirectLinkLockOrderMode,
   shareDirectQuizUrl,
-  shareConfig,
-  shareAppUrl,
   copiedDirectUrlCode,
   setCopiedDirectUrlCode,
-  copiedConfigCode,
-  setCopiedConfigCode,
-  copiedAppUrlCode,
-  setCopiedAppUrlCode,
   directUrlLength,
   newQuizTitle,
   setNewQuizTitle,
@@ -244,7 +235,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   setNewPassword,
   newGeotagDistance,
   setNewGeotagDistance,
-  handleApplyBatchRouteLocations
+  handleApplyBatchRouteLocations,
+  walkId
 }) => {
   return (
     <motion.div
@@ -271,14 +263,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(e) => setConfigMasterPasswordInput(e.target.value)}
               className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-center font-black tracking-widest text-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               onKeyDown={(e) => {
-                const currentPassword = quizConfig.password || 'Password';
                 if (e.key === 'Enter') {
                   if (configMasterPasswordInput === 'Password') {
                     setIsConfigUnlocked(true);
                     setIsAdmin(true);
-                  } else if (configMasterPasswordInput === currentPassword) {
-                    setIsConfigUnlocked(true);
-                    setIsAdmin(false);
+                    setConfigTab('general');
                   } else {
                     alert(t(lang, 'wrongPasswordAlert'));
                   }
@@ -287,13 +276,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             />
             <button
               onClick={() => {
-                const currentPassword = quizConfig.password || 'Password';
                 if (configMasterPasswordInput === 'Password') {
                   setIsConfigUnlocked(true);
                   setIsAdmin(true);
-                } else if (configMasterPasswordInput === currentPassword) {
-                  setIsConfigUnlocked(true);
-                  setIsAdmin(false);
+                  setConfigTab('general');
                 } else {
                   alert(t(lang, 'wrongPasswordAlert'));
                 }
@@ -463,7 +449,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {configTab === 'db' && (
             <DatabaseAndLibraryTab
               lang={lang}
-              quizConfig={quizConfig}
               savedQuizzes={savedQuizzes}
               handleSaveCurrentQuizToDB={handleSaveCurrentQuizToDB}
               isSavingToDb={isSavingToDb}
@@ -520,14 +505,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               directLinkLockOrderMode={directLinkLockOrderMode}
               setDirectLinkLockOrderMode={setDirectLinkLockOrderMode}
               shareDirectQuizUrl={shareDirectQuizUrl}
-              shareConfig={shareConfig}
-              shareAppUrl={shareAppUrl}
               copiedDirectUrlCode={copiedDirectUrlCode}
               setCopiedDirectUrlCode={setCopiedDirectUrlCode}
-              copiedConfigCode={copiedConfigCode}
-              setCopiedConfigCode={setCopiedConfigCode}
-              copiedAppUrlCode={copiedAppUrlCode}
-              setCopiedAppUrlCode={setCopiedAppUrlCode}
               directUrlLength={directUrlLength}
               newQuizTitle={newQuizTitle}
               setNewQuizTitle={setNewQuizTitle}
@@ -535,6 +514,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               setNewPassword={setNewPassword}
               newGeotagDistance={newGeotagDistance}
               setNewGeotagDistance={setNewGeotagDistance}
+              walkId={walkId}
             />
           )}
         </div>
@@ -552,6 +532,128 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           lang={lang}
         />
       )}
+
+      {/* Create New Quiz Confirmation Modal */}
+      <AnimatePresence>
+        {showCreateNewQuizConfirm && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCreateNewQuizConfirm(false)}
+              className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl"
+            >
+              <div className="bg-emerald-600 p-7 text-white sm:p-8">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateNewQuizConfirm(false)}
+                  className="absolute right-6 top-6 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
+                  <Sparkles className="h-8 w-8 text-white" />
+                </div>
+                <h2 className="text-2xl font-black">{t(lang, 'createNewQuizBtn')}</h2>
+              </div>
+              <div className="space-y-5 p-7 sm:p-8">
+                <p className="text-sm font-medium leading-relaxed text-slate-500">
+                  {lang === 'sv' 
+                    ? 'Är du säker på att du vill skapa ett nytt quiz? Detta kommer att helt rensa nuvarande frågor, svar och deltagare.' 
+                    : 'Are you sure you want to create a new quiz? This will completely clear all current questions, answers, and participants.'}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateNewQuizConfirm(false)}
+                    className="flex-1 rounded-2xl bg-slate-100 py-3.5 text-xs font-black uppercase text-slate-600 hover:bg-slate-200"
+                  >
+                    {t(lang, 'cancelBtn') || 'Avbryt'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleCreateNewQuizConfirm();
+                      setShowCreateNewQuizConfirm(false);
+                    }}
+                    className="flex-1 rounded-2xl bg-emerald-600 py-3.5 text-xs font-black uppercase text-white hover:bg-emerald-700 shadow-md shadow-emerald-100 animate-none"
+                  >
+                    {t(lang, 'confirm') || 'Ja, skapa'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Clear All Data Confirmation Modal */}
+      <AnimatePresence>
+        {showClearConfirm && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowClearConfirm(false)}
+              className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl"
+            >
+              <div className="bg-rose-600 p-7 text-white sm:p-8">
+                <button
+                  type="button"
+                  onClick={() => setShowClearConfirm(false)}
+                  className="absolute right-6 top-6 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
+                  <Trash2 className="h-8 w-8 text-white" />
+                </div>
+                <h2 className="text-2xl font-black">{t(lang, 'clearAllDataBtn')}</h2>
+              </div>
+              <div className="space-y-5 p-7 sm:p-8">
+                <p className="text-sm font-medium leading-relaxed text-slate-500">
+                  {lang === 'sv'
+                    ? 'Är du säker på att du vill rensa alla svar och deltagare? Denna åtgärd kan inte ångras.'
+                    : 'Are you sure you want to clear all answers and participants? This action cannot be undone.'}
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowClearConfirm(false)}
+                    className="flex-1 rounded-2xl bg-slate-100 py-3.5 text-xs font-black uppercase text-slate-600 hover:bg-slate-200"
+                  >
+                    {t(lang, 'cancelBtn') || 'Avbryt'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleClearAllData();
+                      setShowClearConfirm(false);
+                    }}
+                    className="flex-1 rounded-2xl bg-rose-600 py-3.5 text-xs font-black uppercase text-white hover:bg-rose-700 shadow-md shadow-rose-100 animate-none"
+                  >
+                    {t(lang, 'confirm') || 'Ja, rensa'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
-};
+});

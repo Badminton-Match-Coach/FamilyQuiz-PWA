@@ -57,7 +57,6 @@ export interface ResultsViewProps {
   setShowResultsActions: (show: boolean | ((prev: boolean) => boolean)) => void;
   shareDirectQuizUrl: () => Promise<void>;
   shareParticipantAnswers: () => Promise<void>;
-  importSharedAnswers: () => Promise<void>;
   hasAnyGeotag: boolean;
   walkedPath: { lat: number; lng: number }[];
   calculatePathDistance: (path: { lat: number; lng: number }[]) => number;
@@ -69,7 +68,7 @@ export interface ResultsViewProps {
   setZoomedImageUrl: (url: string | null) => void;
 }
 
-export const ResultsView: React.FC<ResultsViewProps> = ({
+export const ResultsView = React.memo<ResultsViewProps>(({
   lang,
   quizConfig,
   participants,
@@ -91,7 +90,6 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   setShowResultsActions,
   shareDirectQuizUrl,
   shareParticipantAnswers,
-  importSharedAnswers,
   hasAnyGeotag,
   walkedPath,
   calculatePathDistance,
@@ -413,78 +411,10 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               })()) : (
                 <div className="space-y-6">
                   <div className="relative bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-2xl border border-indigo-200/50 text-center">
-                    {/* Top Right Mer Actions */}
-                    <div className="absolute top-4 sm:top-6 right-4 sm:right-6 z-20">
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setShowResultsActions(prev => !prev)}
-                          className="flex items-center gap-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shadow-xs active:scale-95 border border-slate-200/60"
-                          title={showResultsActions ? t(lang, 'hideLabel') : t(lang, 'moreLabel')}
-                        >
-                          <Share2 className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>{t(lang, 'moreLabel')}</span>
-                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showResultsActions ? 'rotate-180' : ''}`} />
-                        </button>
 
-                        <AnimatePresence>
-                          {showResultsActions && (
-                            <>
-                              <div 
-                                className="fixed inset-0 z-20" 
-                                onClick={() => setShowResultsActions(false)} 
-                              />
-                              <motion.div
-                                initial={{ opacity: 0, y: -6, scale: 0.95 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: -6, scale: 0.95 }}
-                                transition={{ duration: 0.15 }}
-                                className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2 space-y-1.5 z-30 text-left"
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowResultsActions(false);
-                                    shareDirectQuizUrl();
-                                  }}
-                                  className="w-full py-2.5 px-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-all flex items-center gap-2"
-                                >
-                                  <Share2 className="w-4 h-4 shrink-0" />
-                                  <span>{t(lang, 'shareDirectLinkBtn')?.replace(/\(.*\)/, '').trim() || 'Dela Quiz'}</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowResultsActions(false);
-                                    shareParticipantAnswers();
-                                  }}
-                                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-all flex items-center gap-2"
-                                >
-                                  <Share2 className="w-4 h-4 shrink-0" />
-                                  <span>{t(lang, 'submitOurAnswersBtn')}</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowResultsActions(false);
-                                    importSharedAnswers();
-                                  }}
-                                  className="w-full py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-black text-xs uppercase shadow-xs active:scale-95 transition-all flex items-center gap-2"
-                                >
-                                  <Upload className="w-4 h-4 shrink-0 text-slate-600" />
-                                  <span>{t(lang, 'importSharedAnswersBtn')}</span>
-                                </button>
-                              </motion.div>
-                            </>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    </div>
 
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
-                      <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt="Familj som går" referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                      <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt={t(lang, 'familyWalkingAlt')} referrerPolicy="no-referrer" className="w-full h-full object-contain" />
                     </div>
                     {(() => {
                       const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
@@ -657,14 +587,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                             <Share2 className="w-4 h-4" />
                             <span>{t(lang, 'submitOurAnswersBtn')}</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={importSharedAnswers}
-                            className="py-3 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#cbd5e1] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
-                          >
-                            <Upload className="w-4 h-4" />
-                            <span>{t(lang, 'importSharedAnswersBtn')}</span>
-                          </button>
+
                         </div>
                       )}
                     </div>
@@ -1052,4 +975,4 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               )}
             </motion.div>
   );
-};
+});

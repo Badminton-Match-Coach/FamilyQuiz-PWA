@@ -6,6 +6,7 @@ export const defaultQuiz: QuizConfig = {
   password: "123",
   geotagUnlockDistance: 20,
   requireSequentialAnswers: false,
+  textMatchStrictness: 'normal',
   barnQuestions: [
     {
       id: "b1",

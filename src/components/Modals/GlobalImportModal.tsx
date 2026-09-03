@@ -108,10 +108,10 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
             </div>
             <div>
               <h3 className="font-black text-slate-800 text-base sm:text-lg">
-                {t(lang, 'importQuizModalTitle') || 'Importera eller öppna frågesport'}
+                {t(lang, 'importQuizModalTitle')}
               </h3>
               <p className="text-xs text-slate-500 font-medium">
-                {t(lang, 'importQuizModalSubtitle') || 'Välj från färdigt bibliotek, sparat arkiv eller klistra in JSON'}
+                {t(lang, 'importQuizModalSubtitle')}
               </p>
             </div>
           </div>
@@ -129,7 +129,7 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
           {quizMetadataList.length > 0 && (
             <div className="space-y-3">
               <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">
-                {t(lang, 'presetQuizzes') || 'Färdiga frågesporter'}
+                {t(lang, 'presetQuizzes')}
               </h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {quizMetadataList.map(meta => (
@@ -167,7 +167,7 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Database className="w-3.5 h-3.5" />
-                  <span>{t(lang, 'savedQuizzes') || 'Sparade frågesporter'} ({savedQuizzes.length})</span>
+                  <span>{t(lang, 'savedQuizzes')} ({savedQuizzes.length})</span>
                 </h4>
               </div>
 
@@ -212,7 +212,7 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>{t(lang, 'pasteJsonDirectly') || 'Klistra in JSON-konfiguration'}</span>
+              <span>{t(lang, 'pasteJsonDirectly')}</span>
             </h4>
             <textarea
               value={configJsonInput}
@@ -231,7 +231,7 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
                 className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all"
               >
                 <ArrowRight className="w-3.5 h-3.5" />
-                <span>{t(lang, 'importConfigBtn') || 'Importera'}</span>
+                <span>{t(lang, 'importConfigBtn')}</span>
               </button>
             </div>
           </div>

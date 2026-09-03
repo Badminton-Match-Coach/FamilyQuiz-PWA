@@ -20,22 +20,25 @@ try {
   console.warn('Failed to load translation cache:', e);
 }
 
+let saveTimeout: any = null;
 function saveCacheToStorage() {
-  try {
-    // If cache exceeds limit, prune oldest entries
-    if (memoryCache.size > MAX_TRANSLATION_CACHE_ENTRIES) {
-      const keys = Array.from(memoryCache.keys());
-      const keysToRemove = keys.slice(0, keys.length - MAX_TRANSLATION_CACHE_ENTRIES);
-      keysToRemove.forEach(k => memoryCache.delete(k));
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      if (memoryCache.size > MAX_TRANSLATION_CACHE_ENTRIES) {
+        const keys = Array.from(memoryCache.keys());
+        const keysToRemove = keys.slice(0, keys.length - MAX_TRANSLATION_CACHE_ENTRIES);
+        keysToRemove.forEach(k => memoryCache.delete(k));
+      }
+      const obj: Record<string, { text: string; options: string[] }> = {};
+      memoryCache.forEach((v, k) => {
+        obj[k] = v;
+      });
+      localStorage.setItem('quiz_app_translation_cache', JSON.stringify(obj));
+    } catch (e) {
+      console.warn('Failed to save translation cache:', e);
     }
-    const obj: Record<string, { text: string; options: string[] }> = {};
-    memoryCache.forEach((v, k) => {
-      obj[k] = v;
-    });
-    localStorage.setItem('quiz_app_translation_cache', JSON.stringify(obj));
-  } catch (e) {
-    console.warn('Failed to save translation cache:', e);
-  }
+  }, 400);
 }
 
 type CacheSubscriber = () => void;
@@ -48,8 +51,13 @@ export function subscribeTranslationCache(sub: CacheSubscriber) {
   };
 }
 
+let notifyFrame: any = null;
 function notifySubscribers() {
-  subscribers.forEach(sub => sub());
+  if (notifyFrame) return;
+  notifyFrame = requestAnimationFrame(() => {
+    notifyFrame = null;
+    subscribers.forEach(sub => sub());
+  });
 }
 
 const pendingRequests = new Set<string>();

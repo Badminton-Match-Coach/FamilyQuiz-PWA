@@ -827,7 +827,8 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                         editorTestWord,
                                         rawQ.correctTextAnswer || '',
                                         rawQ.acceptedTextAnswers || [],
-                                        editingQuestionLang
+                                        editingQuestionLang,
+                                        quizConfig.textMatchStrictness || 'normal'
                                       );
                                       const flagMap: Record<string, string> = { sv: '🇸🇪', en: '🇬🇧', de: '🇩🇪', fr: '🇫🇷', es: '🇪🇸' };
                                       return (

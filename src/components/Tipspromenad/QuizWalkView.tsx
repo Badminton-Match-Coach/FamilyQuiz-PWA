@@ -74,7 +74,7 @@ export interface QuizWalkViewProps {
   visibleQuestionCount: number;
 }
 
-export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
+export const QuizWalkView = React.memo<QuizWalkViewProps>(({
   lang,
   quizConfig,
   participants,
@@ -1196,4 +1196,4 @@ export const QuizWalkView: React.FC<QuizWalkViewProps> = ({
               )}
             </motion.div>
   );
-};
+});

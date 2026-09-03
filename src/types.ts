@@ -49,6 +49,7 @@ export interface QuizConfig {
   password?: string;
   geotagUnlockDistance?: number; // Distance in meters to unlock geotagged questions (default: 20m, min: 5m)
   requireSequentialAnswers?: boolean; // Questions must be answered in sequence order
+  textMatchStrictness?: 'strict' | 'normal' | 'lenient'; // Soundex / spelling tolerance level for free text answers
   barnQuestions: Question[];
   vuxenQuestions: Question[];
 }

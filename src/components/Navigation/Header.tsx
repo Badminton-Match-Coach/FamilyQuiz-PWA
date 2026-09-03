@@ -125,11 +125,9 @@ export const Header = React.memo<HeaderProps>(({
               )}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center min-w-0 gap-3">
-                <h1 className="min-w-[10rem] flex-1 text-xl sm:text-2xl font-black text-white leading-tight tracking-tight truncate">
-                  {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
-                </h1>
-              </div>
+              <h1 className="text-lg sm:text-2xl font-black text-white leading-snug tracking-tight break-words [overflow-wrap:anywhere]">
+                {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
+              </h1>
             </div>
           </div>
 

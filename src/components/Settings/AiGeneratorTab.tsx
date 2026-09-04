@@ -379,9 +379,11 @@ Svara med giltig JSON i följande format:
               <div className="text-xs">
                 <span className="font-bold text-slate-800 flex items-center gap-1">
                   <ImageIcon className="w-3.5 h-3.5 text-purple-600" />
-                  {t(lang, 'aiIncludeImagesLabel')}
+                  {t(lang, 'aiIncludeImagesLabel') || t(lang, 'aiUseImagesLabel')}
                 </span>
-                <p className="text-[10px] text-slate-500 leading-tight mt-0.5">{t(lang, 'aiIncludeImagesDesc')}</p>
+                <p className="text-[10px] text-slate-500 leading-tight mt-0.5">
+                  {t(lang, 'aiIncludeImagesDesc') || t(lang, 'aiUseImagesDesc')}
+                </p>
               </div>
             </label>
           </div>

@@ -116,7 +116,7 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
- * Save or update a quiz in IndexedDB (with synced localStorage fallback)
+ * Save or update a quiz in IndexedDB (with synced localStorage fallback and upserting by quizId)
  */
 export async function saveQuizToIndexedDB(
   quizConfig: QuizConfig,
@@ -124,20 +124,28 @@ export async function saveQuizToIndexedDB(
   customTitle?: string,
   quizState?: QuizSessionState
 ): Promise<SavedQuizRecord> {
-  const id = existingId || `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-  const title = customTitle?.trim() || quizConfig.title?.trim() || 'Min Tipspromenad';
+  const quizId = quizConfig.quizId;
+  const mirror = getLocalStorageMirror();
+
+  // Find existing record by existingId or matching quizConfig.quizId
+  let existingRecord: SavedQuizRecord | undefined;
+  if (existingId) {
+    existingRecord = mirror.find((m) => m.id === existingId);
+  }
+  if (!existingRecord && quizId) {
+    existingRecord = mirror.find((m) => m.quizConfig?.quizId === quizId);
+  }
+
+  const id = existingId || existingRecord?.id || `quiz_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const title = customTitle?.trim() || quizConfig.title?.trim() || existingRecord?.title || 'Min Tipspromenad';
   const now = Date.now();
+  const createdAt = existingRecord?.createdAt || now;
 
   const barnCount = quizConfig.barnQuestions?.length || 0;
   const vuxenCount = quizConfig.vuxenQuestions?.length || 0;
   const hasLocations = [...(quizConfig.barnQuestions || []), ...(quizConfig.vuxenQuestions || [])].some(
     (q) => !!q.location
   );
-
-  // Check existing created date from mirror first to avoid transaction chaining issues
-  const mirror = getLocalStorageMirror();
-  const existingRecord = mirror.find((m) => m.id === id);
-  const createdAt = existingRecord?.createdAt || now;
 
   const record: SavedQuizRecord = {
     id,
@@ -149,22 +157,35 @@ export async function saveQuizToIndexedDB(
     hasLocations,
     quizConfig: {
       ...quizConfig,
+      quizId: quizId || id,
       title,
     },
     quizState: quizState || existingRecord?.quizState,
   };
 
-  // 1. Always update localStorage mirror first so data is never lost on mobile
-  const updatedMirror = [record, ...mirror.filter((m) => m.id !== id)].sort((a, b) => b.updatedAt - a.updatedAt);
+  // 1. Update mirror: remove any duplicate with same id or same quizConfig.quizId
+  const filteredMirror = mirror.filter((m) => m.id !== id && (!quizId || m.quizConfig?.quizId !== quizId));
+  const updatedMirror = [record, ...filteredMirror].sort((a, b) => b.updatedAt - a.updatedAt);
   saveLocalStorageMirror(updatedMirror);
 
-  // 2. Persist to IndexedDB
+  // 2. Persist to IndexedDB & remove old duplicates sharing quizId
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      store.put(record);
+
+      const getAllReq = store.getAll();
+      getAllReq.onsuccess = () => {
+        const allRecords: SavedQuizRecord[] = getAllReq.result || [];
+        for (const r of allRecords) {
+          if (r.id !== id && quizId && r.quizConfig?.quizId === quizId) {
+            store.delete(r.id);
+          }
+        }
+        store.put(record);
+      };
+
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
@@ -177,7 +198,7 @@ export async function saveQuizToIndexedDB(
 }
 
 /**
- * Get all saved quizzes from IndexedDB (with synced localStorage fallback)
+ * Get all saved quizzes from IndexedDB (with synced localStorage fallback and automatic deduplication)
  */
 export async function getAllQuizzesFromIndexedDB(): Promise<SavedQuizRecord[]> {
   let idbRecords: SavedQuizRecord[] = [];
@@ -204,34 +225,60 @@ export async function getAllQuizzesFromIndexedDB(): Promise<SavedQuizRecord[]> {
   }
 
   const mirror = getLocalStorageMirror();
+  let rawRecords = idbSuccess && idbRecords.length > 0 ? idbRecords : mirror;
 
-  if (idbSuccess && idbRecords.length > 0) {
-    // IndexedDB is the source of truth, update mirror
-    idbRecords.sort((a, b) => b.updatedAt - a.updatedAt);
-    saveLocalStorageMirror(idbRecords);
-    return idbRecords;
-  }
+  if (rawRecords.length > 0) {
+    // Deduplicate by quizId or id (keeping newest by updatedAt)
+    rawRecords.sort((a, b) => b.updatedAt - a.updatedAt);
+    const seenQuizIds = new Set<string>();
+    const seenIds = new Set<string>();
+    const uniqueRecords: SavedQuizRecord[] = [];
 
-  // If IndexedDB returned empty or failed, but localStorage has records, restore them
-  if (mirror.length > 0) {
-    if (idbSuccess) {
-      // Background restore to IndexedDB
+    for (const record of rawRecords) {
+      const qId = record.quizConfig?.quizId;
+      if (seenIds.has(record.id) || (qId && seenQuizIds.has(qId))) {
+        continue;
+      }
+      seenIds.add(record.id);
+      if (qId) {
+        seenQuizIds.add(qId);
+      }
+      uniqueRecords.push(record);
+    }
+
+    // If IDB succeeded but had duplicates, clean them up in IDB
+    if (idbSuccess && uniqueRecords.length < idbRecords.length) {
       try {
         const db = await openDB();
         const tx = db.transaction(STORE_NAME, 'readwrite');
         const store = tx.objectStore(STORE_NAME);
-        for (const item of mirror) {
+        store.clear();
+        for (const item of uniqueRecords) {
           store.put(item);
         }
       } catch (err) {
-        console.warn('Failed background restore to IndexedDB:', err);
+        console.warn('Failed to clean up duplicate records in IDB:', err);
       }
     }
-    mirror.sort((a, b) => b.updatedAt - a.updatedAt);
-    return mirror;
+
+    saveLocalStorageMirror(uniqueRecords);
+    return uniqueRecords;
   }
 
-  return idbRecords;
+  if (mirror.length > 0 && idbSuccess && idbRecords.length === 0) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      for (const item of mirror) {
+        store.put(item);
+      }
+    } catch (err) {
+      console.warn('Failed background restore to IndexedDB:', err);
+    }
+  }
+
+  return rawRecords;
 }
 
 /**
@@ -458,4 +505,3 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
     return { shared: false, method: 'clipboard' };
   }
 }
-

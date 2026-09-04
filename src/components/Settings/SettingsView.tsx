@@ -101,6 +101,8 @@ export interface SettingsViewProps {
   setConfigJsonInput: (v: string) => void;
   handleImportConfig: () => void;
   currentQuizId: string;
+  catalogUrl?: string;
+  onOpenUrlHelpModal?: () => void;
   // General Tab props
   showCreateNewQuizConfirm: boolean;
   setShowCreateNewQuizConfirm: (show: boolean) => void;
@@ -208,6 +210,8 @@ export const SettingsView = React.memo<SettingsViewProps>(({
   setConfigJsonInput,
   handleImportConfig,
   currentQuizId,
+  catalogUrl,
+  onOpenUrlHelpModal,
   showCreateNewQuizConfirm,
   setShowCreateNewQuizConfirm,
   handleCreateNewQuizConfirm,
@@ -478,6 +482,8 @@ export const SettingsView = React.memo<SettingsViewProps>(({
               setConfigJsonInput={setConfigJsonInput}
               handleImportConfig={handleImportConfig}
               currentQuizId={currentQuizId}
+              catalogUrl={catalogUrl}
+              onOpenUrlHelpModal={onOpenUrlHelpModal}
             />
           )}
 

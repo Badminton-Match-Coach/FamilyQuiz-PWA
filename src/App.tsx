@@ -40,7 +40,8 @@ import {
   Mail,
   ArrowUpDown,
   GripVertical,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Key
 } from 'lucide-react';
 import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { Header } from './components/Navigation/Header';
@@ -49,13 +50,14 @@ import { QuizWalkView } from './components/Tipspromenad/QuizWalkView';
 import { ResultsView } from './components/Tipspromenad/ResultsView';
 import { compressImageFile, getOptionLabel } from './utils/imageAndLabelUtils';
 
-const SettingsView = React.lazy(() => import('./components/Settings/SettingsView').then(m => ({ default: m.SettingsView })));
-const QuestionFullScreenEditor = React.lazy(() => import('./components/Settings/QuestionFullScreenEditor').then(m => ({ default: m.QuestionFullScreenEditor })));
-const GlobalImportModal = React.lazy(() => import('./components/Modals/GlobalImportModal').then(m => ({ default: m.GlobalImportModal })));
-const ImageZoomModal = React.lazy(() => import('./components/Modals/ImageZoomModal').then(m => ({ default: m.ImageZoomModal })));
-const HowItWorksModal = React.lazy(() => import('./components/Modals/HowItWorksModal').then(m => ({ default: m.HowItWorksModal })));
-const InAppBreakoutModal = React.lazy(() => import('./components/Modals/InAppBreakoutModal').then(m => ({ default: m.InAppBreakoutModal })));
-const CustomAlertModal = React.lazy(() => import('./components/Modals/CustomAlertModal').then(m => ({ default: m.CustomAlertModal })));
+import { SettingsView } from './components/Settings/SettingsView';
+import { QuestionFullScreenEditor } from './components/Settings/QuestionFullScreenEditor';
+import { GlobalImportModal } from './components/Modals/GlobalImportModal';
+import { ImageZoomModal } from './components/Modals/ImageZoomModal';
+import { HowItWorksModal } from './components/Modals/HowItWorksModal';
+import { InAppBreakoutModal } from './components/Modals/InAppBreakoutModal';
+import { CustomAlertModal } from './components/Modals/CustomAlertModal';
+import { UrlHelpModal } from './components/Modals/UrlHelpModal';
 
 import { defaultQuiz } from './data/defaultQuiz';
 import { 
@@ -492,7 +494,8 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
     handleSelectQuestionIndex(followUpIndex, true, participantId);
     return true;
   };
-  const [showLoadConfirm, setShowLoadConfirm] = useState<{ type: 'db' | 'library'; payload: any } | null>(null);
+  const [showLoadConfirm, setShowLoadConfirm] = useState<{ type: 'db' | 'library'; payload: any; catalogBaseUrl?: string } | null>(null);
+  const [showUrlHelpModal, setShowUrlHelpModal] = useState(false);
 
   const [viewingParticipantId, setViewingParticipantId] = useState<string | null>(null);
   const [zoomedImageUrl, setZoomedImageUrl] = useState<string | null>(null);
@@ -2232,7 +2235,23 @@ ${exampleJson}`;
 
   const normalizeCatalogUrl = (input?: any): { baseUrl: string; manifestUrl: string; isCustom: boolean } => {
     let trimmed = typeof input === 'string' ? input.trim() : '';
-    if (!trimmed || trimmed === '[object Object]' || trimmed === DEFAULT_CATALOG_URL || trimmed === '/quizzes/' || trimmed === 'quizzes/' || trimmed === './quizzes/') {
+    if (!trimmed || trimmed === '[object Object]') {
+      return { baseUrl: DEFAULT_CATALOG_URL, manifestUrl: `${DEFAULT_CATALOG_URL}manifest.json`, isCustom: false };
+    }
+    // Strip query string and hash from the catalog URL itself if present
+    try {
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        const u = new URL(trimmed);
+        trimmed = `${u.origin}${u.pathname}`;
+      } else {
+        trimmed = trimmed.split('?')[0].split('#')[0];
+      }
+    } catch {
+      trimmed = trimmed.split('?')[0].split('#')[0];
+    }
+    trimmed = trimmed.trim();
+
+    if (!trimmed || trimmed === DEFAULT_CATALOG_URL || trimmed === '/quizzes/' || trimmed === 'quizzes/' || trimmed === './quizzes/' || trimmed === 'quizzes' || trimmed === '/quizzes') {
       return { baseUrl: DEFAULT_CATALOG_URL, manifestUrl: `${DEFAULT_CATALOG_URL}manifest.json`, isCustom: false };
     }
     // If user provided link to index.html or index.htm
@@ -2509,9 +2528,9 @@ ${exampleJson}`;
     }
   };
 
-  const loadLibraryQuiz = async (filenameOrItem: string | any, bypassConfirm = false) => {
+  const loadLibraryQuiz = async (filenameOrItem: string | any, bypassConfirm = false, customCatalogBaseUrl?: string) => {
     if (!bypassConfirm && (participants.length > 0 || answers.length > 0)) {
-      setShowLoadConfirm({ type: 'library', payload: filenameOrItem });
+      setShowLoadConfirm({ type: 'library', payload: filenameOrItem, catalogBaseUrl: customCatalogBaseUrl });
       return;
     }
 
@@ -2530,12 +2549,19 @@ ${exampleJson}`;
         presetDesc = filenameOrItem.description || '';
         presetLang = filenameOrItem.language;
       } else {
-        const str = String(filenameOrItem || '');
-        if (str.startsWith('http://') || str.startsWith('https://') || str.startsWith('/')) {
+        const str = String(filenameOrItem || '').trim();
+        if (str.startsWith('http://') || str.startsWith('https://')) {
+          url = str;
+        } else if (str.startsWith('/') && !customCatalogBaseUrl) {
           url = str;
         } else {
-          const { baseUrl } = normalizeCatalogUrl(catalogUrl);
-          url = `${baseUrl}${str}`;
+          const effectiveCatalog = customCatalogBaseUrl || catalogUrl;
+          const { baseUrl } = normalizeCatalogUrl(effectiveCatalog);
+          let cleanFilename = str.replace(/^(\.\/|\/)/, '');
+          if (!cleanFilename.includes('.')) {
+            cleanFilename = `${cleanFilename}.json`;
+          }
+          url = `${baseUrl}${cleanFilename}`;
         }
       }
 
@@ -2667,24 +2693,42 @@ ${exampleJson}`;
         const hashStr = rawHash.startsWith('#') ? rawHash.slice(1) : rawHash;
         const hashParams = new URLSearchParams(hashStr);
 
-        // Check for catalog parameter in URL: ?catalog=..., ?catalogUrl=..., ?katalog=..., #catalog=...
+        // Check for catalog parameter in URL: ?catalog=..., ?katalog=..., ?cat=..., #catalog=...
         const urlCatalog = 
           searchParams.get('catalog') || 
           searchParams.get('catalogUrl') || 
           searchParams.get('katalog') ||
+          searchParams.get('katalogUrl') ||
+          searchParams.get('cat') ||
+          searchParams.get('c') ||
           hashParams.get('catalog') || 
           hashParams.get('catalogUrl') || 
-          hashParams.get('katalog');
+          hashParams.get('katalog') || 
+          hashParams.get('cat');
 
+        let effectiveCatalog = catalogUrl;
         if (urlCatalog) {
           const decodedCatalog = decodeURIComponent(urlCatalog).trim();
           if (decodedCatalog) {
+            effectiveCatalog = decodedCatalog;
             setCatalogUrl(decodedCatalog);
             localStorage.setItem(STORAGE_KEY_CATALOG_URL, decodedCatalog);
             await fetchQuizLibrary(decodedCatalog);
           }
         } else {
           await fetchQuizLibrary();
+        }
+
+        // Check if user requested URL Help Modal via query/hash
+        if (
+          searchParams.has('help') || 
+          searchParams.has('hjalp') || 
+          searchParams.has('urlguide') || 
+          searchParams.has('urlhelp') || 
+          hashParams.has('help') || 
+          hashParams.has('urlguide')
+        ) {
+          setShowUrlHelpModal(true);
         }
 
         const qpsCandidate = 
@@ -2747,14 +2791,6 @@ ${exampleJson}`;
           }
         }
 
-        let compressedCandidate = 
-          searchParams.get('quiz') || 
-          searchParams.get('z') || 
-          searchParams.get('q') || 
-          hashParams.get('quiz') || 
-          hashParams.get('z') || 
-          hashParams.get('q');
-
         const isLockedInUrl = 
           searchParams.get('lock') === '1' ||
           searchParams.get('mode') === 'quiz' ||
@@ -2774,7 +2810,52 @@ ${exampleJson}`;
         if (urlWalkId) {
           setWalkId(urlWalkId);
           localStorage.setItem(STORAGE_KEY_WALK_ID, urlWalkId);
-        } else if (compressedCandidate) {
+        }
+
+        // Check for direct quiz file loading: ?quizFile=..., ?file=..., ?fil=..., ?loadQuiz=...
+        const rawQuizFile = 
+          searchParams.get('quizFile') || 
+          searchParams.get('quizfile') || 
+          searchParams.get('file') || 
+          searchParams.get('fil') || 
+          searchParams.get('quizfil') || 
+          searchParams.get('loadQuiz') || 
+          searchParams.get('filename') || 
+          searchParams.get('qf') ||
+          hashParams.get('quizFile') || 
+          hashParams.get('quizfile') || 
+          hashParams.get('file') || 
+          hashParams.get('fil') || 
+          hashParams.get('loadQuiz') || 
+          hashParams.get('filename');
+
+        const isFilenameLike = (val?: string | null): boolean => {
+          if (!val) return false;
+          const s = val.trim().toLowerCase();
+          return s.endsWith('.json') || s.endsWith('.txt') || (s.length < 60 && !s.includes('/') && !s.includes('&') && s.length > 2 && !s.match(/^[A-Za-z0-9+/=]{60,}$/));
+        };
+
+        const rawQuizParam = searchParams.get('quiz') || searchParams.get('q') || hashParams.get('quiz') || hashParams.get('q');
+        const targetQuizFile = rawQuizFile || (isFilenameLike(rawQuizParam) ? rawQuizParam : null);
+
+        if (targetQuizFile) {
+          await loadLibraryQuiz(targetQuizFile, true, effectiveCatalog);
+          if (window.history && window.history.replaceState) {
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState(null, '', cleanUrl);
+          }
+          return true;
+        }
+
+        let compressedCandidate = 
+          (!isFilenameLike(searchParams.get('quiz')) ? searchParams.get('quiz') : null) || 
+          searchParams.get('z') || 
+          (!isFilenameLike(searchParams.get('q')) ? searchParams.get('q') : null) || 
+          (!isFilenameLike(hashParams.get('quiz')) ? hashParams.get('quiz') : null) || 
+          hashParams.get('z') || 
+          (!isFilenameLike(hashParams.get('q')) ? hashParams.get('q') : null);
+
+        if (!urlWalkId && compressedCandidate) {
           // If loading a new quiz but no session ID was supplied in the URL, create a new one
           const newWalkId = crypto.randomUUID();
           setWalkId(newWalkId);
@@ -2808,17 +2889,6 @@ ${exampleJson}`;
             }
             return true;
           }
-        }
-
-        // URL Parameter / hash auto-load: ?quizFile=filename.json, ?loadQuiz=filename.json, #loadQuiz=filename.json
-        const quizFile = searchParams.get('quizFile') || searchParams.get('loadQuiz') || hashParams.get('loadQuiz');
-        if (quizFile) {
-          await loadLibraryQuiz(quizFile);
-          if (window.history && window.history.replaceState) {
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState(null, '', cleanUrl);
-          }
-          return true;
         }
       } catch (err) {
         console.error('Failed to load quiz from URL parameters/hash:', err);
@@ -3648,7 +3718,7 @@ ${exampleJson}`;
                       if (showLoadConfirm.type === 'db') {
                         handleLoadQuizFromDB(showLoadConfirm.payload, true);
                       } else {
-                        loadLibraryQuiz(showLoadConfirm.payload, true);
+                        loadLibraryQuiz(showLoadConfirm.payload, true, showLoadConfirm.catalogBaseUrl);
                       }
                       setShowLoadConfirm(null);
                     }}
@@ -3854,6 +3924,8 @@ ${exampleJson}`;
               newGeotagDistance={newGeotagDistance}
               setNewGeotagDistance={setNewGeotagDistance}
               handleApplyBatchRouteLocations={handleApplyRouteGeoTags}
+              catalogUrl={catalogUrl}
+              onOpenUrlHelpModal={() => setShowUrlHelpModal(true)}
             />
           )}
         </AnimatePresence>
@@ -3915,18 +3987,22 @@ ${exampleJson}`;
         )}
 
         {/* Image Zoom Modal */}
-        <ImageZoomModal
-          imageUrl={zoomedImageUrl}
-          onClose={() => setZoomedImageUrl(null)}
-          lang={lang}
-        />
+        {zoomedImageUrl && (
+          <ImageZoomModal
+            imageUrl={zoomedImageUrl}
+            onClose={() => setZoomedImageUrl(null)}
+            lang={lang}
+          />
+        )}
 
         {/* How It Works Help Modal */}
-        <HowItWorksModal
-          isOpen={showHowItWorks}
-          onClose={() => setShowHowItWorks(false)}
-          lang={lang}
-        />
+        {showHowItWorks && (
+          <HowItWorksModal
+            isOpen={showHowItWorks}
+            onClose={() => setShowHowItWorks(false)}
+            lang={lang}
+          />
+        )}
 
         {/* IndexedDB Action Confirmation Modal */}
         <AnimatePresence>
@@ -4055,14 +4131,101 @@ ${exampleJson}`;
         </AnimatePresence>
 
         {/* Custom Alert Modal (replaces browser native alerts) */}
-        <CustomAlertModal
-          isOpen={customAlert.isOpen}
-          message={customAlert.message}
-          title={customAlert.title}
-          type={customAlert.type}
-          onClose={() => setCustomAlert(prev => ({ ...prev, isOpen: false }))}
-          lang={lang}
-        />
+        {/* API Key Settings Modal */}
+        <AnimatePresence>
+          {showApiKeyInput && (
+            <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowApiKeyInput(false)}
+                className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 16 }}
+                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100"
+              >
+                <div className="bg-indigo-600 p-6 text-white relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKeyInput(false)}
+                    className="absolute right-5 top-5 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30 cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                  <div className="mb-3.5 flex h-12 w-12 items-center justify-center rounded-xl bg-white/20">
+                    <Key className="h-6 w-6 text-white" />
+                  </div>
+                  <h3 className="text-xl font-black">
+                    {t(lang, 'aiSettingsSectionTitle') || 'Gemini API-nyckel'}
+                  </h3>
+                  <p className="text-xs text-indigo-100 font-medium mt-1">
+                    {t(lang, 'aiSettingsDesc') || 'Ange din Gemini API-nyckel för att generera quizfrågor automatiskt med AI.'}
+                  </p>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                      API-nyckel (Gemini)
+                    </label>
+                    <input
+                      type="password"
+                      placeholder="AIzaSy..."
+                      value={userApiKeyInput}
+                      onChange={(e) => setUserApiKeyInput(e.target.value)}
+                      className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <p className="text-[11px] text-slate-400 font-medium">
+                      Nyckeln sparas säkert enbart i din webbläsare (localStorage).
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKeyInput(false)}
+                      className="flex-1 rounded-xl bg-slate-100 hover:bg-slate-200 py-3 text-xs font-black uppercase text-slate-600 transition-all active:scale-95 cursor-pointer"
+                    >
+                      {t(lang, 'cancelBtn') || 'Avbryt'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomApiKey}
+                      className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 py-3 text-xs font-black uppercase text-white transition-all active:scale-95 cursor-pointer shadow-md shadow-indigo-100"
+                    >
+                      {t(lang, 'saveBtn') || 'Spara nyckel'}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {customAlert.isOpen && (
+          <CustomAlertModal
+            isOpen={customAlert.isOpen}
+            message={customAlert.message}
+            title={customAlert.title}
+            type={customAlert.type}
+            onClose={() => setCustomAlert(prev => ({ ...prev, isOpen: false }))}
+            lang={lang}
+          />
+        )}
+
+        {showUrlHelpModal && (
+          <UrlHelpModal
+            isOpen={showUrlHelpModal}
+            onClose={() => setShowUrlHelpModal(false)}
+            lang={lang}
+            currentCatalogUrl={catalogUrl}
+            availableQuizFiles={quizLibrary.map(q => q.filename || `${q.id}.json`)}
+          />
+        )}
       </div>
     </div>
   );

@@ -21,7 +21,8 @@ import {
   Globe,
   Plus,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Link2
 } from 'lucide-react';
 import { Language, t } from '../../i18n';
 import { QuizConfig } from '../../types';
@@ -61,6 +62,8 @@ export interface DatabaseAndLibraryTabProps {
   setConfigJsonInput: (v: string) => void;
   handleImportConfig: () => void;
   currentQuizId: string;
+  catalogUrl?: string;
+  onOpenUrlHelpModal?: () => void;
 }
 
 export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
@@ -94,8 +97,11 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
   configJsonInput,
   setConfigJsonInput,
   handleImportConfig,
-  currentQuizId
+  currentQuizId,
+  catalogUrl,
+  onOpenUrlHelpModal
 }) => {
+  const [copiedQuizId, setCopiedQuizId] = useState<string | null>(null);
   const dbFileInputRef = useRef<HTMLInputElement>(null);
   const [showAllSavedQuizzes, setShowAllSavedQuizzes] = useState(true);
   const [dbNotification, setDbNotification] = useState<string | null>(null);
@@ -462,17 +468,28 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
 
                       {/* SECTION: PRESET CATALOG QUIZZES (Bibliotek) */}
                       <div className="space-y-3 pt-4 border-t border-slate-100">
-                        <div className="flex items-center justify-between px-1">
+                        <div className="flex items-center justify-between px-1 flex-wrap gap-2">
                           <div className="flex items-center gap-2">
                             <FolderOpen className="w-4 h-4 text-indigo-600" />
                             <h3 className="font-black text-xs uppercase tracking-wider text-slate-700">
                               {t(lang, 'premadeQuizzesSection')}
                             </h3>
+                            {quizMetadataList.length > 0 && (
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
+                                {quizMetadataList.length}
+                              </span>
+                            )}
                           </div>
-                          {quizMetadataList.length > 0 && (
-                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                              {quizMetadataList.length}
-                            </span>
+                          {onOpenUrlHelpModal && (
+                            <button
+                              type="button"
+                              onClick={onOpenUrlHelpModal}
+                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px] flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+                              title={t(lang, 'urlParamsHelpBtn')}
+                            >
+                              <Link2 className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>{t(lang, 'urlParamsHelpBtn')}</span>
+                            </button>
                           )}
                         </div>
 
@@ -545,13 +562,43 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                                       </span>
                                     </div>
                                   </div>
-                                  <button 
-                                    onClick={() => handleLoadPresetQuiz(item)}
-                                    className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'loadQuizBtn')}</span>
-                                  </button>
+                                  <div className="flex items-center gap-2 pt-1">
+                                    <button 
+                                      onClick={() => handleLoadPresetQuiz(item)}
+                                      className="flex-1 py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                      <span>{t(lang, 'loadQuizBtn')}</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const filename = item.filename || `${item.id}.json`;
+                                        const effectiveCat = catalogUrl || `${window.location.origin}/quizzes/`;
+                                        const origin = window.location.origin + window.location.pathname;
+                                        const directUrl = new URL(origin);
+                                        directUrl.searchParams.set('catalog', effectiveCat);
+                                        directUrl.searchParams.set('quizFile', filename);
+                                        navigator.clipboard.writeText(directUrl.toString());
+                                        setCopiedQuizId(item.id);
+                                        setTimeout(() => setCopiedQuizId(null), 2500);
+                                      }}
+                                      className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+                                      title={t(lang, 'copyDirectQuizLinkBtn')}
+                                    >
+                                      {copiedQuizId === item.id ? (
+                                        <>
+                                          <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                          <span className="text-emerald-700 font-black">{lang === 'sv' ? 'Kopierad!' : 'Copied!'}</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Link2 className="w-3.5 h-3.5 text-slate-600" />
+                                          <span>{t(lang, 'copyDirectQuizLinkBtn')}</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
                                 </div>
                               );
                             })}

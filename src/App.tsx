@@ -47,32 +47,26 @@ import {
 import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { Header } from './components/Navigation/Header';
 import { SetupView } from './components/Tipspromenad/SetupView';
-import { QuizWalkView } from './components/Tipspromenad/QuizWalkView';
-import { ResultsView } from './components/Tipspromenad/ResultsView';
 import { compressImageFile, getOptionLabel } from './utils/imageAndLabelUtils';
 
-import { SettingsView } from './components/Settings/SettingsView';
-import { QuestionFullScreenEditor } from './components/Settings/QuestionFullScreenEditor';
-import { GlobalImportModal } from './components/Modals/GlobalImportModal';
-import { ImageZoomModal } from './components/Modals/ImageZoomModal';
-import { HowItWorksModal } from './components/Modals/HowItWorksModal';
-import { InAppBreakoutModal } from './components/Modals/InAppBreakoutModal';
-import { CustomAlertModal } from './components/Modals/CustomAlertModal';
-import { UrlHelpModal } from './components/Modals/UrlHelpModal';
+const QuizWalkView = React.lazy(() => import('./components/Tipspromenad/QuizWalkView').then(m => ({ default: m.QuizWalkView })));
+const ResultsView = React.lazy(() => import('./components/Tipspromenad/ResultsView').then(m => ({ default: m.ResultsView })));
+const SettingsView = React.lazy(() => import('./components/Settings/SettingsView').then(m => ({ default: m.SettingsView })));
+const QuestionFullScreenEditor = React.lazy(() => import('./components/Settings/QuestionFullScreenEditor').then(m => ({ default: m.QuestionFullScreenEditor })));
+const GlobalImportModal = React.lazy(() => import('./components/Modals/GlobalImportModal').then(m => ({ default: m.GlobalImportModal })));
+const ImageZoomModal = React.lazy(() => import('./components/Modals/ImageZoomModal').then(m => ({ default: m.ImageZoomModal })));
+const HowItWorksModal = React.lazy(() => import('./components/Modals/HowItWorksModal').then(m => ({ default: m.HowItWorksModal })));
+const InAppBreakoutModal = React.lazy(() => import('./components/Modals/InAppBreakoutModal').then(m => ({ default: m.InAppBreakoutModal })));
+const CustomAlertModal = React.lazy(() => import('./components/Modals/CustomAlertModal').then(m => ({ default: m.CustomAlertModal })));
+const UrlHelpModal = React.lazy(() => import('./components/Modals/UrlHelpModal').then(m => ({ default: m.UrlHelpModal })));
 
 import { defaultQuiz } from './data/defaultQuiz';
 import { 
-  AdminMapPicker, 
-  ParticipantMap, 
-  RouteGeoTagModal, 
-  CompassDirectionBadge, 
-  MiniStationMap, 
-  TrailProgressBar, 
   calculateDistanceMeters, 
   formatDistance, 
   calculateWalkingTimeMinutes,
   calculatePathDistance 
-} from './components/MapComponent';
+} from './utils/geoUtils';
 import { generateQuizClient, batchTranslateQuizQuestions, getStoredApiKey, setStoredApiKey, getStoredAiUseImages, setStoredAiUseImages, validateTextAnswerWithGemini, findLocationCoordinatesWithGemini } from './geminiClient';
 import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion, unpackLanguage } from './i18n';
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';

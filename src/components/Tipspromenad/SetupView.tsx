@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { QuizConfig, Participant, UserType } from '../../types';
 import { Language, t } from '../../i18n';
-import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../MapComponent';
+import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
 
 export interface SetupViewProps {
   lang: Language;

@@ -26,11 +26,18 @@ export default defineConfig(({ mode }) => {
           manualChunks(id) {
             if (id.includes('node_modules')) {
               if (id.includes('leaflet')) return 'vendor-leaflet';
-              if (id.includes('motion') || id.includes('react') || id.includes('scheduler')) return 'vendor-react';
               if (id.includes('lucide-react')) return 'vendor-icons';
+              if (id.includes('motion')) return 'vendor-motion';
+              if (id.includes('react') || id.includes('scheduler')) return 'vendor-react';
               if (id.includes('@google/genai')) return 'vendor-ai';
               if (id.includes('lz-string') || id.includes('qrcode')) return 'vendor-utils';
               return 'vendor-misc';
+            }
+            if (id.includes('src/i18n')) {
+              return 'app-i18n';
+            }
+            if (id.includes('src/data/defaultQuiz')) {
+              return 'app-default-quiz';
             }
           },
         },

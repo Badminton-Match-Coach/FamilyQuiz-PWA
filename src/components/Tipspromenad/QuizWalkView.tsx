@@ -28,9 +28,8 @@ import {
 } from 'lucide-react';
 import { QuizConfig, Participant, UserType, Question, Location } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
+import { calculateDistanceMeters, formatDistance } from '../../utils/geoUtils';
 import {
-  calculateDistanceMeters,
-  formatDistance,
   ParticipantMap,
   TrailProgressBar,
   MiniStationMap,

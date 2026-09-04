@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { QuizConfig, UserType, Question, Location } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
-import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../MapComponent';
+import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
 

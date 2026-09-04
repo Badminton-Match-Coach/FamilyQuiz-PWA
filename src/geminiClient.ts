@@ -1,4 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
+async function getGeminiSdk(apiKey: string) {
+  const { GoogleGenAI, Type } = await import('@google/genai');
+  return { ai: new GoogleGenAI({ apiKey }), Type };
+}
 
 export function getStoredApiKey(): string {
   if (typeof window === 'undefined') return '';
@@ -39,7 +42,7 @@ export async function generateQuizClient(params: {
     throw new Error("MISSING_API_KEY");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const { ai, Type } = await getGeminiSdk(apiKey);
   const { topics, count, target, lang, ageFrom = 5, ageTo = 10, geotagLandmarks = false, includeImages = false, targetLanguages = [] } = params;
   const currentLang = lang || 'sv';
 
@@ -334,7 +337,7 @@ export async function translateQuestionsClient(
     return { translations: [] };
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const { ai, Type } = await getGeminiSdk(apiKey);
 
   const prompt = `Translate the following quiz questions and options directly into target language code: "${targetLanguage}".
 Each question object has an "id", "text", "originalLanguage", and optional "options".
@@ -390,7 +393,7 @@ export async function validateTextAnswerWithGemini(params: {
     throw new Error("MISSING_API_KEY");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const { ai, Type } = await getGeminiSdk(apiKey);
   const { userInput, targetWord, acceptedAlternatives = [] } = params;
 
   const prompt = `You are a linguistic validation engine for a multi-lingual Progressive Web App (PWA). Your job is to determine if a user's input matches a specific target word or concept, even if the user has made severe spelling or grammatical errors typical of dyslexia.
@@ -459,7 +462,7 @@ export async function findLocationCoordinatesWithGemini(
     throw new Error("MISSING_API_KEY");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const { ai, Type } = await getGeminiSdk(apiKey);
   const prompt = `Identify the real-world place, landmark, building, park, museum, city, or location mentioned or referred to in the following text/question.
 Find its precise real-world GPS coordinates (WGS84 decimal latitude and longitude) and a clean place name.
 

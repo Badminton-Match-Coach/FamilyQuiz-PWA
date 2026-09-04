@@ -5,23 +5,39 @@ async function getGeminiSdk(apiKey: string) {
 
 export function getStoredApiKey(): string {
   if (typeof window === 'undefined') return '';
-  return localStorage.getItem('gemini_api_key') || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  try {
+    return localStorage.getItem('gemini_api_key') || ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  } catch {
+    return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  }
 }
 
 export function setStoredApiKey(key: string): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('gemini_api_key', key.trim());
+    try {
+      localStorage.setItem('gemini_api_key', key.trim());
+    } catch (e) {
+      console.warn('Unable to persist API key to localStorage', e);
+    }
   }
 }
 
 export function getStoredAiUseImages(): boolean {
   if (typeof window === 'undefined') return false;
-  return localStorage.getItem('gemini_ai_use_images') === 'true';
+  try {
+    return localStorage.getItem('gemini_ai_use_images') === 'true';
+  } catch {
+    return false;
+  }
 }
 
 export function setStoredAiUseImages(enabled: boolean): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('gemini_ai_use_images', enabled ? 'true' : 'false');
+    try {
+      localStorage.setItem('gemini_ai_use_images', enabled ? 'true' : 'false');
+    } catch (e) {
+      console.warn('Unable to persist AI image setting to localStorage', e);
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'family-quiz-v5';
+const CACHE_VERSION = 'family-quiz-v6';
 const STATIC_CACHE = `${CACHE_VERSION}-shell`;
 const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;

@@ -16,6 +16,8 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker
       .register('./sw.js')
       .then((reg) => {
+        // Automatically check for SW updates
+        reg.update();
         console.log('PWA ServiceWorker registered with scope:', reg.scope);
       })
       .catch((err) => {

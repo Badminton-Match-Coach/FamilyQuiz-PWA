@@ -6,13 +6,15 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
+import { Language, t } from '../../i18n';
 
 export interface ImageZoomModalProps {
   imageUrl: string | null;
   onClose: () => void;
+  lang?: Language;
 }
 
-export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose }) => {
+export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClose, lang = 'sv' }) => {
   return (
     <AnimatePresence>
       {imageUrl && (
@@ -30,13 +32,13 @@ export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClos
             <button
               onClick={onClose}
               className="absolute -top-12 right-0 p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors backdrop-blur-sm shadow-lg"
-              title="Stäng bild"
+              title={t(lang as Language, 'closeImageTitle')}
             >
               <X className="w-6 h-6" />
             </button>
             <img
               src={imageUrl}
-              alt="Zoomed question"
+              alt={t(lang as Language, 'imageZoomedAlt')}
               referrerPolicy="no-referrer"
               className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/20"
             />

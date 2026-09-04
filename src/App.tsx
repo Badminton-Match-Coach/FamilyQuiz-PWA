@@ -4155,26 +4155,23 @@ ${exampleJson}`;
         {/* API Key Settings Modal */}
         <AnimatePresence>
           {showApiKeyInput && (
-            <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4">
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={handleCloseApiKeyModal}
-                className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm cursor-pointer"
-              />
+            <div 
+              className="fixed inset-0 z-[10000] flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-slate-900/75 backdrop-blur-sm"
+              onClick={handleCloseApiKeyModal}
+            >
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 16 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 16 }}
                 onClick={(e) => e.stopPropagation()}
-                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100 z-10"
+                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100 z-10 my-auto max-h-[calc(100dvh-2rem)] flex flex-col"
               >
-                <div className="bg-indigo-600 p-6 text-white relative">
+                <div className="bg-indigo-600 p-6 text-white relative shrink-0">
                   <button
                     type="button"
                     onClick={handleCloseApiKeyModal}
-                    className="absolute right-5 top-5 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30 cursor-pointer"
+                    className="absolute right-4 top-4 rounded-full bg-white/20 p-2.5 transition-colors hover:bg-white/30 cursor-pointer touch-manipulation text-white"
+                    aria-label="Stäng"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -4189,7 +4186,7 @@ ${exampleJson}`;
                   </p>
                 </div>
 
-                <div className="p-6 space-y-4">
+                <div className="p-6 space-y-4 overflow-y-auto">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
@@ -4199,19 +4196,28 @@ ${exampleJson}`;
                         href="https://aistudio.google.com/app/apikey"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors touch-manipulation"
                       >
                         <span>{t(lang, 'getMyApiKeysLink') || 'Mina API-nycklar'}</span>
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
-                    <input
-                      type="password"
-                      placeholder="AIzaSy..."
-                      value={userApiKeyInput}
-                      onChange={(e) => setUserApiKeyInput(e.target.value)}
-                      className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleSaveCustomApiKey();
+                      }}
+                      className="space-y-2"
+                    >
+                      <input
+                        type="password"
+                        placeholder="AIzaSy..."
+                        value={userApiKeyInput}
+                        onChange={(e) => setUserApiKeyInput(e.target.value)}
+                        className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoComplete="off"
+                      />
+                    </form>
                     <div className="space-y-2 pt-1">
                       <p className="text-[11px] text-slate-400 font-medium">
                         Nyckeln sparas säkert enbart i din webbläsare (localStorage).
@@ -4220,7 +4226,7 @@ ${exampleJson}`;
                         href="https://aistudio.google.com/app/apikey"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-2 p-3 rounded-xl bg-indigo-50/70 hover:bg-indigo-100/70 text-indigo-900 border border-indigo-100 transition-colors group"
+                        className="flex items-center gap-2 p-3 rounded-xl bg-indigo-50/70 hover:bg-indigo-100/70 text-indigo-900 border border-indigo-100 transition-colors group touch-manipulation"
                       >
                         <Key className="w-4 h-4 text-indigo-600 shrink-0 group-hover:scale-110 transition-transform" />
                         <span className="text-xs font-semibold flex-1">
@@ -4235,14 +4241,14 @@ ${exampleJson}`;
                     <button
                       type="button"
                       onClick={handleCloseApiKeyModal}
-                      className="flex-1 rounded-xl bg-slate-100 hover:bg-slate-200 py-3 text-xs font-black uppercase text-slate-600 transition-all active:scale-95 cursor-pointer"
+                      className="flex-1 rounded-xl bg-slate-100 hover:bg-slate-200 py-3.5 text-xs font-black uppercase text-slate-600 transition-all active:scale-95 cursor-pointer touch-manipulation"
                     >
                       {t(lang, 'cancelBtn') || 'Avbryt'}
                     </button>
                     <button
                       type="button"
                       onClick={handleSaveCustomApiKey}
-                      className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 py-3 text-xs font-black uppercase text-white transition-all active:scale-95 cursor-pointer shadow-md shadow-indigo-100"
+                      className="flex-1 rounded-xl bg-indigo-600 hover:bg-indigo-700 py-3.5 text-xs font-black uppercase text-white transition-all active:scale-95 cursor-pointer shadow-md shadow-indigo-100 touch-manipulation"
                     >
                       {t(lang, 'saveBtn') || 'Spara nyckel'}
                     </button>

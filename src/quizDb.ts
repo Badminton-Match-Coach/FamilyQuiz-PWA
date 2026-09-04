@@ -505,3 +505,4 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
     return { shared: false, method: 'clipboard' };
   }
 }
+

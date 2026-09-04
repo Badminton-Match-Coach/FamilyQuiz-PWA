@@ -21,7 +21,8 @@ import {
   Database,
   ArrowUpDown,
   Check,
-  Share2
+  Share2,
+  Sliders
 } from 'lucide-react';
 import { Language, t } from '../../i18n';
 import { QuizConfig, Participant } from '../../types';
@@ -61,6 +62,7 @@ export interface GeneralSettingsTabProps {
   setNewPassword: (v: string) => void;
   newGeotagDistance: number;
   setNewGeotagDistance: (v: number) => void;
+  walkId?: string;
 }
 
 export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
@@ -95,33 +97,55 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
   newPassword,
   setNewPassword,
   newGeotagDistance,
-  setNewGeotagDistance
+  setNewGeotagDistance,
+  walkId,
 }) => {
   const quizTitleInputRef = useRef<HTMLInputElement>(null);
   const [newQuizLogoUrl, setNewQuizLogoUrl] = useState(quizConfig.logoUrl || '');
   const [newQuizPassword, setNewQuizPassword] = useState(quizConfig.password || '');
   const [saveConfirmationMessage, setSaveConfirmationMessage] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    setNewQuizLogoUrl(quizConfig.logoUrl || '');
+    setNewQuizPassword(quizConfig.password || '');
+  }, [quizConfig.logoUrl, quizConfig.password]);
+
   return (
     <>
                     <div className="space-y-6">
                       {/* Create New Quiz Action Banner */}
                       {isAdmin && (
-                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 p-4 rounded-2xl flex flex-col xs:flex-row items-start xs:items-center justify-between gap-3 shadow-sm">
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
-                              <h4 className="font-black text-xs uppercase tracking-wider text-emerald-950">{t(lang, 'createNewQuizBtn')}</h4>
+                        <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 p-4 rounded-2xl flex flex-col gap-3 shadow-sm">
+                          <div className="flex flex-col xs:flex-row items-start xs:items-center justify-between gap-3">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+                                <h4 className="font-black text-xs uppercase tracking-wider text-emerald-950">{t(lang, 'createNewQuizBtn')}</h4>
+                              </div>
+                              <p className="text-xs text-emerald-700 font-medium leading-relaxed">{t(lang, 'createNewQuizDesc')}</p>
                             </div>
-                            <p className="text-xs text-emerald-700 font-medium leading-relaxed">{t(lang, 'createNewQuizDesc')}</p>
+                            <button
+                              type="button"
+                              onClick={() => setShowCreateNewQuizConfirm(true)}
+                              className="w-full xs:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span>{t(lang, 'createNewQuizBtn')}</span>
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setShowCreateNewQuizConfirm(true)}
-                            className="w-full xs:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 shrink-0"
-                          >
-                            <Plus className="w-4 h-4" />
-                            <span>{t(lang, 'createNewQuizBtn')}</span>
-                          </button>
+                          
+                          <div className="p-4 bg-emerald-100/50 border border-emerald-200 rounded-xl text-emerald-900 text-[11px] leading-relaxed font-medium">
+                            <p className="font-black uppercase tracking-wider mb-2">{t(lang, 'howToHeading')}</p>
+                            <ol className="list-decimal list-inside space-y-1">
+                              <li>{t(lang, 'howToStep1')}</li>
+                              <li>{t(lang, 'howToStep2')}</li>
+                              <li>{t(lang, 'howToStep3')}</li>
+                              <li>{t(lang, 'howToStep4')}</li>
+                              <li>{t(lang, 'howToStep5')}</li>
+                              <li>{t(lang, 'howToStep6')}</li>
+                              <li>{t(lang, 'howToStep7')}</li>
+                            </ol>
+                          </div>
                         </div>
                       )}
 
@@ -189,6 +213,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 </button>
                               )}
                             </div>
+                            <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'logoUrlExplainer')}</p>
                           </div>
                         </div>
                       </div>
@@ -225,8 +250,9 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                           )}
                         </div>
                         <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'currentPasswordLabel')} <span className="font-mono font-bold text-slate-600">{quizConfig.password || t(lang, 'noPasswordSet')}</span></p>
-                        <div className="p-3 bg-amber-50/90 border border-amber-200/80 rounded-xl text-amber-900 text-xs font-medium leading-relaxed">
-                          {t(lang, 'emptyPasswordAutoFacitInfo')}
+                        <div className="p-3 bg-amber-50/90 border border-amber-200/80 rounded-xl text-amber-900 text-xs font-medium leading-relaxed space-y-2">
+                          <p>{t(lang, 'emptyPasswordAutoFacitInfo')}</p>
+                          <p>{t(lang, 'passwordRequiredFacitInfo')}</p>
                         </div>
                       </div>
 
@@ -237,6 +263,17 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                         </div>
                         <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-xs font-bold text-slate-700 border border-slate-200">{quizConfig.quizId}</p>
                       </div>
+
+                      {walkId && (
+                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-emerald-600" />
+                            <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'walkIdHeading')}</h3>
+                          </div>
+                          <p className="break-all rounded-xl bg-white px-3 py-2 font-mono text-emerald-700 bg-emerald-50/50 border border-emerald-100 font-bold text-xs">{walkId}</p>
+                          <p className="text-[11px] text-slate-500 font-medium leading-relaxed">{t(lang, 'walkIdExplainer')}</p>
+                        </div>
+                      )}
 
                       {/* Danger Zone */}
                       {isAdmin && (
@@ -289,6 +326,50 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                               </p>
                             </div>
                           </label>
+
+                          {/* Free Text Spelling Tolerance (Soundex Level) */}
+                          <div className="p-4 bg-teal-50/70 border border-teal-200/80 rounded-2xl space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <Sliders className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                              <div>
+                                <h4 className="font-black text-xs text-teal-950 uppercase tracking-wide">
+                                  {t(lang, 'textMatchStrictnessTitle')}
+                                </h4>
+                                <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                  {t(lang, 'textMatchStrictnessDesc')}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                              {[
+                                { id: 'strict', label: t(lang, 'textMatchLevel_strict'), desc: t(lang, 'textMatchLevelDesc_strict') },
+                                { id: 'normal', label: t(lang, 'textMatchLevel_normal'), desc: t(lang, 'textMatchLevelDesc_normal') },
+                                { id: 'lenient', label: t(lang, 'textMatchLevel_lenient'), desc: t(lang, 'textMatchLevelDesc_lenient') },
+                              ].map((lvl) => {
+                                const active = (quizConfig.textMatchStrictness || 'normal') === lvl.id;
+                                return (
+                                  <button
+                                    key={lvl.id}
+                                    type="button"
+                                    onClick={() => setQuizConfig(prev => ({ ...prev, textMatchStrictness: lvl.id as 'strict' | 'normal' | 'lenient' }))}
+                                    className={`p-3 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                                      active
+                                        ? 'bg-teal-600 text-white border-teal-600 shadow-sm ring-2 ring-teal-200'
+                                        : 'bg-white hover:bg-teal-50 text-slate-700 border-teal-200/80'
+                                    }`}
+                                  >
+                                    <span className={`font-black text-xs ${active ? 'text-white' : 'text-slate-800'}`}>
+                                      {lvl.label}
+                                    </span>
+                                    <span className={`text-[10px] mt-1 font-medium leading-tight ${active ? 'text-teal-100' : 'text-slate-500'}`}>
+                                      {lvl.desc}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
 
                           {/* Direct Quiz Link Button (Top recommended) */}
                           <button 
@@ -560,11 +641,11 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                               </p>
                               <div>
                                 <a 
-                                  href="mailto:BadmintonMatchCoach@gmail.com?subject=FamilyQuizPWA"
+                                  href="mailto:bo-goran@luttren.nu?subject=FamilyQuizPWA"
                                   className="inline-flex items-center justify-center gap-1.5 text-xs font-black text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl border border-indigo-100"
                                 >
                                   <Mail className="w-3.5 h-3.5" />
-                                  <span>BadmintonMatchCoach@gmail.com</span>
+                                  <span>bo-goran@luttren.nu</span>
                                 </a>
                               </div>
                             </div>

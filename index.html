@@ -1,21 +1,71 @@
 <!doctype html>
-<html lang="en">
+<html lang="sv">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FamilyQuiz PWA</title>
+    <title>Family Quiz PWA</title>
+    <meta name="description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna." />
+    <meta property="og:title" content="Family Quiz PWA" />
+    <meta property="og:description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna." />
     <meta name="theme-color" content="#4f46e5" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="FamilyQuiz PWA" />
-    <meta name="application-name" content="FamilyQuiz PWA" />
+    <meta name="apple-mobile-web-app-title" content="Family Quiz PWA" />
+    <meta name="application-name" content="Family Quiz PWA" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/png" href="./icon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="./pwa-192.png" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
+
+    <!--
+      =============================================================================
+      FAMILY QUIZ PWA - URL PARAMETER SPECIFICATION / HJÄLP FÖR URL-PARAMETRAR
+      =============================================================================
+      Appen kan ta emot URL med katalog-URL och quiz-filnamn för att automatiskt ladda
+      in och starta en färdig tipspromenad direkt vid start:
+
+      PARAMETRAR:
+      1. Katalog-URL:
+         - catalog = Webbadress till katalog/mapp (t.ex. https://example.com/quizzes/)
+         - Alternativa alias: catalogUrl, katalog, katalogUrl, cat, c
+      
+      2. Quiz-filnamn:
+         - quizFile = Filnamn på quizfilen (t.ex. sommarquiz.json)
+         - Alternativa alias: file, fil, quizfil, filename, loadQuiz, qf, quiz
+
+      3. Låst deltagarläge (Valfritt):
+         - lock=1 eller mode=quiz (låser appen så att deltagare inte kan redigera)
+
+      EXEMPEL PÅ DIREKTLÄNKAR:
+      - Standard:
+        https://dinapp.se/?catalog=https://minsajt.se/quizzes/&quizFile=sommarquiz.json
+      - Svenska parametrar:
+        https://dinapp.se/?katalog=https://minsajt.se/quizzes/&fil=sommarquiz.json
+      - Relativ katalog på samma domän:
+        https://dinapp.se/?catalog=quizzes/&quizFile=intro_sv.json
+      - Direkt fullständig fil-URL:
+        https://dinapp.se/?quizFile=https://minsajt.se/quizzes/sommarquiz.json
+      - Låst deltagarläge:
+        https://dinapp.se/?catalog=https://minsajt.se/quizzes/&quizFile=sommarquiz.json&lock=1
+      =============================================================================
+    -->
   </head>
   <body>
+    <!-- Fallback & crawler documentation for URL parameters -->
+    <noscript>
+      <div style="font-family: sans-serif; padding: 20px; max-width: 700px; margin: 0 auto; line-height: 1.6;">
+        <h1>Family Quiz PWA - URL-Guide</h1>
+        <p>Denna applikation stöder direktlänkning via URL-parametrar för att öppna ett specifikt quiz från en katalog:</p>
+        <ul>
+          <li><strong>Katalog-parameter:</strong> <code>catalog</code>, <code>katalog</code>, <code>cat</code> eller <code>catalogUrl</code></li>
+          <li><strong>Quizfil-parameter:</strong> <code>quizFile</code>, <code>file</code>, <code>fil</code>, <code>quizfil</code> eller <code>loadQuiz</code></li>
+          <li><strong>Låst läge:</strong> <code>lock=1</code></li>
+        </ul>
+        <p><strong>Exempel:</strong> <code>?catalog=https://minsajt.se/quizzes/&amp;quizFile=sommarquiz.json</code></p>
+      </div>
+    </noscript>
+
     <div id="root"></div>
     <script type="module" src="./src/main.tsx"></script>
   </body>

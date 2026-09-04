@@ -72,8 +72,8 @@ export const Header = React.memo<HeaderProps>(({
               onClick={handleQuizIconClick}
               className={
                 quizConfig.logoUrl
-                  ? "h-11 sm:h-12 w-auto max-w-[9.5rem] rounded-2xl shadow-lg shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default px-1"
-                  : "w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
+                  ? "h-11 sm:h-12 w-auto max-w-[9.5rem] shrink-0 bg-transparent flex items-center justify-center cursor-default"
+                  : "w-11 h-11 sm:w-12 sm:h-12 shrink-0 bg-transparent flex items-center justify-center cursor-default"
               }
               aria-label="Quiz"
             >

@@ -181,12 +181,6 @@ export default function App() {
       setStoredApiKey(trimmed);
       setUserApiKeyInput(trimmed);
       setShowApiKeyInput(false);
-      setCustomAlert({
-        isOpen: true,
-        title: lang === 'sv' ? 'Sparat!' : 'Saved!',
-        message: t(lang, 'apiKeySavedSuccess') || 'API-nyckel har sparats säkert i din webbläsare!',
-        type: 'success',
-      });
     } catch {
       // ignore
     }
@@ -3883,7 +3877,7 @@ ${exampleJson}`;
               setPastedJsonInput={setPastedJsonInput}
               handleImportPastedJson={handleImportPastedJson}
               showApiKeyInput={showApiKeyInput}
-              setShowApiKeyInput={handleOpenApiKeyModal}
+              setShowApiKeyInput={setShowApiKeyInput}
               customApiKey={userApiKeyInput}
               setCustomApiKey={setUserApiKeyInput}
               handleSaveCustomApiKey={handleSaveCustomApiKey}

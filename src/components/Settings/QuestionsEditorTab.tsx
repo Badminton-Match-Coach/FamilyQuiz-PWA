@@ -24,9 +24,12 @@ import {
   ChevronRight,
   Search,
   CheckSquare,
-  ArrowUpDown
+  ArrowUpDown,
+  Target,
+  PenTool,
+  X
 } from 'lucide-react';
-import { QuizConfig, UserType, Question, Location } from '../../types';
+import { QuizConfig, UserType, Question, Location, QuestionType } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
 import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
@@ -67,6 +70,34 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
 }) => {
   const [questionSearch, setQuestionSearch] = useState('');
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+
+  const handleAddNewQuestion = (type: QuestionType = 'options', targetCategory?: UserType) => {
+    const category = targetCategory || createModalCategory || editingQuestionsCategory;
+    const newQuestion: Question = {
+      id: crypto.randomUUID(),
+      type,
+      text: type === 'points' ? 'Ny poängfråga...' : type === 'text' ? 'Ny textfråga...' : 'Ny fråga...',
+      options: type === 'points' || type === 'text' ? [] : ['Svar 1', 'Svar X', 'Svar 2'],
+      correctAnswers: type === 'points' || type === 'text' ? [] : [0],
+      maxPoints: type === 'points' ? 10 : undefined,
+      correctTextAnswer: type === 'text' ? 'Rätt svar' : undefined,
+      acceptedTextAnswers: type === 'text' ? [] : undefined,
+      originalLanguage: lang,
+    };
+    
+    setQuizConfig(prev => {
+      const newConfig = { ...prev };
+      if (category === 'barn') {
+        newConfig.barnQuestions = [...newConfig.barnQuestions, newQuestion];
+      } else {
+        newConfig.vuxenQuestions = [...newConfig.vuxenQuestions, newQuestion];
+      }
+      return newConfig;
+    });
+    setCreateModalCategory(null);
+    setShowCreateQuestionModal(null);
+    setFullScreenEditingQuestionId(newQuestion.id);
+  };
 
   const selectAllQuestions = () => {
     const questions = editingQuestionsCategory === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
@@ -763,16 +794,204 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
                           })}
                       </div>
 
+                      {showBulkDeleteConfirm && (
+                        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                          <div
+                            className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"
+                            onClick={() => setShowBulkDeleteConfirm(false)}
+                          />
+                          <div className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl">
+                            <div className="bg-rose-600 p-7 text-white sm:p-8">
+                              <button
+                                type="button"
+                                onClick={() => setShowBulkDeleteConfirm(false)}
+                                className="absolute right-6 top-6 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30"
+                              >
+                                <span className="text-lg font-bold">×</span>
+                              </button>
+                              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
+                                <Trash2 className="h-8 w-8 text-white" />
+                              </div>
+                              <h2 className="text-2xl font-black">
+                                {t(lang, 'deleteSelectedQuestionsTitle') || 'Radera markerade frågor'}
+                              </h2>
+                            </div>
+                            <div className="space-y-5 p-7 sm:p-8">
+                              <p className="text-sm font-medium leading-relaxed text-slate-500">
+                                {t(lang, 'deleteSelectedQuestionsWarning', { count: selectedQuestionIds.length.toString() }) || `Är du säker på att du vill radera ${selectedQuestionIds.length} markerade frågor? Detta kan inte ångras.`}
+                              </p>
+                              <div className="flex gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowBulkDeleteConfirm(false)}
+                                  className="flex-1 rounded-2xl bg-slate-100 py-3.5 text-xs font-black uppercase text-slate-600 hover:bg-slate-200"
+                                >
+                                  {t(lang, 'cancelBtn') || 'Avbryt'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    confirmDeleteSelectedQuestions();
+                                  }}
+                                  className="flex-1 rounded-2xl bg-rose-600 py-3.5 text-xs font-black uppercase text-white hover:bg-rose-700 shadow-md shadow-rose-100"
+                                >
+                                  {t(lang, 'confirmDeleteSelectedQuestionsBtn') || 'Ja, radera'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {isAdmin && (
                         <button 
+                          type="button"
                           onClick={() => {
                             setCreateModalCategory(editingQuestionsCategory);
                             setShowCreateQuestionModal(editingQuestionsCategory);
                           }}
-                          className="w-full py-3.5 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
+                          className="w-full py-3.5 bg-slate-900 text-white hover:bg-slate-800 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 shadow-md transition-all active:scale-95 cursor-pointer"
                         >
                           <Plus className="w-4 h-4" /> {t(lang, 'addNewQuestionBtn', { category: editingQuestionsCategory === 'barn' ? t(lang, 'kid') : t(lang, 'adult') })}
                         </button>
+                      )}
+
+                      {/* Question Type Selector Modal */}
+                      {createModalCategory && (
+                        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-y-auto">
+                          <div
+                            className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm transition-opacity"
+                            onClick={() => {
+                              setCreateModalCategory(null);
+                              setShowCreateQuestionModal(null);
+                            }}
+                          />
+                          <div className="relative w-full max-w-lg overflow-hidden rounded-[2.5rem] bg-white shadow-2xl border border-slate-100 my-auto">
+                            {/* Header */}
+                            <div className="bg-gradient-to-r from-slate-900 to-indigo-950 p-6 text-white sm:p-7 relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCreateModalCategory(null);
+                                  setShowCreateQuestionModal(null);
+                                }}
+                                className="absolute right-5 top-5 rounded-full bg-white/10 hover:bg-white/20 p-2 text-white/80 hover:text-white transition-colors cursor-pointer"
+                                aria-label="Stäng"
+                              >
+                                <X className="w-5 h-5" />
+                              </button>
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-500/30 border border-indigo-400/30 text-indigo-300">
+                                  <Plus className="h-6 w-6 text-white" />
+                                </div>
+                                <div>
+                                  <h2 className="text-xl font-black tracking-tight">
+                                    {t(lang, 'selectQuestionTypeTitle')}
+                                  </h2>
+                                  <p className="text-xs text-indigo-200 font-medium mt-0.5">
+                                    {t(lang, 'selectQuestionTypeDesc', {
+                                      category: (createModalCategory || editingQuestionsCategory) === 'barn'
+                                        ? `🧒 ${t(lang, 'childrenQuestionsCategory')}`
+                                        : `🧑 ${t(lang, 'adultQuestionsCategory')}`
+                                    })}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Question Type Choices */}
+                            <div className="p-6 sm:p-7 space-y-3 bg-slate-50/50">
+                              {/* Option 1: 1X2 Multiple Choice */}
+                              <button
+                                type="button"
+                                onClick={() => handleAddNewQuestion('options')}
+                                className="w-full text-left p-4 bg-white hover:bg-indigo-50/70 active:scale-[0.98] border-2 border-slate-200/90 hover:border-indigo-500 rounded-2xl transition-all shadow-sm group cursor-pointer flex items-center gap-4"
+                              >
+                                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 border border-indigo-100 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-all shadow-sm">
+                                  <CheckSquare className="w-6 h-6" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-sm text-slate-900 group-hover:text-indigo-700">
+                                      {t(lang, 'questionTypeOptionsTitle')}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-700 rounded-full">
+                                      1X2
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">
+                                    {t(lang, 'questionTypeOptionsDesc')}
+                                  </p>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-600 transition-colors shrink-0" />
+                              </button>
+
+                              {/* Option 2: Points Question */}
+                              <button
+                                type="button"
+                                onClick={() => handleAddNewQuestion('points')}
+                                className="w-full text-left p-4 bg-white hover:bg-amber-50/70 active:scale-[0.98] border-2 border-slate-200/90 hover:border-amber-500 rounded-2xl transition-all shadow-sm group cursor-pointer flex items-center gap-4"
+                              >
+                                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-100 flex items-center justify-center shrink-0 group-hover:bg-amber-500 group-hover:text-white transition-all shadow-sm">
+                                  <Target className="w-6 h-6" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-sm text-slate-900 group-hover:text-amber-700">
+                                      {t(lang, 'questionTypePointsTitle')}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 rounded-full">
+                                      0–10p
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">
+                                    {t(lang, 'questionTypePointsDesc')}
+                                  </p>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-amber-600 transition-colors shrink-0" />
+                              </button>
+
+                              {/* Option 3: Free-Text Question */}
+                              <button
+                                type="button"
+                                onClick={() => handleAddNewQuestion('text')}
+                                className="w-full text-left p-4 bg-white hover:bg-emerald-50/70 active:scale-[0.98] border-2 border-slate-200/90 hover:border-emerald-500 rounded-2xl transition-all shadow-sm group cursor-pointer flex items-center gap-4"
+                              >
+                                <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-all shadow-sm">
+                                  <PenTool className="w-6 h-6" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-sm text-slate-900 group-hover:text-emerald-700">
+                                      {t(lang, 'questionTypeTextTitle')}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 rounded-full">
+                                      Text
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">
+                                    {t(lang, 'questionTypeTextDesc')}
+                                  </p>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-600 transition-colors shrink-0" />
+                              </button>
+                            </div>
+
+                            {/* Footer */}
+                            <div className="p-4 bg-slate-100/80 border-t border-slate-200/70 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCreateModalCategory(null);
+                                  setShowCreateQuestionModal(null);
+                                }}
+                                className="px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 active:scale-95 text-slate-700 font-bold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer"
+                              >
+                                {t(lang, 'cancelBtn') || 'Avbryt'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
   );

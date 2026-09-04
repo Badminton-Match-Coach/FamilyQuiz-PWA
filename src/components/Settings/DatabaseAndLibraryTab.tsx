@@ -107,6 +107,34 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
   const [dbNotification, setDbNotification] = useState<string | null>(null);
   const latestSavedQuiz = savedQuizzes.length > 0 ? savedQuizzes[0] : null;
 
+  const currentTotalQuestions = (quizConfig?.barnQuestions?.length || 0) + (quizConfig?.vuxenQuestions?.length || 0);
+  const currentGpsCount = useMemo(() => {
+    if (!quizConfig) return 0;
+    const all = [...(quizConfig.barnQuestions || []), ...(quizConfig.vuxenQuestions || [])];
+    return all.filter(q => q.location && (q.location.lat !== 0 || q.location.lng !== 0)).length;
+  }, [quizConfig]);
+
+  const isCurrentQuiz = (item: { id?: string; title?: string; filename?: string }) => {
+    if (!quizConfig) return false;
+    const curTitle = (quizConfig.title || '').trim().toLowerCase();
+    const curId = (quizConfig.quizId || '').trim().toLowerCase();
+    const itemTitle = (item.title || '').trim().toLowerCase();
+    const itemId = (item.id || '').trim().toLowerCase();
+    const itemFilename = (item.filename || '').trim().toLowerCase();
+
+    if (curId && itemId && (curId === itemId || curId.includes(itemId) || itemId.includes(curId))) return true;
+    if (curTitle && itemTitle) {
+      if (curTitle === itemTitle) return true;
+      const cleanCurTitle = curTitle.replace(/\s*\([^)]*\)/g, '').trim();
+      const cleanItemTitle = itemTitle.replace(/\s*\([^)]*\)/g, '').trim();
+      if (cleanCurTitle && cleanItemTitle && (cleanCurTitle === cleanItemTitle || cleanCurTitle.includes(cleanItemTitle) || cleanItemTitle.includes(cleanCurTitle))) {
+        return true;
+      }
+    }
+    if (itemFilename && curId && (itemFilename.includes(curId) || curId.includes(itemFilename.replace('.json', '')))) return true;
+    return false;
+  };
+
   const filteredSavedQuizzes = useMemo(() => {
     return savedQuizzes.filter(q => {
       if (!q || typeof q.title !== 'string') return false;
@@ -228,99 +256,63 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                       <div className="space-y-2.5">
                         <div className="flex items-center justify-between px-1">
                           <div className="flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-indigo-600" />
-                            <h3 className="font-black text-xs uppercase tracking-widest text-slate-500">
-                              {t(lang, 'recentQuizSection')}
+                            <Sparkles className="w-4 h-4 text-emerald-600" />
+                            <h3 className="font-black text-xs uppercase tracking-widest text-slate-700">
+                              {t(lang, 'currentQuizInMemoryHeading') || 'Aktivt quiz i minnet'}
                             </h3>
                           </div>
-                          {latestSavedQuiz && (
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">
-                              {t(lang, 'latestSavedBadge')}
-                            </span>
-                          )}
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-black px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                            {t(lang, 'activeInMemoryBadge') || 'Aktivt i minnet'}
+                          </span>
                         </div>
 
-                        {latestSavedQuiz ? (
-                          <div className="p-4 rounded-3xl bg-white border-2 border-indigo-200/90 shadow-sm space-y-3">
-                            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h4 className="font-black text-slate-800 text-base leading-snug">{latestSavedQuiz.title || 'Okänd'}</h4>
-                                  {quizConfig?.title?.trim() === (latestSavedQuiz.title || '').trim() && (
-                                    <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full">
-                                      {t(lang, 'currentlyLoadedBadge')}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-[11px] text-slate-400 font-medium mt-1">
-                                  {new Date(latestSavedQuiz.updatedAt).toLocaleDateString()} {new Date(latestSavedQuiz.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-                                <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2.5 py-1 rounded-full">
-                                  🧒 {latestSavedQuiz.barnCount}
-                                </span>
-                                <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2.5 py-1 rounded-full">
-                                  🧔 {latestSavedQuiz.vuxenCount}
-                                </span>
-                                {latestSavedQuiz.hasLocations && (
-                                  <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2.5 py-1 rounded-full flex items-center gap-0.5">
-                                    <MapPin className="w-3 h-3 inline" /> GPS
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="flex flex-wrap items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
-                              <button
-                                onClick={handleSaveCurrentQuizToDB}
-                                disabled={isSavingToDb}
-                                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-                              >
-                                <Save className="w-3.5 h-3.5 text-indigo-200" />
-                                <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
-                              </button>
-
-                              <button
-                                onClick={() => handleLoadQuizFromDB(latestSavedQuiz)}
-                                className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all active:scale-95"
-                              >
-                                <FolderOpen className="w-3.5 h-3.5" />
-                                <span>{t(lang, 'loadQuizBtn')}</span>
-                              </button>
-
-                              <button
-                                onClick={() => handleOverwriteQuizInDB(latestSavedQuiz.id)}
-                                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                <span>{t(lang, 'overwriteQuizBtn')}</span>
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="p-4 rounded-3xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-black text-slate-800 text-sm">{quizConfig.title || 'Nuvarande quiz'}</h4>
-                                <span className="text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                                  {t(lang, 'currentlyLoadedBadge')}
+                        {/* AKTIVT QUIZ KORT */}
+                        <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-emerald-50/70 via-white to-indigo-50/40 border-2 border-emerald-500/80 shadow-sm space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="font-black text-slate-900 text-base sm:text-lg leading-snug">
+                                  {quizConfig?.title || 'Namnlöst quiz'}
+                                </h4>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
+                                  <Check className="w-3 h-3" />
+                                  {t(lang, 'activeInMemoryBadge') || 'Aktivt i minnet'}
                                 </span>
                               </div>
-                              <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                                🧒 {quizConfig.barnQuestions?.length || 0} barnfrågor • 🧔 {quizConfig.vuxenQuestions?.length || 0} vuxenfrågor
+                              <p className="text-xs text-slate-500 font-medium mt-1">
+                                {t(lang, 'currentQuizInMemoryDesc') || 'Detta quiz är för närvarande laddat i arbetsminnet.'}
                               </p>
                             </div>
+                            <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                              <span className="text-[10px] font-black bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-full">
+                                🧒 {quizConfig?.barnQuestions?.length || 0} barn
+                              </span>
+                              <span className="text-[10px] font-black bg-pink-50 text-pink-800 border border-pink-200 px-2.5 py-1 rounded-full">
+                                🧔 {quizConfig?.vuxenQuestions?.length || 0} vuxna
+                              </span>
+                              <span className="text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-full">
+                                📋 {currentTotalQuestions} totalt
+                              </span>
+                              {currentGpsCount > 0 && (
+                                <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-full flex items-center gap-0.5">
+                                  <MapPin className="w-3 h-3 inline" /> {currentGpsCount} GPS
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-end gap-2 pt-2.5 border-t border-slate-200/60">
                             <button
                               onClick={handleSaveCurrentQuizToDB}
                               disabled={isSavingToDb}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all shadow-md active:scale-95"
+                              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
                             >
-                              <Save className="w-4 h-4 text-indigo-200" />
-                              <span>{t(lang, 'saveCurrentQuizShortBtn')}</span>
+                              <Save className="w-3.5 h-3.5 text-indigo-200" />
+                              <span>{t(lang, 'saveCurrentToDbBtn')}</span>
                             </button>
                           </div>
-                        )}
+                        </div>
 
                         {/* TOGGLE: DÖLJ / VISA ALLA SPARADE QUIZ KNAPP */}
                         {savedQuizzes.length > 0 && (
@@ -408,60 +400,81 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                           </div>
 
                           <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
-                            {sortedSavedQuizzes.map((item) => (
-                              <div 
-                                key={item.id}
-                                className="p-4 rounded-2xl bg-white border border-slate-200/80 shadow-sm hover:border-indigo-200 transition-all space-y-3"
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <h4 className="font-black text-slate-800 text-base leading-snug">{item.title || 'Okänd'}</h4>
-                                    <p className="text-[11px] text-slate-400 font-medium mt-0.5">
-                                      {item.updatedAt ? `${new Date(item.updatedAt).toLocaleDateString()} ${new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2 py-0.5 rounded-full">
-                                      🧒 {item.barnCount}
-                                    </span>
-                                    <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2 py-0.5 rounded-full">
-                                      🧔 {item.vuxenCount}
-                                    </span>
-                                    {item.hasLocations && (
-                                      <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                                        <MapPin className="w-3 h-3 inline" /> GPS
+                            {sortedSavedQuizzes.map((item) => {
+                              const isCurrent = isCurrentQuiz(item);
+                              return (
+                                <div 
+                                  key={item.id}
+                                  className={`p-4 rounded-2xl transition-all space-y-3 ${
+                                    isCurrent 
+                                      ? 'bg-emerald-50/40 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20' 
+                                      : 'bg-white border border-slate-200/80 shadow-sm hover:border-indigo-200'
+                                  }`}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <h4 className={`font-black text-base leading-snug ${isCurrent ? 'text-slate-900 font-black' : 'text-slate-800'}`}>
+                                          {item.title || 'Okänd'}
+                                        </h4>
+                                        {isCurrent && (
+                                          <span className="inline-flex items-center gap-1 bg-emerald-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-2xs uppercase tracking-wider">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                            {t(lang, 'activeInMemoryBadge') || 'Aktivt i minnet'}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                                        {item.updatedAt ? `${new Date(item.updatedAt).toLocaleDateString()} ${new Date(item.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span className="text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200/60 px-2 py-0.5 rounded-full">
+                                        🧒 {item.barnCount}
                                       </span>
-                                    )}
+                                      <span className="text-[10px] font-black bg-pink-50 text-pink-700 border border-pink-200/60 px-2 py-0.5 rounded-full">
+                                        🧔 {item.vuxenCount}
+                                      </span>
+                                      {item.hasLocations && (
+                                        <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200/60 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                                          <MapPin className="w-3 h-3 inline" /> GPS
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                                    <button
+                                      onClick={() => handleLoadQuizFromDB(item)}
+                                      className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer ${
+                                        isCurrent
+                                          ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700'
+                                      }`}
+                                    >
+                                      {isCurrent ? <Check className="w-3.5 h-3.5 text-white" /> : <FolderOpen className="w-3.5 h-3.5" />}
+                                      <span>{isCurrent ? (t(lang, 'reloadedQuizBtn') || 'Ladda om') : t(lang, 'loadQuizBtn')}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleOverwriteQuizInDB(item.id)}
+                                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                    >
+                                      <Save className="w-3.5 h-3.5" />
+                                      <span>{t(lang, 'overwriteQuizBtn')}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleDeleteQuizFromDB(item.id)}
+                                      className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all active:scale-95 cursor-pointer"
+                                      title={t(lang, 'deleteQuizBtn')}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
                                   </div>
                                 </div>
-
-                                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                                  <button
-                                    onClick={() => handleLoadQuizFromDB(item)}
-                                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl font-black text-xs flex items-center gap-1 transition-all active:scale-95"
-                                  >
-                                    <FolderOpen className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'loadQuizBtn')}</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => handleOverwriteQuizInDB(item.id)}
-                                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95"
-                                  >
-                                    <Save className="w-3.5 h-3.5" />
-                                    <span>{t(lang, 'overwriteQuizBtn')}</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => handleDeleteQuizFromDB(item.id)}
-                                    className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all active:scale-95"
-                                    title={t(lang, 'deleteQuizBtn')}
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -537,11 +550,29 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[45vh] overflow-y-auto pr-1 custom-scrollbar">
                             {sortedLibraryQuizzes.map(item => {
                               const totalQuestions = (item.barnCount || 0) + (item.vuxenCount || 0);
+                              const isCurrent = isCurrentQuiz(item);
                               return (
-                                <div key={item.id} className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-indigo-300 transition-all space-y-3 flex flex-col group">
+                                <div 
+                                  key={item.id} 
+                                  className={`p-4 rounded-2xl transition-all space-y-3 flex flex-col group ${
+                                    isCurrent
+                                      ? 'bg-emerald-50/40 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
+                                      : 'bg-white border border-slate-200 shadow-sm hover:border-indigo-300'
+                                  }`}
+                                >
                                   <div className="flex-1 space-y-1.5">
                                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                                      <h4 className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{item.title || 'Okänd'}</h4>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <h4 className={`font-black text-sm transition-colors ${isCurrent ? 'text-slate-900 font-black' : 'text-slate-800 group-hover:text-indigo-600'}`}>
+                                          {item.title || 'Okänd'}
+                                        </h4>
+                                        {isCurrent && (
+                                          <span className="inline-flex items-center gap-1 bg-emerald-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full shadow-2xs uppercase tracking-wider">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                                            {t(lang, 'activeInMemoryBadge') || 'Aktivt i minnet'}
+                                          </span>
+                                        )}
+                                      </div>
                                       {item.language && (
                                         <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 font-bold text-[10px] px-2 py-0.5 rounded-md border border-indigo-100 uppercase">
                                           {item.language === 'sv' ? '🇸🇪 SV' : item.language === 'en' ? '🇬🇧 EN' : item.language.toUpperCase()}
@@ -565,10 +596,14 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                                   <div className="flex items-center gap-2 pt-1">
                                     <button 
                                       onClick={() => handleLoadPresetQuiz(item)}
-                                      className="flex-1 py-2.5 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                                      className={`flex-1 py-2.5 rounded-xl font-black text-[10px] uppercase transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer ${
+                                        isCurrent
+                                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                                          : 'bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700'
+                                      }`}
                                     >
-                                      <Download className="w-3.5 h-3.5" />
-                                      <span>{t(lang, 'loadQuizBtn')}</span>
+                                      {isCurrent ? <Check className="w-3.5 h-3.5 text-white" /> : <Download className="w-3.5 h-3.5" />}
+                                      <span>{isCurrent ? (t(lang, 'reloadedQuizBtn') || 'Ladda om') : t(lang, 'loadQuizBtn')}</span>
                                     </button>
                                     <button
                                       type="button"

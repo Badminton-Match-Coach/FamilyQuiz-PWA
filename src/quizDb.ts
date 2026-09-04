@@ -5,6 +5,7 @@
 
 import { AnswerRecord, Participant, QuizConfig } from './types';
 import { assertValidQuizConfig } from './utils/quizValidation';
+import { cacheAllQuizImages } from './utils/offlineImageCache';
 
 export interface QuizSessionState {
   participants: Participant[];
@@ -193,6 +194,9 @@ export async function saveQuizToIndexedDB(
   } catch (err) {
     console.warn('IndexedDB write failed, persisted to localStorage fallback instead:', err);
   }
+
+  // Ensure all images are cached in IndexedDB for offline reliability
+  cacheAllQuizImages(record.quizConfig).catch(() => {});
 
   return record;
 }

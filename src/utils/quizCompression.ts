@@ -32,6 +32,8 @@ interface MinifiedQuestion {
   i?: string;
   y?: 'options' | 'text' | 'points';
   q: string;
+  j?: string; // imageUrl (URL link)
+  p?: string[]; // optionImages (URL links)
   o?: string[];
   c?: number[];
   l?: [number, number];
@@ -84,6 +86,17 @@ function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
   }
   if (q.originalLanguage && q.originalLanguage !== 'sv') min.g = q.originalLanguage;
 
+  // Include image URL links only (omit giant base64 data URLs to keep share codes and QR codes tiny)
+  if (q.imageUrl && (!q.imageUrl.startsWith('data:') || q.imageUrl.length < 150)) {
+    min.j = q.imageUrl;
+  }
+  if (q.optionImages && q.optionImages.length > 0) {
+    const sanitized = q.optionImages.map(img => (!img || (img.startsWith('data:') && img.length >= 150)) ? '' : img);
+    if (sanitized.some(Boolean)) {
+      min.p = sanitized;
+    }
+  }
+
   if (!compactForQr && q.translations && Object.keys(q.translations).length > 0) {
     const minTrans: Record<string, { q: string; o?: string[] }> = {};
     for (const [langKey, trans] of Object.entries(q.translations)) {
@@ -127,6 +140,8 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
     correctTextAnswer: min.a,
     acceptedTextAnswers: min.k,
     originalLanguage: (min.g as any) || 'sv',
+    imageUrl: min.j || undefined,
+    optionImages: min.p && min.p.length > 0 ? min.p : undefined,
     translations
   };
 }

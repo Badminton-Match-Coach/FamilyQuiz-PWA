@@ -7,6 +7,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import { Language, t } from '../../i18n';
+import { OfflineImage } from '../Common/OfflineImage';
 
 export interface ImageZoomModalProps {
   imageUrl: string | null;
@@ -31,15 +32,14 @@ export const ImageZoomModal: React.FC<ImageZoomModalProps> = ({ imageUrl, onClos
           >
             <button
               onClick={onClose}
-              className="absolute -top-12 right-0 p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors backdrop-blur-sm shadow-lg"
+              className="absolute -top-12 right-0 p-2.5 bg-white/20 hover:bg-white/30 text-white rounded-full transition-colors backdrop-blur-sm shadow-lg cursor-pointer"
               title={t(lang as Language, 'closeImageTitle')}
             >
               <X className="w-6 h-6" />
             </button>
-            <img
+            <OfflineImage
               src={imageUrl}
               alt={t(lang as Language, 'imageZoomedAlt')}
-              referrerPolicy="no-referrer"
               className="max-h-[85vh] max-w-full rounded-2xl shadow-2xl object-contain border border-white/20"
             />
           </motion.div>

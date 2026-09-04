@@ -17,6 +17,7 @@ import {
 import { Language, SUPPORTED_LANGUAGES, t } from '../../i18n';
 import { QuizConfig } from '../../types';
 import { defaultQuiz } from '../../data/defaultQuiz';
+import { OfflineImage } from '../Common/OfflineImage';
 
 export interface HeaderProps {
   lang: Language;
@@ -71,17 +72,16 @@ export const Header = React.memo<HeaderProps>(({
               onClick={handleQuizIconClick}
               className={
                 quizConfig.logoUrl
-                  ? "h-11 sm:h-12 w-auto max-w-[9.5rem] rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default px-1"
-                  : "w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg transform -rotate-2 shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
+                  ? "h-11 sm:h-12 w-auto max-w-[9.5rem] rounded-2xl shadow-lg shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default px-1"
+                  : "w-11 h-11 sm:w-12 sm:h-12 rounded-2xl shadow-lg shrink-0 border border-white/20 overflow-hidden bg-gradient-to-br from-indigo-600 to-indigo-800 flex items-center justify-center cursor-default"
               }
               aria-label="Quiz"
             >
               {quizConfig.logoUrl ? (
                 <>
-                  <img
+                  <OfflineImage
                     src={quizConfig.logoUrl}
                     alt={`${quizConfig.title} logo`}
-                    referrerPolicy="no-referrer"
                     className="h-full w-auto max-w-full object-contain"
                     onError={(e) => {
                       const target = e.currentTarget as HTMLImageElement;

@@ -33,6 +33,8 @@ import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from '../../uti
 import { findLocationCoordinatesWithGemini } from '../../geminiClient';
 import { compressImageFile, getOptionLabel } from '../../utils/imageAndLabelUtils';
 import { registerQuestionTranslation } from '../../translationCache';
+import { OfflineImage } from '../Common/OfflineImage';
+import { cacheImageInIndexedDB } from '../../utils/offlineImageCache';
 
 export interface QuestionFullScreenEditorProps {
   questionId: string | null;
@@ -487,7 +489,13 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                   disabled={!isAdmin}
                                   value={rawQ.imageUrl || ''}
                                   placeholder={t(lang, 'imageUrlPlaceholder')}
-                                  onChange={(e) => updateQuestion(editingQuestionsCategory, q.id, { imageUrl: e.target.value.trim() || undefined })}
+                                  onChange={(e) => {
+                                    const val = e.target.value.trim() || undefined;
+                                    updateQuestion(editingQuestionsCategory, q.id, { imageUrl: val });
+                                    if (val && val.startsWith('http')) {
+                                      cacheImageInIndexedDB(val);
+                                    }
+                                  }}
                                   className="flex-1 p-3 bg-white border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-semibold text-slate-800 outline-none shadow-2xs"
                                 />
                                 {isAdmin && (
@@ -521,11 +529,10 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                     onClick={() => setZoomedImageUrl(rawQ.imageUrl || null)}
                                     title={t(lang, 'previewImage')}
                                   >
-                                    <img 
+                                    <OfflineImage 
                                       src={rawQ.imageUrl} 
                                       alt="Preview" 
                                       className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
-                                      referrerPolicy="no-referrer"
                                     />
                                     <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
                                       <Maximize2 className="w-4 h-4" />
@@ -955,11 +962,10 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                                 onClick={() => setZoomedImageUrl(rawQ.optionImages?.[oIdx] || null)}
                                                 title={t(lang, 'previewImage')}
                                               >
-                                                <img 
+                                                <OfflineImage 
                                                   src={rawQ.optionImages[oIdx]} 
                                                   alt={`Option ${oIdx + 1}`} 
                                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
-                                                  referrerPolicy="no-referrer"
                                                 />
                                                 <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
                                                   <Maximize2 className="w-3 h-3" />

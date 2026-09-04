@@ -37,6 +37,7 @@ import {
 } from '../MapComponent';
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
+import { OfflineImage } from '../Common/OfflineImage';
 
 import { AnswerRecord } from '../../types';
 
@@ -497,11 +498,10 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   onClick={() => setZoomedImageUrl(stationQ.imageUrl || null)}
                                   title={t(lang, 'previewImage')}
                                 >
-                                  <img
+                                  <OfflineImage
                                     src={stationQ.imageUrl}
                                     alt={stationQ.text}
                                     className="max-h-48 sm:max-h-60 w-full object-contain group-hover:scale-[1.01] transition-transform"
-                                    referrerPolicy="no-referrer"
                                   />
                                   <div className="absolute bottom-2 right-2 bg-black/65 hover:bg-black/85 text-white text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1.5 backdrop-blur-xs transition-colors">
                                     <Maximize2 className="w-3.5 h-3.5" />
@@ -807,11 +807,10 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                     onClick={() => setZoomedImageUrl(activeQ.imageUrl || null)}
                                     title={t(lang, 'previewImage')}
                                   >
-                                    <img
+                                    <OfflineImage
                                       src={activeQ.imageUrl}
                                       alt={activeQ.text}
                                       className="max-h-72 sm:max-h-96 w-full object-contain group-hover:scale-[1.01] transition-transform"
-                                      referrerPolicy="no-referrer"
                                     />
                                     <div className="absolute bottom-2 right-2 bg-black/65 hover:bg-black/85 text-white text-xs font-bold px-2.5 py-1 rounded-xl flex items-center gap-1.5 backdrop-blur-xs transition-colors">
                                       <Maximize2 className="w-3.5 h-3.5" />
@@ -1137,11 +1136,10 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                             }}
                                             title={t(lang, 'previewImage')}
                                           >
-                                            <img 
+                                            <OfflineImage 
                                               src={optImg} 
                                               alt={`Alternativ ${idx + 1}`} 
                                               className="w-full h-full object-cover group-hover:scale-105 transition-transform" 
-                                              referrerPolicy="no-referrer"
                                             />
                                             <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
                                               <Maximize2 className="w-3.5 h-3.5" />

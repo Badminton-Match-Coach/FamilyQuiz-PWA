@@ -74,6 +74,7 @@ import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/s
 import { compressQuizToUrlCode, generateQuizDirectUrl, decompressQuizFromUrlCode } from './utils/quizCompression';
 import { validateQuizConfig } from './utils/quizValidation';
 import { cacheLogoAsDataUrl } from './utils/logoCache';
+import { cacheAllQuizImages, preloadQuizImagesToMemory } from './utils/offlineImageCache';
 import { 
   SavedQuizRecord, 
   saveQuizToIndexedDB, 
@@ -625,6 +626,14 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
   useEffect(() => {
     refreshSavedQuizzes();
   }, []);
+
+  // Automatically cache all quiz images (questions, options, logo) in IndexedDB for offline resilience
+  useEffect(() => {
+    if (quizConfig) {
+      cacheAllQuizImages(quizConfig).catch(() => {});
+      preloadQuizImagesToMemory(quizConfig).catch(() => {});
+    }
+  }, [quizConfig]);
 
   useEffect(() => {
     if (configTab === 'db' || configTab === 'library' || showConfigInput || showAnswerImportModal) {

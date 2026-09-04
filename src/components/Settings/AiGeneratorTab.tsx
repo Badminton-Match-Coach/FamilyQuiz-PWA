@@ -74,8 +74,6 @@ export const AiGeneratorTab: React.FC<AiGeneratorTabProps> = ({
   const [promptLanguages, setPromptLanguages] = useState<Language[]>(['sv']);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedCustomPrompt, setCopiedCustomPrompt] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [userApiKeyInput, setUserApiKeyInput] = useState('');
 
   const togglePromptLanguage = (code: Language) => {
     setPromptLanguages(prev =>

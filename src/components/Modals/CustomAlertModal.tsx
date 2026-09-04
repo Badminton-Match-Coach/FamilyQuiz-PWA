@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
 import { Language } from '../../i18n';
@@ -25,6 +25,17 @@ export const CustomAlertModal: React.FC<CustomAlertModalProps> = ({
   onClose,
   lang = 'sv',
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
@@ -42,8 +53,9 @@ export const CustomAlertModal: React.FC<CustomAlertModalProps> = ({
         >
           <div className="flex justify-end -mb-3 -mt-2">
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -77,8 +89,9 @@ export const CustomAlertModal: React.FC<CustomAlertModalProps> = ({
 
           <div className="pt-2">
             <button
+              type="button"
               onClick={onClose}
-              className="w-full py-3.5 px-6 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-sm uppercase tracking-wider rounded-2xl shadow-lg transition-all"
+              className="w-full py-3.5 px-6 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-black text-sm uppercase tracking-wider rounded-2xl shadow-lg transition-all cursor-pointer"
             >
               OK
             </button>

@@ -162,19 +162,46 @@ export default function App() {
   const [libraryFilterLanguage, setLibraryFilterLanguage] = useState('all');
   const [librarySortBy, setLibrarySortBy] = useState<'name-asc' | 'date-desc' | 'count-desc'>('name-asc');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [userApiKeyInput, setUserApiKeyInput] = useState<string>(() => getStoredApiKey());
   const [directLinkLockOrderMode, setDirectLinkLockOrderMode] = useState<boolean>(false);
 
+  const handleOpenApiKeyModal = () => {
+    setUserApiKeyInput(getStoredApiKey());
+    setShowApiKeyInput(true);
+  };
 
+  const handleCloseApiKeyModal = () => {
+    setShowApiKeyInput(false);
+    setUserApiKeyInput(getStoredApiKey());
+  };
 
   const handleSaveCustomApiKey = () => {
     try {
-      localStorage.setItem('gemini_api_key', userApiKeyInput.trim());
-      alert(t(lang, 'apiKeySavedSuccess') || 'API-nyckel sparad!');
+      const trimmed = userApiKeyInput.trim();
+      setStoredApiKey(trimmed);
+      setUserApiKeyInput(trimmed);
       setShowApiKeyInput(false);
+      setCustomAlert({
+        isOpen: true,
+        title: lang === 'sv' ? 'Sparat!' : 'Saved!',
+        message: t(lang, 'apiKeySavedSuccess') || 'API-nyckel har sparats säkert i din webbläsare!',
+        type: 'success',
+      });
     } catch {
       // ignore
     }
   };
+
+  useEffect(() => {
+    if (!showApiKeyInput) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCloseApiKeyModal();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showApiKeyInput]);
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -904,7 +931,6 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showSettingsHelp, setShowSettingsHelp] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [userApiKeyInput, setUserApiKeyInput] = useState<string>(() => getStoredApiKey());
   const [copiedCustomPrompt, setCopiedCustomPrompt] = useState(false);
   const [pastedJsonInput, setPastedJsonInput] = useState('');
   const [hasCustomizedPromptLangs, setHasCustomizedPromptLangs] = useState(false);
@@ -3857,7 +3883,7 @@ ${exampleJson}`;
               setPastedJsonInput={setPastedJsonInput}
               handleImportPastedJson={handleImportPastedJson}
               showApiKeyInput={showApiKeyInput}
-              setShowApiKeyInput={setShowApiKeyInput}
+              setShowApiKeyInput={handleOpenApiKeyModal}
               customApiKey={userApiKeyInput}
               setCustomApiKey={setUserApiKeyInput}
               handleSaveCustomApiKey={handleSaveCustomApiKey}
@@ -4134,19 +4160,20 @@ ${exampleJson}`;
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                onClick={() => setShowApiKeyInput(false)}
-                className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm"
+                onClick={handleCloseApiKeyModal}
+                className="absolute inset-0 bg-slate-900/75 backdrop-blur-sm cursor-pointer"
               />
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 16 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 16 }}
-                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100"
+                onClick={(e) => e.stopPropagation()}
+                className="relative w-full max-w-md overflow-hidden rounded-[2rem] bg-white shadow-2xl border border-slate-100 z-10"
               >
                 <div className="bg-indigo-600 p-6 text-white relative">
                   <button
                     type="button"
-                    onClick={() => setShowApiKeyInput(false)}
+                    onClick={handleCloseApiKeyModal}
                     className="absolute right-5 top-5 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30 cursor-pointer"
                   >
                     <X className="h-4 w-4" />
@@ -4207,7 +4234,7 @@ ${exampleJson}`;
                   <div className="flex gap-2.5 pt-2">
                     <button
                       type="button"
-                      onClick={() => setShowApiKeyInput(false)}
+                      onClick={handleCloseApiKeyModal}
                       className="flex-1 rounded-xl bg-slate-100 hover:bg-slate-200 py-3 text-xs font-black uppercase text-slate-600 transition-all active:scale-95 cursor-pointer"
                     >
                       {t(lang, 'cancelBtn') || 'Avbryt'}

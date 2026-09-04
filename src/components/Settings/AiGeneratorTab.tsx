@@ -194,7 +194,7 @@ Svara med giltig JSON i följande format:
             onClick={() => setShowApiKeyInput(true)}
             className="self-start sm:self-auto px-3.5 py-2 bg-white/90 hover:bg-white text-indigo-900 border border-indigo-200 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer"
           >
-            <Settings className="w-3.5 h-3.5 text-indigo-600" />
+            <Key className="w-3.5 h-3.5 text-indigo-600" />
             <span>{t(lang, 'aiSettingsSectionTitle')}</span>
           </button>
         </div>

@@ -41,7 +41,8 @@ import {
   ArrowUpDown,
   GripVertical,
   Image as ImageIcon,
-  Key
+  Key,
+  ExternalLink
 } from 'lucide-react';
 import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
 import { Header } from './components/Navigation/Header';
@@ -4168,10 +4169,21 @@ ${exampleJson}`;
                 </div>
 
                 <div className="p-6 space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                      API-nyckel (Gemini)
-                    </label>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                        API-nyckel (Gemini)
+                      </label>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                      >
+                        <span>{t(lang, 'getMyApiKeysLink') || 'Mina API-nycklar'}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
                     <input
                       type="password"
                       placeholder="AIzaSy..."
@@ -4179,9 +4191,23 @@ ${exampleJson}`;
                       onChange={(e) => setUserApiKeyInput(e.target.value)}
                       className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
-                    <p className="text-[11px] text-slate-400 font-medium">
-                      Nyckeln sparas säkert enbart i din webbläsare (localStorage).
-                    </p>
+                    <div className="space-y-2 pt-1">
+                      <p className="text-[11px] text-slate-400 font-medium">
+                        Nyckeln sparas säkert enbart i din webbläsare (localStorage).
+                      </p>
+                      <a
+                        href="https://aistudio.google.com/app/apikey"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 p-3 rounded-xl bg-indigo-50/70 hover:bg-indigo-100/70 text-indigo-900 border border-indigo-100 transition-colors group"
+                      >
+                        <Key className="w-4 h-4 text-indigo-600 shrink-0 group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-semibold flex-1">
+                          {t(lang, 'getApiKeyHelpText') || 'Hämta eller skapa din API-nyckel gratis hos Google AI Studio'}
+                        </span>
+                        <ExternalLink className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-600 shrink-0" />
+                      </a>
+                    </div>
                   </div>
 
                   <div className="flex gap-2.5 pt-2">

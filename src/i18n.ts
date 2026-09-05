@@ -158,6 +158,25 @@ export function getDefaultQuestionTranslations(): Record<string, Record<Language
 }
 
 const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = {
+  defaultParticipantName: {
+    sv: 'Jag',
+    en: 'Me',
+    nl: 'Ik',
+    be: 'Ik',
+    no: 'Jeg',
+    da: 'Jeg',
+    fi: 'Minä',
+    is: 'Ég',
+    se: 'Mon',
+    et: 'Mina',
+    lv: 'Es',
+    lt: 'Aš',
+    uk: 'Я',
+    de: 'Ich',
+    fr: 'Moi',
+    it: 'Io',
+    es: 'Yo'
+  },
   selectAllBtn: {
     sv: 'Markera alla',
     en: 'Select all',

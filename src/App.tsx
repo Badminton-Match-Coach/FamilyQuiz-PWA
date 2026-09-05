@@ -137,16 +137,25 @@ const ensureQuizId = (config: QuizConfig): QuizConfig => {
   return { ...config, quizId: crypto.randomUUID() };
 };
 
+const normalizeParticipantNameForCompare = (name: string) =>
+  (name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[^a-z0-9]/g, '');
+
+const reservedParticipantNames = new Set([
+  'me', 'jag', 'jej', 'mig', 'you', 'du', 'i', 'ich', 'moi', 'yo', 'je', 'mi', 'io', 'mina',
+  'ik', 'jeg', 'eg', 'mon', 'es', 'as', 'я', 'ya'
+]);
+
+const isReservedParticipantName = (name: string) =>
+  reservedParticipantNames.has(normalizeParticipantNameForCompare(name));
+
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
-  const handleLanguageChange = (newLang: Language) => {
-    setLang(newLang);
-    try {
-      localStorage.setItem('family_quiz_lang', newLang);
-    } catch {
-      // ignore
-    }
-  };
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [languageMenuPosition, setLanguageMenuPosition] = useState({ top: 0, left: 0 });
   const languageMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -304,18 +313,8 @@ export default function App() {
     setDeferredInstallPrompt(null);
   };
 
-  const changeLanguage = (newLang: Language) => {
-    unpackLanguage(newLang);
-    setLang(newLang);
-    localStorage.setItem('quiz_app_lang', newLang);
-    
-    // Update default participant name if language changes
-    setParticipants(prev => prev.map(p => 
-      p.id === 'default-du' ? { ...p, name: t(newLang, 'you') } : p
-    ));
-  };
-
   const [participants, setParticipants] = useState<Participant[]>(() => {
+    const currentLang = detectLanguage();
     const saved = localStorage.getItem(STORAGE_KEY_PARTICIPANTS);
     if (saved) {
       try {
@@ -324,8 +323,8 @@ export default function App() {
           // Migration: ensure all participants have uniqueId
           const migrated = parsed.map((p: any) => {
             // Preserve default participant's reserved uniqueId
-            if (p.id === 'default-du') {
-              return { ...p, uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID };
+            if (p.id === 'default-du' || p.uniqueId === DEFAULT_PARTICIPANT_UNIQUE_ID || (p.name && isReservedParticipantName(p.name))) {
+              return { ...p, uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(currentLang, 'defaultParticipantName') };
             }
             return { ...p, uniqueId: p.uniqueId || crypto.randomUUID() };
           });
@@ -335,8 +334,29 @@ export default function App() {
         console.error(e);
       }
     }
-    return [{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(detectLanguage(), 'you'), type: 'vuxen' }];
+    return [{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(currentLang, 'defaultParticipantName'), type: 'vuxen' }];
   });
+
+  const handleLanguageChange = (newLang: Language) => {
+    unpackLanguage(newLang);
+    setLang(newLang);
+    try {
+      localStorage.setItem('family_quiz_lang', newLang);
+      localStorage.setItem('quiz_app_lang', newLang);
+    } catch {
+      // ignore
+    }
+
+    // Update default / un-edited participant names to match the new language
+    setParticipants(prev => prev.map(p => {
+      if (p.id === 'default-du' || p.uniqueId === DEFAULT_PARTICIPANT_UNIQUE_ID || isReservedParticipantName(p.name)) {
+        if (!p.name || !p.name.trim() || isReservedParticipantName(p.name)) {
+          return { ...p, name: t(newLang, 'defaultParticipantName') };
+        }
+      }
+      return p;
+    }));
+  };
 
   const [answers, setAnswers] = useState<AnswerRecord[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_ANSWERS);
@@ -1235,7 +1255,7 @@ ${exampleJson}`;
   // Persist data to "cache" (localStorage) with debounce
   useEffect(() => {
     if (participants.length === 0) {
-      setParticipants([{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(lang, 'you'), type: 'vuxen' }]);
+      setParticipants([{ id: 'default-du', uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(lang, 'defaultParticipantName'), type: 'vuxen' }]);
     } else {
       const timer = setTimeout(() => {
         try {
@@ -3365,22 +3385,6 @@ ${exampleJson}`;
     }
   };
 
-  const normalizeParticipantNameForCompare = (name: string) =>
-    (name || '')
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/[^a-z0-9]/g, '');
-
-  const reservedParticipantNames = new Set([
-    'me', 'jag', 'jej', 'mig', 'you', 'du', 'i', 'ich', 'moi', 'yo', 'je', 'mi', 'io', 'mina'
-  ]);
-
-  const isReservedParticipantName = (name: string) =>
-    reservedParticipantNames.has(normalizeParticipantNameForCompare(name));
-
   const findReservedParticipantName = (currentParticipants: Participant[]) => {
     for (const p of currentParticipants) {
       if (!p.name || !p.name.trim() || isReservedParticipantName(p.name)) {
@@ -3394,7 +3398,7 @@ ${exampleJson}`;
   const buildParticipantAnswerPayload = () => {
     const reservedParticipant = findReservedParticipantName(participants);
     if (reservedParticipant) {
-      alert(t(lang, 'reservedParticipantNameShareError', { name: reservedParticipant.name || t(lang, 'you') }));
+      alert(t(lang, 'reservedParticipantNameShareError', { name: reservedParticipant.name || t(lang, 'defaultParticipantName') }));
       return null;
     }
 

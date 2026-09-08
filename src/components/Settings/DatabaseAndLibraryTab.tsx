@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { Language, t } from '../../i18n';
 import { QuizConfig } from '../../types';
-import { SavedQuizRecord } from '../../quizDb';
+import { SavedQuizRecord, downloadSingleQuizAsJSON } from '../../quizDb';
 import { QuizMetadata } from '../../types';
 import { getQuizAvailableLanguages, getLibraryItemLanguages } from '../../utils/quizLanguages';
 
@@ -462,6 +462,16 @@ export const DatabaseAndLibraryTab: React.FC<DatabaseAndLibraryTabProps> = ({
                                     >
                                       <Save className="w-3.5 h-3.5" />
                                       <span>{t(lang, 'overwriteQuizBtn')}</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadSingleQuizAsJSON(item)}
+                                      className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl font-bold text-xs flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                      title="Ladda ner som .json (QUIZID)"
+                                    >
+                                      <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>JSON</span>
                                     </button>
 
                                     <button

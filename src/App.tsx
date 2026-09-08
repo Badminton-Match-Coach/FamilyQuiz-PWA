@@ -49,16 +49,18 @@ import { Header } from './components/Navigation/Header';
 import { SetupView } from './components/Tipspromenad/SetupView';
 import { compressImageFile, getOptionLabel } from './utils/imageAndLabelUtils';
 
-const QuizWalkView = React.lazy(() => import('./components/Tipspromenad/QuizWalkView').then(m => ({ default: m.QuizWalkView })));
-const ResultsView = React.lazy(() => import('./components/Tipspromenad/ResultsView').then(m => ({ default: m.ResultsView })));
-const SettingsView = React.lazy(() => import('./components/Settings/SettingsView').then(m => ({ default: m.SettingsView })));
-const QuestionFullScreenEditor = React.lazy(() => import('./components/Settings/QuestionFullScreenEditor').then(m => ({ default: m.QuestionFullScreenEditor })));
-const GlobalImportModal = React.lazy(() => import('./components/Modals/GlobalImportModal').then(m => ({ default: m.GlobalImportModal })));
-const ImageZoomModal = React.lazy(() => import('./components/Modals/ImageZoomModal').then(m => ({ default: m.ImageZoomModal })));
-const HowItWorksModal = React.lazy(() => import('./components/Modals/HowItWorksModal').then(m => ({ default: m.HowItWorksModal })));
-const InAppBreakoutModal = React.lazy(() => import('./components/Modals/InAppBreakoutModal').then(m => ({ default: m.InAppBreakoutModal })));
-const CustomAlertModal = React.lazy(() => import('./components/Modals/CustomAlertModal').then(m => ({ default: m.CustomAlertModal })));
-const UrlHelpModal = React.lazy(() => import('./components/Modals/UrlHelpModal').then(m => ({ default: m.UrlHelpModal })));
+import { QuizWalkView } from './components/Tipspromenad/QuizWalkView';
+import { ResultsView } from './components/Tipspromenad/ResultsView';
+import { SettingsView } from './components/Settings/SettingsView';
+import { QuestionFullScreenEditor } from './components/Settings/QuestionFullScreenEditor';
+import { GlobalImportModal } from './components/Modals/GlobalImportModal';
+import { GlobalAnswerImportModal } from './components/Modals/GlobalAnswerImportModal';
+import { ImageZoomModal } from './components/Modals/ImageZoomModal';
+import { HowItWorksModal } from './components/Modals/HowItWorksModal';
+import { InAppBreakoutModal } from './components/Modals/InAppBreakoutModal';
+import { CustomAlertModal } from './components/Modals/CustomAlertModal';
+import { UrlHelpModal } from './components/Modals/UrlHelpModal';
+import { BackupChoiceModal } from './components/Settings/BackupChoiceModal';
 
 import { defaultQuiz } from './data/defaultQuiz';
 import { 
@@ -85,7 +87,9 @@ import {
   exportIndexedDBToJSON, 
   importIndexedDBFromJSON, 
   shareIndexedDBJSON, 
-  clearAllQuizzesFromIndexedDB 
+  clearAllQuizzesFromIndexedDB,
+  exportIndividualQuizzesToFiles,
+  downloadSingleQuizAsJSON
 } from './quizDb';
 import { 
   getQuestionAvailableLanguages, 
@@ -99,13 +103,25 @@ import {
   parseQuizText 
 } from './utils/quizParsers';
 
+import {
+  ParticipantAnswerPayload,
+  DEFAULT_PARTICIPANT_UNIQUE_ID,
+  normalizeParticipantNameForCompare,
+  isReservedParticipantName,
+  xorDecrypt,
+  encodeParticipantAnswers,
+  parseParticipantAnswerPayload,
+  isQuizMatch,
+  mergeParticipantAnswers,
+  unwrapRedirectUrl
+} from './utils/answerSharing';
+
 const STORAGE_KEY_ANSWERS = 'quiz_pwa_answers';
 const STORAGE_KEY_PARTICIPANTS = 'quiz_pwa_participants';
 const STORAGE_KEY_CONFIG = 'quiz_pwa_config';
 const STORAGE_KEY_WALKED_PATH = 'family_quiz_walked_path';
 const STORAGE_KEY_CACHED_APP_URL = 'family_quiz_cached_app_url';
 const STORAGE_KEY_WALK_ID = 'family_quiz_walk_id';
-const DEFAULT_PARTICIPANT_UNIQUE_ID = 'default-participant-reserved';
 const DEFAULT_QUIZ_ID = 'default-quiz-template';
 const FALLBACK_APP_URL = 'https://badminton-match-coach.github.io/FamilyQuiz-PWA/';
 
@@ -133,26 +149,9 @@ function getInitialCachedAppUrl(): string {
 }
 
 const ensureQuizId = (config: QuizConfig): QuizConfig => {
-  if (config.quizId && config.quizId !== DEFAULT_QUIZ_ID) return config;
+  if (config.quizId) return config;
   return { ...config, quizId: crypto.randomUUID() };
 };
-
-const normalizeParticipantNameForCompare = (name: string) =>
-  (name || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .replace(/[^a-z0-9]/g, '');
-
-const reservedParticipantNames = new Set([
-  'me', 'jag', 'jej', 'mig', 'you', 'du', 'i', 'ich', 'moi', 'yo', 'je', 'mi', 'io', 'mina',
-  'ik', 'jeg', 'eg', 'mon', 'es', 'as', 'я', 'ya'
-]);
-
-const isReservedParticipantName = (name: string) =>
-  reservedParticipantNames.has(normalizeParticipantNameForCompare(name));
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => detectLanguage());
@@ -172,6 +171,7 @@ export default function App() {
   const [libraryFilterLanguage, setLibraryFilterLanguage] = useState('all');
   const [librarySortBy, setLibrarySortBy] = useState<'name-asc' | 'date-desc' | 'count-desc'>('name-asc');
   const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [showBackupChoiceModal, setShowBackupChoiceModal] = useState(false);
   const [userApiKeyInput, setUserApiKeyInput] = useState<string>(() => getStoredApiKey());
   const [directLinkLockOrderMode, setDirectLinkLockOrderMode] = useState<boolean>(false);
 
@@ -323,8 +323,14 @@ export default function App() {
           // Migration: ensure all participants have uniqueId
           const migrated = parsed.map((p: any) => {
             // Preserve default participant's reserved uniqueId
-            if (p.id === 'default-du' || p.uniqueId === DEFAULT_PARTICIPANT_UNIQUE_ID || (p.name && isReservedParticipantName(p.name))) {
-              return { ...p, uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID, name: t(currentLang, 'defaultParticipantName') };
+            if (p.id === 'default-du' || p.uniqueId === DEFAULT_PARTICIPANT_UNIQUE_ID) {
+              const currentName = (p.name || '').trim();
+              const isDefaultName = !currentName || isReservedParticipantName(currentName);
+              return {
+                ...p,
+                uniqueId: DEFAULT_PARTICIPANT_UNIQUE_ID,
+                name: isDefaultName ? t(currentLang, 'defaultParticipantName') : currentName
+              };
             }
             return { ...p, uniqueId: p.uniqueId || crypto.randomUUID() };
           });
@@ -718,6 +724,10 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
   };
 
   const handleShareExportDB = async () => {
+    setShowBackupChoiceModal(true);
+  };
+
+  const handleExportAllInOne = async () => {
     try {
       const res = await shareIndexedDBJSON();
       if (res.shared) {
@@ -732,6 +742,24 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
       }
     } catch (err) {
       alert('Kunde inte exportera säkerhetskopia');
+    }
+  };
+
+  const handleExportIndividualQuizzes = async () => {
+    try {
+      const res = await exportIndividualQuizzesToFiles();
+      if (res.count > 0) {
+        setDbNotification(`Laddade ner ${res.count} quiz som separata .json-filer! 📥`);
+      } else {
+        downloadSingleQuizAsJSON({
+          config: quizConfig,
+          quizState: { participants, answers }
+        });
+        setDbNotification('Aktivt quiz har exporterats som .json-fil! 📥');
+      }
+      setTimeout(() => setDbNotification(null), 4000);
+    } catch (err) {
+      alert('Kunde inte exportera quiz-filerna');
     }
   };
 
@@ -1462,8 +1490,7 @@ ${exampleJson}`;
     if (!participant) return;
 
     const trimmedName = participant.name.trim();
-    // Skip name validation for the default participant (allows international names like "Io", "Mina", etc.)
-    if (trimmedName && participant.uniqueId !== DEFAULT_PARTICIPANT_UNIQUE_ID && isReservedParticipantName(trimmedName)) {
+    if (trimmedName && isReservedParticipantName(trimmedName)) {
       alert(t(lang, 'reservedParticipantNameError', { name: trimmedName }));
       setParticipants(prev => prev.map(p => p.id === id ? { ...p, name: '' } : p));
       return;
@@ -1633,6 +1660,16 @@ ${exampleJson}`;
         .replace(/\s*```$/i, '')
         .trim();
 
+      // Unwrap any redirect services (e.g. Outlook SafeLinks, Proofpoint, Google redirect, etc.)
+      cleanInput = unwrapRedirectUrl(cleanInput);
+      if (cleanInput.includes('%23') || cleanInput.includes('%3D') || cleanInput.includes('%26')) {
+        try {
+          cleanInput = decodeURIComponent(cleanInput);
+        } catch {
+          // ignore
+        }
+      }
+
       // Check if user provided a direct URL to a quiz file or manifest
       if ((cleanInput.startsWith('http://') || cleanInput.startsWith('https://')) && !cleanInput.includes('quiz=') && !cleanInput.includes('z=')) {
         try {
@@ -1689,67 +1726,12 @@ ${exampleJson}`;
         }
       }
 
-      if (cleanInput.toLowerCase().startsWith('qps=')) {
-        const encryptedPayload = cleanInput.slice(4);
-        const decompressed = xorDecrypt(encryptedPayload, '$');
-        const payloadText = LZString.decompressFromEncodedURIComponent(decompressed);
-        if (payloadText) {
-          try {
-            const payload = JSON.parse(payloadText);
-            if (payload && payload.schema === 'family-quiz-participant-answers-v1') {
-              const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
-              const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
-
-              if (incomingParticipants.length === 0 && incomingAnswers.length === 0) {
-                throw new Error('No participant payload data');
-              }
-
-              const nameMap = new Map<string, string>();
-              const nextParticipants = [...participants];
-
-              for (const participant of nextParticipants) {
-                const key = `${normalizeParticipantNameForCompare(participant.name)}|${participant.type}`;
-                if (!nameMap.has(key)) nameMap.set(key, participant.id);
-              }
-
-              for (const incoming of incomingParticipants) {
-                const key = `${normalizeParticipantNameForCompare(incoming.name)}|${incoming.type}`;
-                const existingId = nameMap.get(key);
-                if (existingId) {
-                  const exportedAnswers = incomingAnswers.filter(a => a.participantId === incoming.id);
-                  for (const answer of exportedAnswers) {
-                    const existingAnswerIndex = answers.findIndex(a => a.participantId === existingId && a.questionIndex === answer.questionIndex);
-                    if (existingAnswerIndex === -1) {
-                      setAnswers(prev => [...prev, { ...answer, participantId: existingId }]);
-                    }
-                  }
-                  continue;
-                }
-
-                const newParticipant: Participant = { ...incoming, id: crypto.randomUUID() };
-                nextParticipants.push(newParticipant);
-                nameMap.set(key, newParticipant.id);
-
-                const exportedAnswers = incomingAnswers.filter(a => a.participantId === incoming.id);
-                for (const answer of exportedAnswers) {
-                  const existingAnswerIndex = answers.findIndex(a => a.participantId === newParticipant.id && a.questionIndex === answer.questionIndex);
-                  if (existingAnswerIndex === -1) {
-                    setAnswers(prev => [...prev, { ...answer, participantId: newParticipant.id }]);
-                  }
-                }
-              }
-
-              setParticipants(nextParticipants);
-              setShowConfigInput(false);
-              setConfigJsonInput('');
-              setView('setup');
-              alert(t(lang, 'importSharedAnswersSuccess'));
-              return;
-            }
-          } catch (error) {
-            console.error('Failed to parse participant answer payload', error);
-          }
-        }
+      const answerPayload = parseParticipantAnswerPayload(cleanInput);
+      if (answerPayload) {
+        await handleImportParticipantAnswers(answerPayload);
+        setShowConfigInput(false);
+        setConfigJsonInput('');
+        return;
       }
 
       let jsonCandidate = cleanInput;
@@ -2775,61 +2757,17 @@ ${exampleJson}`;
           setShowUrlHelpModal(true);
         }
 
-        const qpsCandidate = 
-          searchParams.get('qps') || 
-          hashParams.get('qps') ||
-          (hashStr.toLowerCase().startsWith('qps=') ? hashStr.slice(4) : null) ||
-          (rawHash.includes('qps=') ? rawHash.split('qps=')[1]?.split('&')[0] : null);
+        const fullUrl = window.location.href;
+        const answerPayload = parseParticipantAnswerPayload(fullUrl);
 
-        if (qpsCandidate) {
+        if (answerPayload) {
           try {
-            const decompressedXor = xorDecrypt(qpsCandidate, '$');
-            const payloadText = LZString.decompressFromEncodedURIComponent(decompressedXor);
-            if (payloadText) {
-              const payload = JSON.parse(payloadText);
-              if (payload && payload.schema === 'family-quiz-participant-answers-v1') {
-                const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
-                const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
-
-                if (payload.walkId) {
-                  setWalkId(payload.walkId);
-                  localStorage.setItem(STORAGE_KEY_WALK_ID, payload.walkId);
-                }
-
-                if (payload.quizId) {
-                  if (payload.quizId === quizConfig.quizId) {
-                    const mergedSession = mergeParticipantAnswerPayload(participants, answers, incomingParticipants, incomingAnswers);
-                    setParticipants(mergedSession.participants);
-                    setAnswers(mergedSession.answers);
-                    alert(t(lang, 'importSharedAnswersSuccess'));
-                  } else {
-                    const targetQuiz = await getQuizByQuizId(payload.quizId);
-                    if (targetQuiz) {
-                      setQuizConfig(ensureQuizId(targetQuiz.quizConfig));
-                      localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(targetQuiz.quizConfig));
-                      const targetSession = targetQuiz.quizState || { participants: [], answers: [] };
-                      const mergedSession = mergeParticipantAnswerPayload(
-                        targetSession.participants,
-                        targetSession.answers,
-                        incomingParticipants,
-                        incomingAnswers
-                      );
-                      await saveQuizSessionToIndexedDB(ensureQuizId(targetQuiz.quizConfig), mergedSession);
-                      setParticipants(mergedSession.participants);
-                      setAnswers(mergedSession.answers);
-                      alert(t(lang, 'importSharedAnswersStoredForQuiz', { title: targetQuiz.title }));
-                    } else {
-                      alert(t(lang, 'answerImportQuizMismatch', { title: payload.title || '?' }));
-                    }
-                  }
-                }
-                if (window.history && window.history.replaceState) {
-                  const cleanUrl = window.location.origin + window.location.pathname;
-                  window.history.replaceState(null, '', cleanUrl);
-                }
-                return true;
-              }
+            await handleImportParticipantAnswers(answerPayload);
+            if (window.history && window.history.replaceState) {
+              const cleanUrl = window.location.origin + window.location.pathname;
+              window.history.replaceState(null, '', cleanUrl);
             }
+            return true;
           } catch (e) {
             console.error('Failed to parse qps payload from URL:', e);
           }
@@ -3385,40 +3323,67 @@ ${exampleJson}`;
     }
   };
 
-  const findReservedParticipantName = (currentParticipants: Participant[]) => {
-    for (const p of currentParticipants) {
-      if (!p.name || !p.name.trim() || isReservedParticipantName(p.name)) {
-        return p;
-      }
-    }
-
-    return null;
-  };
-
-  const buildParticipantAnswerPayload = () => {
-    const reservedParticipant = findReservedParticipantName(participants);
-    if (reservedParticipant) {
-      alert(t(lang, 'reservedParticipantNameShareError', { name: reservedParticipant.name || t(lang, 'defaultParticipantName') }));
-      return null;
-    }
-
-    const payload = {
+  const buildParticipantAnswerPayload = (participantsToUse: Participant[] = participants) => {
+    const payload: ParticipantAnswerPayload = {
       schema: 'family-quiz-participant-answers-v1',
       quizId: quizConfig.quizId,
       walkId: walkId,
       title: quizConfig.title,
       createdAt: new Date().toISOString(),
-      participants: participants.map(({ id, uniqueId, name, type }) => ({ id, uniqueId, name, type })),
+      participants: participantsToUse.map(({ id, uniqueId, name, type }) => ({
+        id,
+        uniqueId: uniqueId || crypto.randomUUID(),
+        name: (name || '').trim(),
+        type
+      })),
       answers: answers.map(a => ({ ...a }))
     };
 
-    const compressed = LZString.compressToEncodedURIComponent(JSON.stringify(payload));
-    const encrypted = xorEncryptDecrypt(compressed, '$');
-    return `qps=${encrypted}`;
+    return encodeParticipantAnswers(payload);
   };
 
   const shareParticipantAnswers = async () => {
-    const payload = buildParticipantAnswerPayload();
+    if (participants.length === 0) {
+      alert(t(lang, 'noParticipantsToShare') || 'Inga deltagare registrerade.');
+      return;
+    }
+
+    let currentParticipants = [...participants];
+    let hasUpdatedParticipants = false;
+
+    // Block submission if any participant still has a default or reserved name ("Jag", "Me", etc.)
+    for (let i = 0; i < currentParticipants.length; i++) {
+      const p = currentParticipants[i];
+      const trimmed = (p.name || '').trim();
+      const isReserved = !trimmed || isReservedParticipantName(trimmed);
+
+      if (isReserved) {
+        const placeholderName = trimmed || t(lang, 'defaultParticipantName') || 'Jag';
+        const promptMsg = `${t(lang, 'reservedParticipantNameShareError', { name: placeholderName }) || `Byt namn på "${placeholderName}" till ditt/deltagarens riktiga namn innan du skickar in svaren.`}\n\n${lang === 'sv' ? 'Ange ditt/deltagarens riktiga namn:' : 'Enter real participant name:'}`;
+
+        const enteredName = window.prompt(promptMsg, placeholderName.toLowerCase() === 'jag' || placeholderName.toLowerCase() === 'me' ? '' : placeholderName);
+
+        if (!enteredName || !enteredName.trim() || isReservedParticipantName(enteredName.trim())) {
+          alert(
+            t(lang, 'reservedParticipantNameShareError', { name: enteredName?.trim() || placeholderName }) ||
+            `Du måste byta ut "${placeholderName}" till ett riktigt namn innan du kan skicka in era svar!`
+          );
+          return;
+        }
+
+        currentParticipants[i] = { ...p, name: enteredName.trim() };
+        hasUpdatedParticipants = true;
+      }
+    }
+
+    if (hasUpdatedParticipants) {
+      setParticipants(currentParticipants);
+      try {
+        localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(currentParticipants));
+      } catch {}
+    }
+
+    const payload = buildParticipantAnswerPayload(currentParticipants);
     if (!payload) return;
 
     const shareUrl = `${window.location.origin}${window.location.pathname}#${payload}`;
@@ -3444,52 +3409,116 @@ ${exampleJson}`;
     }
   };
 
-  const mergeParticipantAnswerPayload = (
-    baseParticipants: Participant[],
-    baseAnswers: AnswerRecord[],
-    incomingParticipants: Participant[],
-    incomingAnswers: AnswerRecord[]
-  ) => {
-    const uniqueIdMap = new Map<string, string>();
-    const nameMap = new Map<string, string>();
-    const mergedParticipants = [...baseParticipants];
-    const mergedAnswers = [...baseAnswers];
+  const handleImportParticipantAnswers = async (payload: ParticipantAnswerPayload) => {
+    const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
+    const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
 
-    for (const participant of mergedParticipants) {
-      if (participant.uniqueId && participant.uniqueId !== DEFAULT_PARTICIPANT_UNIQUE_ID) {
-        uniqueIdMap.set(participant.uniqueId, participant.id);
-      }
-      const nameKey = `${normalizeParticipantNameForCompare(participant.name)}|${participant.type}`;
-      if (!nameMap.has(nameKey)) nameMap.set(nameKey, participant.id);
+    if (incomingParticipants.length === 0 && incomingAnswers.length === 0) {
+      alert(t(lang, 'invalidAnswerImportFormat') || 'Inga deltagarsvar hittades i koden.');
+      return;
     }
 
-    for (const incoming of incomingParticipants) {
-      const nameKey = `${normalizeParticipantNameForCompare(incoming.name)}|${incoming.type}`;
-      const existingParticipantId =
-        (incoming.uniqueId && incoming.uniqueId !== DEFAULT_PARTICIPANT_UNIQUE_ID && uniqueIdMap.get(incoming.uniqueId)) ||
-        nameMap.get(nameKey);
-      const targetParticipantId = existingParticipantId || crypto.randomUUID();
-
-      if (!existingParticipantId) {
-        const newParticipant = {
-          ...incoming,
-          id: targetParticipantId,
-          uniqueId: incoming.uniqueId || crypto.randomUUID()
-        };
-        mergedParticipants.push(newParticipant);
-        uniqueIdMap.set(newParticipant.uniqueId, newParticipant.id);
-        nameMap.set(nameKey, newParticipant.id);
-      }
-
-      for (const answer of incomingAnswers.filter((item) => item.participantId === incoming.id)) {
-        const hasAnswer = mergedAnswers.some(
-          (existing) => existing.participantId === targetParticipantId && existing.questionIndex === answer.questionIndex
-        );
-        if (!hasAnswer) mergedAnswers.push({ ...answer, participantId: targetParticipantId });
-      }
+    if (payload.walkId) {
+      setWalkId(payload.walkId);
+      try {
+        localStorage.setItem(STORAGE_KEY_WALK_ID, payload.walkId);
+      } catch {}
     }
 
-    return { participants: mergedParticipants, answers: mergedAnswers };
+    const matchesActiveQuiz = isQuizMatch(payload, quizConfig);
+
+    if (matchesActiveQuiz) {
+      const merged = mergeParticipantAnswers(
+        participants,
+        answers,
+        incomingParticipants,
+        incomingAnswers,
+        t(lang, 'defaultParticipantName') || 'Deltagare'
+      );
+      setParticipants(merged.participants);
+      setAnswers(merged.answers);
+      try {
+        localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(merged.participants));
+        localStorage.setItem(STORAGE_KEY_ANSWERS, JSON.stringify(merged.answers));
+      } catch {}
+
+      if (isAdmin && quizConfig.quizId) {
+        try {
+          await saveQuizSessionToIndexedDB(ensureQuizId(quizConfig), merged);
+          await refreshSavedQuizzes();
+        } catch {}
+      }
+
+      const names = incomingParticipants.map(p => p.name).filter(Boolean).join(', ');
+      alert(
+        t(lang, 'readingAnswersSuccess', {
+          count: incomingParticipants.length.toString(),
+          names: names || 'deltagare'
+        }) || t(lang, 'importSharedAnswersSuccess')
+      );
+      setShowAnswerImportModal(false);
+      setAnswerImportInput('');
+      setView('setup');
+      return;
+    }
+
+    const targetQuiz = payload.quizId ? await getQuizByQuizId(payload.quizId) : null;
+    if (targetQuiz) {
+      const targetSession = targetQuiz.quizState || { participants: [], answers: [] };
+      const merged = mergeParticipantAnswers(
+        targetSession.participants,
+        targetSession.answers,
+        incomingParticipants,
+        incomingAnswers,
+        t(lang, 'defaultParticipantName') || 'Deltagare'
+      );
+      await saveQuizSessionToIndexedDB(ensureQuizId(targetQuiz.quizConfig), merged);
+      await refreshSavedQuizzes();
+      alert(t(lang, 'importSharedAnswersStoredForQuiz', { title: targetQuiz.title }));
+      setShowAnswerImportModal(false);
+      setAnswerImportInput('');
+      return;
+    }
+
+    const proceed = window.confirm(
+      t(lang, 'answerImportQuizMismatchConfirm', {
+        title: payload.title || 'annat quiz',
+        currentTitle: quizConfig.title || 'Tipspromenad'
+      }) ||
+      `Svaren är märkta för "${payload.title || 'annat quiz'}". Vill du läsa in dem till det aktiva quizet ("${quizConfig.title}") ändå?`
+    );
+
+    if (proceed) {
+      const merged = mergeParticipantAnswers(
+        participants,
+        answers,
+        incomingParticipants,
+        incomingAnswers,
+        t(lang, 'defaultParticipantName') || 'Deltagare'
+      );
+      setParticipants(merged.participants);
+      setAnswers(merged.answers);
+      try {
+        localStorage.setItem(STORAGE_KEY_PARTICIPANTS, JSON.stringify(merged.participants));
+        localStorage.setItem(STORAGE_KEY_ANSWERS, JSON.stringify(merged.answers));
+      } catch {}
+      if (isAdmin && quizConfig.quizId) {
+        try {
+          await saveQuizSessionToIndexedDB(ensureQuizId(quizConfig), merged);
+          await refreshSavedQuizzes();
+        } catch {}
+      }
+      const names = incomingParticipants.map(p => p.name).filter(Boolean).join(', ');
+      alert(
+        t(lang, 'readingAnswersSuccess', {
+          count: incomingParticipants.length.toString(),
+          names: names || 'deltagare'
+        }) || t(lang, 'importSharedAnswersSuccess')
+      );
+      setShowAnswerImportModal(false);
+      setAnswerImportInput('');
+      setView('setup');
+    }
   };
 
   const handleImportAnswersFromInput = async () => {
@@ -3497,60 +3526,12 @@ ${exampleJson}`;
     if (!rawInput) return;
 
     try {
-      const cleanInput = rawInput.replace(/\r\n/g, '\n').trim();
-      
-      if (cleanInput.toLowerCase().startsWith('qps=')) {
-        const encryptedPayload = cleanInput.slice(4);
-        const decompressed = xorDecrypt(encryptedPayload, '$');
-        const payloadText = LZString.decompressFromEncodedURIComponent(decompressed);
-        
-        if (payloadText) {
-          const payload = JSON.parse(payloadText);
-          if (payload && payload.schema === 'family-quiz-participant-answers-v1') {
-            const incomingParticipants: Participant[] = Array.isArray(payload.participants) ? payload.participants : [];
-            const incomingAnswers: AnswerRecord[] = Array.isArray(payload.answers) ? payload.answers : [];
-
-            if (incomingParticipants.length === 0 && incomingAnswers.length === 0) {
-              throw new Error('No participant payload data');
-            }
-
-            if (payload.quizId === quizConfig.quizId) {
-              if (payload.walkId && walkId && payload.walkId !== walkId) {
-                const proceed = window.confirm(t(lang, 'walkIdMismatchConfirm'));
-                if (!proceed) return;
-              }
-              const mergedSession = mergeParticipantAnswerPayload(participants, answers, incomingParticipants, incomingAnswers);
-              setParticipants(mergedSession.participants);
-              setAnswers(mergedSession.answers);
-            } else {
-              const targetQuiz = payload.quizId ? await getQuizByQuizId(payload.quizId) : null;
-              if (!targetQuiz) {
-                alert(t(lang, 'answerImportQuizMismatch', { title: payload.title || '?' }));
-                return;
-              }
-
-              const targetSession = targetQuiz.quizState || { participants: [], answers: [] };
-              const mergedSession = mergeParticipantAnswerPayload(
-                targetSession.participants,
-                targetSession.answers,
-                incomingParticipants,
-                incomingAnswers
-              );
-              await saveQuizSessionToIndexedDB(ensureQuizId(targetQuiz.quizConfig), mergedSession);
-              await refreshSavedQuizzes();
-              alert(t(lang, 'importSharedAnswersStoredForQuiz', { title: targetQuiz.title }));
-            }
-
-            setShowAnswerImportModal(false);
-            setAnswerImportInput('');
-            setView('setup');
-            if (payload.quizId === quizConfig.quizId) alert(t(lang, 'importSharedAnswersSuccess'));
-            return;
-          }
-        }
+      const payload = parseParticipantAnswerPayload(rawInput);
+      if (payload) {
+        await handleImportParticipantAnswers(payload);
+        return;
       }
-      
-      throw new Error('Invalid answer payload format. Must start with qps=');
+      alert(t(lang, 'invalidAnswerImportFormat'));
     } catch (error) {
       console.error('Failed to import answers:', error);
       alert(t(lang, 'invalidAnswerImportFormat'));
@@ -3775,6 +3756,7 @@ ${exampleJson}`;
               validateAndFinalizeParticipantName={validateAndFinalizeParticipantName}
               shareDirectQuizUrl={shareDirectQuizUrl}
               shareParticipantAnswers={shareParticipantAnswers}
+              onOpenImportAnswers={() => setShowAnswerImportModal(true)}
               setShowHowItWorks={setShowHowItWorks}
               isDirectLinkLocked={isQuizModeLocked}
               setView={setView}
@@ -3839,6 +3821,7 @@ ${exampleJson}`;
               setShowResultsActions={setShowResultsActions}
               shareDirectQuizUrl={shareDirectQuizUrl}
               shareParticipantAnswers={shareParticipantAnswers}
+              onOpenImportAnswers={() => setShowAnswerImportModal(true)}
               hasAnyGeotag={hasAnyGeotag}
               walkedPath={walkedPath}
               calculatePathDistance={calculatePathDistance}
@@ -4014,6 +3997,21 @@ ${exampleJson}`;
           />
         )}
 
+        {/* Global Answer Import Modal */}
+        {showAnswerImportModal && (
+          <GlobalAnswerImportModal
+            isOpen={showAnswerImportModal}
+            onClose={() => setShowAnswerImportModal(false)}
+            lang={lang}
+            quizConfig={quizConfig}
+            onImportPayload={handleImportParticipantAnswers}
+            onLoadQuizCode={(code) => {
+              setShowAnswerImportModal(false);
+              processImportConfig(code);
+            }}
+          />
+        )}
+
         {/* Image Zoom Modal */}
         {zoomedImageUrl && (
           <ImageZoomModal
@@ -4022,6 +4020,15 @@ ${exampleJson}`;
             lang={lang}
           />
         )}
+
+        {/* Backup Choice Modal */}
+        <BackupChoiceModal
+          isOpen={showBackupChoiceModal}
+          onClose={() => setShowBackupChoiceModal(false)}
+          onExportAll={handleExportAllInOne}
+          onExportIndividual={handleExportIndividualQuizzes}
+          lang={lang}
+        />
 
         {/* How It Works Help Modal */}
         {showHowItWorks && (

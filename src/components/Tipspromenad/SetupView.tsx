@@ -20,10 +20,12 @@ import {
   Globe,
   Share2,
   Upload,
-  ChevronDown
+  ChevronDown,
+  Download
 } from 'lucide-react';
 import { QuizConfig, Participant, UserType } from '../../types';
 import { Language, t } from '../../i18n';
+import { isReservedParticipantName } from '../../utils/answerSharing';
 import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
 
 export interface SetupViewProps {
@@ -38,6 +40,7 @@ export interface SetupViewProps {
   validateAndFinalizeParticipantName: (id: string) => void;
   shareDirectQuizUrl: () => Promise<void>;
   shareParticipantAnswers: () => Promise<void>;
+  onOpenImportAnswers?: () => void;
   setShowHowItWorks: (show: boolean) => void;
   isDirectLinkLocked: boolean;
   setView: (v: 'setup' | 'quiz' | 'results' | 'config') => void;
@@ -55,6 +58,7 @@ export const SetupView = React.memo<SetupViewProps>(({
   validateAndFinalizeParticipantName,
   shareDirectQuizUrl,
   shareParticipantAnswers,
+  onOpenImportAnswers,
   setShowHowItWorks,
   isDirectLinkLocked,
   setView
@@ -77,58 +81,71 @@ export const SetupView = React.memo<SetupViewProps>(({
                 </h2>
                 <div className="bg-white rounded-[2rem] p-6 shadow-2xl flex flex-col gap-4 flex-1 border border-indigo-200/50">
                   <div className="flex-1 space-y-3 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
-                    {participants.map(p => (
-                      <div key={p.id} className="p-4 rounded-2xl bg-indigo-50/80 border-2 border-indigo-100 flex items-center justify-between group">
-                        <div 
-                          className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
-                          onClick={() => setEditingParticipantId(p.id)}
-                        >
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 ${
-                            p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
-                          }`}>
-                            {p.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            {editingParticipantId === p.id ? (
-                              <input 
-                                autoFocus
-                                className="w-full bg-white border border-indigo-300 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none focus:border-indigo-500"
-                                value={p.name}
-                                onChange={(e) => updateParticipantName(p.id, e.target.value)}
-                                onBlur={() => validateAndFinalizeParticipantName(p.id)}
-                                onKeyDown={(e) => e.key === 'Enter' && validateAndFinalizeParticipantName(p.id)}
+                    {participants.map(p => {
+                      const isNameReserved = !p.name || !p.name.trim() || isReservedParticipantName(p.name);
+                      return (
+                        <div key={p.id} className={`p-4 rounded-2xl border-2 flex items-center justify-between group transition-all ${
+                          isNameReserved ? 'bg-amber-50/90 border-amber-300' : 'bg-indigo-50/80 border-indigo-100'
+                        }`}>
+                          <div 
+                            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                            onClick={() => setEditingParticipantId(p.id)}
+                          >
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-white shrink-0 ${
+                              p.type === 'barn' ? 'bg-amber-400' : 'bg-pink-400'
+                            }`}>
+                              {p.name ? p.name.charAt(0).toUpperCase() : '?'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              {editingParticipantId === p.id ? (
+                                <input 
+                                  autoFocus
+                                  className="w-full bg-white border border-indigo-300 rounded-lg px-2 py-1 text-sm font-black text-slate-800 outline-none focus:border-indigo-500"
+                                  value={p.name}
+                                  onChange={(e) => updateParticipantName(p.id, e.target.value)}
+                                  onBlur={() => validateAndFinalizeParticipantName(p.id)}
+                                  onKeyDown={(e) => e.key === 'Enter' && validateAndFinalizeParticipantName(p.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  placeholder={t(lang, 'writeNameHere') || 'Ange ditt namn'}
+                                />
+                              ) : (
+                                <div>
+                                  <p 
+                                    className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors truncate min-h-[1.2em]"
+                                    title={t(lang, 'clickToEditName')}
+                                  >
+                                    {p.name}
+                                  </p>
+                                  {isNameReserved && (
+                                    <p className="text-[10px] text-amber-700 font-bold leading-tight mt-0.5 flex items-center gap-1">
+                                      <span>✏️ {lang === 'sv' ? 'Tryck här för att ange ditt namn' : 'Tap here to enter your name'}</span>
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                              <span 
+                                className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase inline-block mt-0.5 cursor-pointer transition-opacity hover:opacity-70 ${
+                                  p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
+                                }`}
                                 onClick={(e) => e.stopPropagation()}
-                              />
-                            ) : (
-                              <p 
-                                className="font-black text-slate-800 leading-tight cursor-pointer hover:text-indigo-600 transition-colors truncate min-h-[1.2em]"
-                                title={t(lang, 'clickToEditName')}
                               >
-                                {p.name}
-                              </p>
-                            )}
-                            <span 
-                              className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase inline-block mt-0.5 cursor-pointer transition-opacity hover:opacity-70 ${
-                                p.type === 'barn' ? 'bg-amber-100 text-amber-700' : 'bg-pink-100 text-pink-700'
-                              }`}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}
-                            </span>
+                                {p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}
+                              </span>
+                            </div>
                           </div>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setParticipantToDelete(p);
+                            }}
+                            className="opacity-60 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-red-500 p-2"
+                            title={t(lang, 'deleteParticipant')}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setParticipantToDelete(p);
-                          }}
-                          className="opacity-60 group-hover:opacity-100 transition-opacity text-slate-400 hover:text-red-500 p-2"
-                          title={t(lang, 'deleteParticipant')}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                   
                   <div className="space-y-3 pt-4 border-t border-slate-100">
@@ -208,6 +225,16 @@ export const SetupView = React.memo<SetupViewProps>(({
                             <Share2 className="w-4 h-4" />
                             <span>{t(lang, 'submitOurAnswersBtn')}</span>
                           </button>
+                          {onOpenImportAnswers && (
+                            <button
+                              type="button"
+                              onClick={onOpenImportAnswers}
+                              className="py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#1d4ed8] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>{t(lang, 'importAnswersBtn') || 'Läs in svar'}</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>

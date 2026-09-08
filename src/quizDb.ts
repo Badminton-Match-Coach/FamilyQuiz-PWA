@@ -510,3 +510,54 @@ export async function shareIndexedDBJSON(): Promise<{ shared: boolean; method: '
   }
 }
 
+/**
+ * Download a single quiz record as an individual JSON file with its title and quizId in filename
+ */
+export function downloadSingleQuizAsJSON(record: { id?: string; title?: string; config?: QuizConfig; quizConfig?: QuizConfig; quizState?: any }): void {
+  const config = record.quizConfig || record.config;
+  if (!config) return;
+  const quizId = config.quizId || record.id || crypto.randomUUID();
+  const rawTitle = record.title || config.title || 'Quiz';
+  const cleanTitle = rawTitle.trim().replace(/[^a-zA-Z0-9åäöÅÄÖ_-]/g, '_').substring(0, 35) || 'quiz';
+  const filename = `${cleanTitle}_${quizId}.json`;
+
+  const payload = {
+    version: 1,
+    type: 'family-quiz-config',
+    exportedAt: new Date().toISOString(),
+    quiz: config,
+    quizConfig: config,
+    quizState: record.quizState
+  };
+
+  const jsonStr = JSON.stringify(payload, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export all saved quizzes as individual JSON files named after their title and QUIZID
+ */
+export async function exportIndividualQuizzesToFiles(): Promise<{ count: number }> {
+  const quizzes = await getAllQuizzesFromIndexedDB();
+  if (!quizzes || quizzes.length === 0) {
+    return { count: 0 };
+  }
+
+  for (let i = 0; i < quizzes.length; i++) {
+    downloadSingleQuizAsJSON(quizzes[i]);
+    if (i < quizzes.length - 1) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
+  return { count: quizzes.length };
+}
+

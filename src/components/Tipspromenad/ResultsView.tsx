@@ -26,7 +26,8 @@ import {
   Search,
   Maximize2,
   Upload,
-  ChevronRight
+  ChevronRight,
+  Download
 } from 'lucide-react';
 import { QuizConfig, Participant, UserType, Question } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
@@ -57,6 +58,7 @@ export interface ResultsViewProps {
   setShowResultsActions: (show: boolean | ((prev: boolean) => boolean)) => void;
   shareDirectQuizUrl: () => Promise<void>;
   shareParticipantAnswers: () => Promise<void>;
+  onOpenImportAnswers?: () => void;
   hasAnyGeotag: boolean;
   walkedPath: { lat: number; lng: number }[];
   calculatePathDistance: (path: { lat: number; lng: number }[]) => number;
@@ -90,6 +92,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
   setShowResultsActions,
   shareDirectQuizUrl,
   shareParticipantAnswers,
+  onOpenImportAnswers,
   hasAnyGeotag,
   walkedPath,
   calculatePathDistance,
@@ -587,6 +590,16 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                             <Share2 className="w-4 h-4" />
                             <span>{t(lang, 'submitOurAnswersBtn')}</span>
                           </button>
+                          {onOpenImportAnswers && (
+                            <button
+                              type="button"
+                              onClick={onOpenImportAnswers}
+                              className="py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#1d4ed8] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>{t(lang, 'importAnswersBtn') || 'Läs in svar'}</span>
+                            </button>
+                          )}
 
                         </div>
                       )}

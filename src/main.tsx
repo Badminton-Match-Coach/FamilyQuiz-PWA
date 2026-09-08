@@ -12,16 +12,24 @@ createRoot(document.getElementById('root')!).render(
 );
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker
-      .register('./sw.js')
-      .then((reg) => {
-        // Automatically check for SW updates
-        reg.update();
-        console.log('PWA ServiceWorker registered with scope:', reg.scope);
-      })
-      .catch((err) => {
-        console.warn('PWA ServiceWorker registration failed:', err);
-      });
-  });
+  if (import.meta.env.PROD) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker
+        .register('./sw.js')
+        .then((reg) => {
+          reg.update();
+          console.log('PWA ServiceWorker registered with scope:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('PWA ServiceWorker registration failed:', err);
+        });
+    });
+  } else {
+    // In dev mode, unregister any active service worker so Vite's dev server is never intercepted
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+      }
+    });
+  }
 }

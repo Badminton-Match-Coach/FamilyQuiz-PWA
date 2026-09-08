@@ -177,6 +177,46 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     it: 'Io',
     es: 'Yo'
   },
+  importAnswersBtn: {
+    sv: 'Läs in svar',
+    en: 'Import answers'
+  },
+  importAnswersModalTitle: {
+    sv: 'Läs in deltagarsvar',
+    en: 'Import participant answers'
+  },
+  importAnswersModalDesc: {
+    sv: 'Klistra in länken eller koden med svar från deltagarna',
+    en: 'Paste the link or code with answers from participants'
+  },
+  pasteFromClipboardBtn: {
+    sv: 'Klistra in från urklipp',
+    en: 'Paste from clipboard'
+  },
+  importSharedAnswersSuccess: {
+    sv: 'Deltagarnas svar har lästs in!',
+    en: 'Participant answers have been imported!'
+  },
+  importSharedAnswersStoredForQuiz: {
+    sv: 'Svaren har sparats för quizet "{title}"!',
+    en: 'Answers have been saved for the quiz "{title}"!'
+  },
+  answerImportQuizMismatch: {
+    sv: 'Svaren är märkta för "{title}".',
+    en: 'The answers belong to "{title}".'
+  },
+  answerImportQuizMismatchConfirm: {
+    sv: 'Svaren är märkta för quizet "{title}". Vill du läsa in svaren till det aktiva quizet ("{currentTitle}") ändå?',
+    en: 'The answers are tagged for "{title}". Do you want to import them into the active quiz ("{currentTitle}") anyway?'
+  },
+  invalidAnswerImportFormat: {
+    sv: 'Kunde inte tolka svarslänken eller koden. Kontrollera att du kopierat hela länken.',
+    en: 'Could not parse the answer link or code. Please make sure the full link was copied.'
+  },
+  readingAnswersSuccess: {
+    sv: 'Läste in svar från {count} deltagare ({names})!',
+    en: 'Imported answers from {count} participants ({names})!'
+  },
   selectAllBtn: {
     sv: 'Markera alla',
     en: 'Select all',
@@ -1607,6 +1647,49 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     no: 'Lagre sikkerhetskopi', da: 'Gem sikkerhedskopi', fi: 'Tallenna varmuuskopio', is: 'Vista öryggisafrit',
     se: 'Vurke sihkarvuođakopiija', et: 'Salvesta varukoopia', lv: 'Saglabāt dublējumu', lt: 'Išsaugoti atsarginę kopiją',
     uk: 'Зберегти резервну копію', de: 'Sicherungskopie speichern', fr: 'Sauvegarder une copie', it: 'Salva copia di backup', es: 'Guardar copia de seguridad'
+  },
+  backupChoiceTitle: {
+    sv: 'Spara säkerhetskopia', en: 'Save backup file', nl: 'Back-up opslaan', be: 'Back-up opslaan',
+    no: 'Lagre sikkerhetskopi', da: 'Gem sikkerhedskopi', fi: 'Tallenna varmuuskopio', is: 'Vista öryggisafrit',
+    se: 'Vurke sihkarvuođakopiija', et: 'Salvesta varukoopia', lv: 'Saglabāt dublējumu', lt: 'Išsaugoti atsarginę kopiją',
+    uk: 'Зберегти резервну копію', de: 'Sicherungskopie speichern', fr: 'Sauvegarder une copie', it: 'Salva copia di backup', es: 'Guardar copia de seguridad'
+  },
+  backupChoiceSubtitle: {
+    sv: 'Hur vill du spara din säkerhetskopia?', en: 'How would you like to save your backup?',
+    de: 'Wie möchten Sie die Sicherung speichern?', fr: 'Comment souhaitez-vous enregistrer la sauvegarde ?',
+    es: '¿Cómo desea guardar la copia de seguridad?', nl: 'Hoe wilt u de back-up opslaan?',
+    no: 'Hvordan vil du lagre sikkerhetskopien?', da: 'Hvordan vil du gemme sikkerhedskopien?', fi: 'Miten haluat tallentaa varmuuskopion?'
+  },
+  backupOptionAllTitle: {
+    sv: 'Säkerhetskopia (alla)', en: 'Backup (all quizzes)',
+    de: 'Sicherung (alle Quizzes)', fr: 'Sauvegarde (tous les quiz)',
+    es: 'Copia de seguridad (todos)', nl: 'Back-up (alle quizzen)',
+    no: 'Sikkerhetskopi (alle)', da: 'Sikkerhedskopi (alle)', fi: 'Varmuuskopio (kaikki)'
+  },
+  backupOptionAllDesc: {
+    sv: 'Samlar alla sparade quiz och inställningar i en enda komplett databasfil (.json).',
+    en: 'Collects all saved quizzes and settings into a single database file (.json).',
+    de: 'Sammelt alle gespeicherten Quizzes und Einstellungen in einer einzigen Datei (.json).',
+    fr: 'Rassemble tous les quiz enregistrés et paramètres dans un seul fichier (.json).',
+    es: 'Guarda todos los quizzes guardados y ajustes en un solo archivo (.json).'
+  },
+  backupOptionIndividualTitle: {
+    sv: 'Quizz var och ett med egna namn under QUIZID .json',
+    en: 'Each quiz separately with QUIZID .json',
+    de: 'Jedes Quiz einzeln mit QUIZID .json',
+    fr: 'Chaque quiz séparément sous QUIZID .json',
+    es: 'Cada quiz por separado bajo QUIZID .json',
+    nl: 'Elke quiz afzonderlijk onder QUIZID .json',
+    no: 'Hvert quiz for seg med QUIZID .json',
+    da: 'Hvert quiz for sig med QUIZID .json',
+    fi: 'Jokainen visa erikseen QUIZID .json'
+  },
+  backupOptionIndividualDesc: {
+    sv: 'Exportera varje sparad tipspromenad som en enskild .json-fil döpt med dess Quiz-ID.',
+    en: 'Export each saved quiz as an individual .json file named with its Quiz ID.',
+    de: 'Exportieren Sie jedes gespeicherte Quiz als einzelne .json-Datei mit der Quiz-ID.',
+    fr: 'Exporte chaque quiz enregistré sous forme de fichier .json individuel nommer avec son ID.',
+    es: 'Exporta cada quiz guardado como un archivo .json individual nombrado con su ID.'
   },
   importDbBtn: {
     sv: 'Öppna säkerhetskopia', en: 'Open backup file', nl: 'Back-up openen', be: 'Back-up openen',
@@ -3162,7 +3245,7 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     be: 'Beantwoord klassieke 1X2-vragen, puntvragen 🎯 of vrije tekstvragen ✍️ met slimme spellingcontrole. Let op eventuele vervolgvragen onderweg!',
     no: 'Svar på klassiske 1X2-spørsmål, poengspørsmål 🎯 eller fritekstspørsmål ✍️ med stavekontroll. Se opp for oppfølgingsspørsmål underveis!',
     da: 'Svar på klassiske 1X2-spørgsmål, pointspørgsmål 🎯 eller fritekstspørgsmål ✍️ med stavekontrol. Hold øje med opfølgende spørgsmål!',
-    fi: 'Vastaa perinteisiin 1X2-kysymyksiin, pistekysymyksiin 🎯 tai tekstikysymyksiin ✍️. Tarkkaile reitillä avautuvia jatkokysymyksiä!',
+    fi: 'Vastaa perinteisiin 1X2-kysymyksiin, pistekysymyksiin ������ tai tekstikysymyksiin ✍️. Tarkkaile reitillä avautuvia jatkokysymyksiä!',
     is: 'Svaraðu hefðbundnum 1X2 spurningum, stigaspurningum 🎯 eða textaspurningum ✍️. Fylgstu með framhaldsspurningum á göngunni!',
     se: 'Vásit 1X2-gažaldagaide, čuokkisgažaldagaide 🎯 dahje čállingažaldagaide ✍️. Čuovo mielde jus čuovusgažaldagat rahpasit!',
     et: 'Vastake klassikalistele 1X2 küsimustele, punktiküsimustele 🎯 või vabatekstiküsimustele ✍️. Pange tähele rajal avanevaid järelküsimusi!',

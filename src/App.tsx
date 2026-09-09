@@ -3937,6 +3937,7 @@ ${exampleJson}`;
               handleApplyBatchRouteLocations={handleApplyRouteGeoTags}
               catalogUrl={catalogUrl}
               onOpenUrlHelpModal={() => setShowUrlHelpModal(true)}
+              walkId={walkId}
             />
           )}
         </AnimatePresence>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -141,6 +141,25 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
   const [showQuestionMore, setShowQuestionMore] = useState(false);
 
   const [editorTestWord, setEditorTestWord] = useState('');
+  const langScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (questionId) {
+      const rawQ = quizConfig.barnQuestions.find(item => item.id === questionId) || quizConfig.vuxenQuestions.find(item => item.id === questionId);
+      if (rawQ) {
+        setEditingQuestionLang(rawQ.originalLanguage || lang);
+      }
+    }
+  }, [questionId]);
+
+  useEffect(() => {
+    if (langScrollRef.current) {
+      const selectedBtn = langScrollRef.current.querySelector(`[data-lang="${editingQuestionLang}"]`);
+      if (selectedBtn) {
+        selectedBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+    }
+  }, [editingQuestionLang]);
 
   return (
     <AnimatePresence>
@@ -360,13 +379,14 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                               <ChevronLeft className="w-4 h-4" />
                             </button>
 
-                            <div className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto no-scrollbar scroll-smooth snap-x">
+                            <div ref={langScrollRef} className="flex items-center gap-1 min-w-0 flex-1 overflow-x-auto no-scrollbar scroll-smooth snap-x">
                               {SUPPORTED_LANGUAGES.map((l) => {
                                 const isSelected = editingQuestionLang === l.code;
                                 const isOrig = l.code === (rawQ.originalLanguage || 'sv');
                                 return (
                                   <button
                                     key={l.code}
+                                    data-lang={l.code}
                                     type="button"
                                     onClick={() => {
                                       const currentIdx = SUPPORTED_LANGUAGES.findIndex(item => item.code === editingQuestionLang);
@@ -413,28 +433,6 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                         onTouchStart={handleTouchStart}
                         onTouchEnd={handleTouchEnd}
                       >
-                        {/* Language Banner & Swipe Indicator */}
-                        <div className="bg-gradient-to-r from-indigo-50 to-slate-50 border border-indigo-100/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
-                          <div className="flex items-center gap-2.5">
-                            <span className="text-2xl leading-none">{currentLangOption.flag}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-sm text-slate-900">{currentLangOption.name}</span>
-                              {isOriginalLang ? (
-                                <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-300/80 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                                  ⭐ {t(lang, 'originalLangTag')}
-                                </span>
-                              ) : (
-                                <span className="text-[10px] bg-indigo-100 text-indigo-800 border border-indigo-200 font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                                  🌐 {t(lang, 'translationTag')}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <div className="text-[11px] text-indigo-600 font-bold bg-indigo-100/60 px-3 py-1 rounded-xl flex items-center gap-1.5">
-                            <span>{t(lang, 'swipeLanguageHint')}</span>
-                          </div>
-                        </div>
-
                         {/* Animated Container for Question Text and Options */}
                         <AnimatePresence mode="wait">
                           <motion.div

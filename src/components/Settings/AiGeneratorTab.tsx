@@ -17,14 +17,19 @@ import {
   MapPin,
   Settings,
   Copy,
-  CheckCircle2
+  CheckCircle2,
+  CheckSquare,
+  Trophy,
+  Layers
 } from 'lucide-react';
 import { Language, SUPPORTED_LANGUAGES, t } from '../../i18n';
-import { QuizConfig } from '../../types';
+import { QuizConfig, QuestionType } from '../../types';
 import {
   getStoredApiKey,
   getStoredAiUseImages,
   setStoredAiUseImages,
+  getStoredAiQuestionTypes,
+  setStoredAiQuestionTypes,
   generateQuizClient
 } from '../../geminiClient';
 import { registerQuestionTranslation } from '../../translationCache';
@@ -71,9 +76,39 @@ export const AiGeneratorTab: React.FC<AiGeneratorTabProps> = ({
   const [aiKidAgeTo, setAiKidAgeTo] = useState<number | string>(10);
   const [aiGeotagLandmarks, setAiGeotagLandmarks] = useState(false);
   const [aiIncludeImages, setAiIncludeImages] = useState<boolean>(() => getStoredAiUseImages());
+  const [selectedQuestionTypes, setSelectedQuestionTypes] = useState<QuestionType[]>(() => getStoredAiQuestionTypes());
   const [promptLanguages, setPromptLanguages] = useState<Language[]>(['sv']);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedCustomPrompt, setCopiedCustomPrompt] = useState(false);
+
+  const toggleQuestionType = (type: QuestionType) => {
+    setSelectedQuestionTypes(prev => {
+      let next: QuestionType[];
+      if (prev.includes(type)) {
+        if (prev.length <= 1) {
+          alert(t(lang, 'aiAtLeastOneTypeAlert'));
+          return prev;
+        }
+        next = prev.filter(t => t !== type);
+      } else {
+        next = [...prev, type];
+      }
+      setStoredAiQuestionTypes(next);
+      return next;
+    });
+  };
+
+  const handleSelectAllQuestionTypes = () => {
+    const all: QuestionType[] = ['options', 'text', 'points', 'ladder'];
+    setSelectedQuestionTypes(all);
+    setStoredAiQuestionTypes(all);
+  };
+
+  const handleSelectOnlyOptions = () => {
+    const only: QuestionType[] = ['options'];
+    setSelectedQuestionTypes(only);
+    setStoredAiQuestionTypes(only);
+  };
 
   const togglePromptLanguage = (code: Language) => {
     setPromptLanguages(prev =>
@@ -84,13 +119,110 @@ export const AiGeneratorTab: React.FC<AiGeneratorTabProps> = ({
   };
 
   const copyCustomPromptToClipboard = async () => {
-    const promptText = `Skapa ${aiCount} tipspromenadfrågor med tema "${aiTopic || 'Allmänbildning'}" för ${aiTarget === 'barn' ? `barn (${aiKidAgeFrom}-${aiKidAgeTo} år)` : aiTarget === 'vuxen' ? 'vuxna' : `både barn (${aiKidAgeFrom}-${aiKidAgeTo} år) och vuxna`}.
-Varje fråga ska ha 3 svarsalternativ (1, X, 2), där endast 1 är rätt.
-Svara med giltig JSON i följande format:
-{
-  "barnQuestions": [...],
-  "vuxenQuestions": [...]
-}`;
+    const langNames: Record<string, string> = {
+      sv: 'svenska',
+      en: 'engelska',
+      es: 'spanska',
+      de: 'tyska',
+      fr: 'franska',
+    };
+    const mainLang = langNames[promptLanguages[0]] || 'svenska';
+
+    let typesDescription = '';
+    const sampleItems: any[] = [];
+
+    if (selectedQuestionTypes.includes('options')) {
+      typesDescription += `\n1. "options" (Flervalsfråga / 1X2):
+- "type": "options"
+- "text": "Frågetext"
+- "options": ["Alternativ 1", "Alternativ 2", "Alternativ 3"] (2 till 4 svarsalternativ)
+- "correctAnswer": 0-baserat heltal (0, 1 eller 2) för rätt alternativ i options-listan`;
+      sampleItems.push({
+        type: "options",
+        text: "Vad heter Sveriges huvudstad?",
+        options: ["Stockholm", "Göteborg", "Malmö"],
+        correctAnswer: 0
+      });
+    }
+
+    if (selectedQuestionTypes.includes('text')) {
+      typesDescription += `\n2. "text" (Fritextfråga / skrivet svar):
+- "type": "text"
+- "text": "Öppen kunskapsfråga där deltagaren själv skriver in svaret"
+- "correctTextAnswer": "Exakt rätt svar (t.ex. Stockholm)"
+- "acceptedTextAnswers": ["Alternativ stavning 1", "Synonym 2"] (valfria godkända varianter)
+- "options": [] (lämna tom)`;
+      sampleItems.push({
+        type: "text",
+        text: "Vilken stad kallas ofta för Ljusets stad?",
+        correctTextAnswer: "Paris",
+        acceptedTextAnswers: ["Staden Paris"]
+      });
+    }
+
+    if (selectedQuestionTypes.includes('points')) {
+      typesDescription += `\n3. "points" (Poängfråga / uppskattning / utmaning):
+- "type": "points"
+- "text": "Uppskattningsfråga eller utmaning (t.ex. gissa vikt, antal, eller fysisk utmaning)"
+- "maxPoints": 10 (maximalt antal poäng som kan tilldelas)
+- "options": [] (lämna tom)`;
+      sampleItems.push({
+        type: "points",
+        text: "Gissa hur mycket en fullvuxen älg väger i kg (ca 400-500 kg). Närmast får max 10 poäng!",
+        maxPoints: 10
+      });
+    }
+
+    if (selectedQuestionTypes.includes('ladder')) {
+      typesDescription += `\n4. "ladder" (Poängtrappa / På spåret):
+- "type": "ladder"
+- "text": "Övergripande rubrik/ämne (t.ex. 'Vart är vi på väg? (Resmål)' eller 'Vem är personen?')"
+- "clues": Exakt 3 stegvisa ledtrådar i fallande svårighetsgrad:
+  * Ledtråd 1: Klurig, svår ledtråd värd 10 poäng
+  * Ledtråd 2: Medelsvår ledtråd med geografi eller historia värd 7 poäng
+  * Ledtråd 3: Lätt ledtråd som leder direkt till svaret värd 4 poäng
+- "ladderPoints": [10, 7, 4]
+- "correctTextAnswer": "Rätt svar (t.ex. Rom)"
+- "acceptedTextAnswers": ["Roma"] (valfria godkända varianter)
+- "options": [] (lämna tom)`;
+      sampleItems.push({
+        type: "ladder",
+        text: "Vart är vi på väg? (Resmål)",
+        clues: [
+          "10p: Vi lämnar hamnstaden och reser mot lejonens och kristallkronornas stad...",
+          "7p: Denna historiska huvudstad pryds av Colosseum och Forum Romanum...",
+          "4p: Alla vägar bär hit och Fontana di Trevi lockar miljoner turister..."
+        ],
+        ladderPoints: [10, 7, 4],
+        correctTextAnswer: "Rom",
+        acceptedTextAnswers: ["Roma"]
+      });
+    }
+
+    const templateObj: any = {
+      title: aiTopic ? `Tipspromenad: ${aiTopic}` : "Tipspromenad"
+    };
+    if (aiTarget === 'barn' || aiTarget === 'båda') {
+      templateObj.barnQuestions = sampleItems;
+    }
+    if (aiTarget === 'vuxen' || aiTarget === 'båda') {
+      templateObj.vuxenQuestions = sampleItems;
+    }
+
+    const promptText = `Skapa ${aiCount} tipspromenadfrågor med tema "${aiTopic || 'Allmänbildning'}" för ${
+      aiTarget === 'barn' 
+        ? `barn (${aiKidAgeFrom}-${aiKidAgeTo} år)` 
+        : aiTarget === 'vuxen' 
+        ? 'vuxna' 
+        : `både barn (${aiKidAgeFrom}-${aiKidAgeTo} år) och vuxna`
+    }.
+Språk: Frågorna, ledtrådarna och svaren MÅSTE vara på ${mainLang}.
+
+TILLÅTNA FRÅGETYPER (skapa en engagerande, varierad mix av följande):${typesDescription}
+
+Svara med ett giltigt JSON-objekt enligt följande struktur utan kodblock eller extra text:
+${JSON.stringify(templateObj, null, 2)}`;
+
     try {
       await navigator.clipboard.writeText(promptText);
       setCopiedCustomPrompt(true);
@@ -113,6 +245,11 @@ Svara med giltig JSON i följande format:
       return;
     }
 
+    if (selectedQuestionTypes.length === 0) {
+      alert(t(lang, 'aiAtLeastOneTypeAlert'));
+      return;
+    }
+
     setIsGenerating(true);
     try {
       const selectedLangs = promptLanguages.length > 0 ? promptLanguages : [lang];
@@ -127,6 +264,7 @@ Svara med giltig JSON i följande format:
         geotagLandmarks: aiGeotagLandmarks,
         includeImages: aiIncludeImages,
         targetLanguages: selectedLangs,
+        questionTypes: selectedQuestionTypes,
       });
 
       // Register all newly generated translations into the local cache
@@ -319,6 +457,185 @@ Svara med giltig JSON i följande format:
             )}
           </div>
 
+          {/* Question Types To Include */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">
+                  {t(lang, 'aiQuestionTypesLabel')}
+                </label>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                  {selectedQuestionTypes.length}/4
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSelectAllQuestionTypes}
+                  className="px-2.5 py-1 text-[10px] font-bold text-indigo-700 hover:text-indigo-900 bg-white/80 hover:bg-white border border-indigo-200 rounded-lg shadow-2xs transition-all active:scale-95 cursor-pointer"
+                >
+                  {t(lang, 'aiSelectAllTypes')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectOnlyOptions}
+                  className="px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white/80 hover:bg-white border border-indigo-200 rounded-lg shadow-2xs transition-all active:scale-95 cursor-pointer"
+                >
+                  {t(lang, 'aiOnlyOptionsType')}
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-slate-500 leading-tight">
+              {t(lang, 'aiQuestionTypesDesc')}
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              {/* Options */}
+              <button
+                type="button"
+                onClick={() => toggleQuestionType('options')}
+                className={`p-3 rounded-2xl border-2 text-left transition-all flex items-start gap-3 active:scale-[0.98] cursor-pointer ${
+                  selectedQuestionTypes.includes('options')
+                    ? 'bg-white border-indigo-600 shadow-md ring-2 ring-indigo-200'
+                    : 'bg-white/60 border-slate-200 hover:bg-white text-slate-500 opacity-70'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
+                  selectedQuestionTypes.includes('options')
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-400'
+                }`}>
+                  <CheckSquare className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-slate-900 flex items-center gap-1.5">
+                      <span>{t(lang, 'optionsQuestionType')}</span>
+                    </span>
+                    <span className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      selectedQuestionTypes.includes('options')
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {selectedQuestionTypes.includes('options') && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                    {t(lang, 'aiOptionsTypeDesc')}
+                  </p>
+                </div>
+              </button>
+
+              {/* Text */}
+              <button
+                type="button"
+                onClick={() => toggleQuestionType('text')}
+                className={`p-3 rounded-2xl border-2 text-left transition-all flex items-start gap-3 active:scale-[0.98] cursor-pointer ${
+                  selectedQuestionTypes.includes('text')
+                    ? 'bg-white border-sky-500 shadow-md ring-2 ring-sky-200'
+                    : 'bg-white/60 border-slate-200 hover:bg-white text-slate-500 opacity-70'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
+                  selectedQuestionTypes.includes('text')
+                    ? 'bg-sky-500 text-white'
+                    : 'bg-slate-100 text-slate-400'
+                }`}>
+                  <span className="text-sm">🔤</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-slate-900 flex items-center gap-1.5">
+                      <span>{t(lang, 'textQuestionType')}</span>
+                    </span>
+                    <span className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      selectedQuestionTypes.includes('text')
+                        ? 'bg-sky-500 border-sky-500 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {selectedQuestionTypes.includes('text') && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                    {t(lang, 'aiTextTypeDesc')}
+                  </p>
+                </div>
+              </button>
+
+              {/* Points */}
+              <button
+                type="button"
+                onClick={() => toggleQuestionType('points')}
+                className={`p-3 rounded-2xl border-2 text-left transition-all flex items-start gap-3 active:scale-[0.98] cursor-pointer ${
+                  selectedQuestionTypes.includes('points')
+                    ? 'bg-white border-amber-500 shadow-md ring-2 ring-amber-200'
+                    : 'bg-white/60 border-slate-200 hover:bg-white text-slate-500 opacity-70'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
+                  selectedQuestionTypes.includes('points')
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-slate-100 text-slate-400'
+                }`}>
+                  <Trophy className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-slate-900 flex items-center gap-1.5">
+                      <span>{t(lang, 'pointsQuestionType')}</span>
+                    </span>
+                    <span className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      selectedQuestionTypes.includes('points')
+                        ? 'bg-amber-500 border-amber-500 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {selectedQuestionTypes.includes('points') && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                    {t(lang, 'aiPointsTypeDesc')}
+                  </p>
+                </div>
+              </button>
+
+              {/* Ladder */}
+              <button
+                type="button"
+                onClick={() => toggleQuestionType('ladder')}
+                className={`p-3 rounded-2xl border-2 text-left transition-all flex items-start gap-3 active:scale-[0.98] cursor-pointer ${
+                  selectedQuestionTypes.includes('ladder')
+                    ? 'bg-white border-purple-600 shadow-md ring-2 ring-purple-200'
+                    : 'bg-white/60 border-slate-200 hover:bg-white text-slate-500 opacity-70'
+                }`}
+              >
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 font-bold ${
+                  selectedQuestionTypes.includes('ladder')
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-slate-100 text-slate-400'
+                }`}>
+                  <span className="text-sm">🪜</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-xs text-slate-900 flex items-center gap-1.5">
+                      <span>{t(lang, 'ladderQuestionType')}</span>
+                    </span>
+                    <span className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                      selectedQuestionTypes.includes('ladder')
+                        ? 'bg-purple-600 border-purple-600 text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}>
+                      {selectedQuestionTypes.includes('ladder') && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                    {t(lang, 'aiLadderTypeDesc')}
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
           {/* Supported Output Languages */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-black text-indigo-600 uppercase tracking-widest block">
@@ -402,7 +719,10 @@ Svara med giltig JSON i följande format:
               ) : (
                 <>
                   <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>{t(lang, 'generateQuestionsNowBtn')}</span>
+                  <span>
+                    {t(lang, 'generateQuestionsNowBtn')}
+                    {selectedQuestionTypes.length > 1 ? ` (${selectedQuestionTypes.length} typer)` : ''}
+                  </span>
                 </>
               )}
             </button>

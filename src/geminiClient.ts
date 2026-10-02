@@ -1,6 +1,25 @@
+import { QuestionType } from './types';
+
 async function getGeminiSdk(apiKey: string) {
   const { GoogleGenAI, Type } = await import('@google/genai');
   return { ai: new GoogleGenAI({ apiKey }), Type };
+}
+
+async function generateContentWithFallback(ai: any, options: { contents: any; config?: any }) {
+  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  let lastError: any = null;
+  for (const model of modelsToTry) {
+    try {
+      return await ai.models.generateContent({
+        ...options,
+        model,
+      });
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`Model ${model} failed, trying fallback...`, err?.message || err);
+    }
+  }
+  throw lastError || new Error("All Gemini model fallbacks failed.");
 }
 
 export function getStoredApiKey(): string {
@@ -41,6 +60,32 @@ export function setStoredAiUseImages(enabled: boolean): void {
   }
 }
 
+export function getStoredAiQuestionTypes(): QuestionType[] {
+  if (typeof window === 'undefined') return ['options', 'text', 'points', 'ladder'];
+  try {
+    const raw = localStorage.getItem('gemini_ai_question_types');
+    if (!raw) return ['options', 'text', 'points', 'ladder'];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const valid: QuestionType[] = parsed.filter((t: any) => ['options', 'text', 'points', 'ladder'].includes(t));
+      if (valid.length > 0) return valid;
+    }
+  } catch (e) {
+    console.warn('Unable to load AI question types setting from localStorage', e);
+  }
+  return ['options', 'text', 'points', 'ladder'];
+}
+
+export function setStoredAiQuestionTypes(types: QuestionType[]): void {
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('gemini_ai_question_types', JSON.stringify(types));
+    } catch (e) {
+      console.warn('Unable to persist AI question types setting to localStorage', e);
+    }
+  }
+}
+
 export async function generateQuizClient(params: {
   topics: string;
   count: number;
@@ -52,6 +97,7 @@ export async function generateQuizClient(params: {
   geotagLandmarks?: boolean;
   includeImages?: boolean;
   targetLanguages?: string[];
+  questionTypes?: QuestionType[];
 }) {
   const apiKey = params.apiKey || getStoredApiKey();
   if (!apiKey) {
@@ -59,11 +105,26 @@ export async function generateQuizClient(params: {
   }
 
   const { ai, Type } = await getGeminiSdk(apiKey);
-  const { topics, count, target, lang, ageFrom = 5, ageTo = 10, geotagLandmarks = false, includeImages = false, targetLanguages = [] } = params;
+  const { 
+    topics, 
+    count, 
+    target, 
+    lang, 
+    ageFrom = 5, 
+    ageTo = 10, 
+    geotagLandmarks = false, 
+    includeImages = false, 
+    targetLanguages = [],
+    questionTypes
+  } = params;
   const currentLang = lang || 'sv';
 
   const isBarn = target === 'barn' || target === 'båda';
   const isVuxen = target === 'vuxen' || target === 'båda';
+
+  const selectedTypes: QuestionType[] = (questionTypes && questionTypes.length > 0)
+    ? questionTypes
+    : ['options', 'text', 'points', 'ladder'];
 
   const langNames: Record<string, string> = {
     sv: 'Swedish',
@@ -85,10 +146,63 @@ export async function generateQuizClient(params: {
   };
   const targetLangName = langNames[currentLang] || 'Swedish';
 
-  let prompt = `Create a quiz with the theme "${topics}". The questions and answers MUST be in ${targetLangName}. Each question can have between 2 and 5 multiple choice options in the "options" array, and "correctAnswer" is the 0-based index of the correct option.\n`;
+  let typeInstructions = `\nALLOWED QUESTION TYPES TO GENERATE:
+You MUST create questions using ONLY the following type(s): ${selectedTypes.map(t => `"${t}"`).join(', ')}.
+${selectedTypes.length > 1 ? 'Distribute the questions evenly and engagingly across these allowed types so the quiz has great variety!\n' : ''}
+Detailed specifications for each allowed type (set the "type" field to one of: ${selectedTypes.map(t => `"${t}"`).join(', ')}):
+`;
+
+  if (selectedTypes.includes('options')) {
+    typeInstructions += `1. "options" (Multiple-choice / 1X2):
+   - "type": "options"
+   - "text": The question text.
+   - "options": An array of 2 to 4 answer options (e.g. ["Option 1", "Option 2", "Option 3"]).
+   - "correctAnswer": 0-based integer index of the correct option in "options" array.
+`;
+  }
+
+  if (selectedTypes.includes('text')) {
+    typeInstructions += `2. "text" (Open Free-Text / Fritextfråga):
+   - "type": "text"
+   - "text": A trivia question where participants must type the answer (e.g. "Vilken stad kallas för Ljusets stad?").
+   - "correctTextAnswer": The exact primary correct answer (e.g. "Paris").
+   - "acceptedTextAnswers": Array of 1-3 alternate accepted answers, common abbreviations or synonyms (e.g. ["Staden Paris"]).
+   - "options": [] (empty array).
+`;
+  }
+
+  if (selectedTypes.includes('points')) {
+    typeInstructions += `3. "points" (Estimation or point challenge / Poängfråga):
+   - "type": "points"
+   - "text": An estimation question or challenge (e.g. "Gissa hur mycket en fullvuxen blåval väger i ton (ca 150 ton). Närmast gissning får flest poäng!" or a fun activity challenge).
+   - "maxPoints": Maximum achievable points as an integer (typically 10, or 5).
+   - "options": [] (empty array).
+`;
+  }
+
+  if (selectedTypes.includes('ladder')) {
+    typeInstructions += `4. "ladder" (Clue ladder / "På spåret" style / Poängtrappa):
+   - "type": "ladder"
+   - "text": The overarching clue-hunt topic or question (e.g. "Vart är vi på väg? (Resmål)" or "Vem är personen?").
+   - "clues": An array of EXACTLY 3 step-by-step clues ordered from hardest to easiest:
+     * clues[0]: Difficult, cryptic clue (worth 10 points)
+     * clues[1]: Medium clue with historical, geographical or cultural details (worth 7 points)
+     * clues[2]: Easy, obvious clue leading directly to the solution (worth 4 points)
+   - "ladderPoints": [10, 7, 4]
+   - "correctTextAnswer": The destination, person or solution (e.g. "Rom").
+   - "acceptedTextAnswers": Array of alternate spellings or accepted synonyms (e.g. ["Roma"]).
+   - "options": [] (empty array).
+`;
+  }
+
+  let prompt = `Create a quiz with the theme "${topics}". The questions, clues, and answers MUST be in ${targetLangName}. 
+
+You MUST return valid JSON.
+${typeInstructions}
+`;
 
   if (geotagLandmarks) {
-    prompt += `GEOTAGGING & REAL-WORLD COORDINATES REQUIREMENT:
+    prompt += `\nGEOTAGGING & REAL-WORLD COORDINATES REQUIREMENT:
 If the questions are about or mention specific real-world places, landmarks, monuments, museums, historical buildings, parks, stations, or geographical locations (e.g. "Eiffel Tower", "Stockholm Palace", "Big Ben", "Colosseum", "Central Park", "Skansen", "Liseberg", "Vasa Museum"):
 For each such question, you MUST provide its real-world GPS coordinates:
 - "latitude": float (WGS84 decimal degrees, e.g. 59.3268)
@@ -98,7 +212,7 @@ If a question is general trivia without a specific physical place, set latitude 
   }
 
   if (includeImages) {
-    prompt += `IMAGES REQUIREMENT (FOR QUESTIONS AND ANSWERS):
+    prompt += `\nIMAGES REQUIREMENT (FOR QUESTIONS AND ANSWERS):
 You have the ability to include high-quality, illustrative images for questions and/or individual answer options:
 1. Question Image ("imageUrl"): If the question is about an object, animal, flag, person, landmark, artwork, scientific diagram, or visual puzzle, provide a direct, clean image URL (e.g. from Wikimedia Commons, Unsplash direct URLs like "https://images.unsplash.com/photo-..." or reliable public web sources, or a clean SVG data URI like "data:image/svg+xml;utf8,..."). If no image is needed, set imageUrl to null or empty string.
 2. Option Images ("optionImages"): When an option is visual (e.g. "Which flag belongs to Sweden?", "Which bird is an eagle?", "Select the painting by Van Gogh", shapes, colors, flags, animals), provide an array of image URLs corresponding 1-to-1 with the options array. If an option does not have an image, put null or empty string for that index.
@@ -106,17 +220,23 @@ Ensure URLs are valid and safe.\n`;
   }
 
   if (target === 'båda') {
-    prompt += `Create a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old) and ${count} questions for adults (more challenging).`;
+    prompt += `\nCreate a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old) and ${count} questions for adults (more challenging).`;
   } else if (target === 'barn') {
-    prompt += `Create a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old).`;
+    prompt += `\nCreate a total of ${count} questions for children (approx. ${ageFrom}-${ageTo} years old).`;
   } else {
-    prompt += `Create a total of ${count} questions for adults (challenging but fun).`;
+    prompt += `\nCreate a total of ${count} questions for adults (challenging but fun).`;
   }
 
   const questionItemProperties: any = {
+    type: { type: Type.STRING },
     text: { type: Type.STRING },
     options: { type: Type.ARRAY, items: { type: Type.STRING } },
-    correctAnswer: { type: Type.INTEGER }
+    correctAnswer: { type: Type.INTEGER },
+    correctTextAnswer: { type: Type.STRING },
+    acceptedTextAnswers: { type: Type.ARRAY, items: { type: Type.STRING } },
+    maxPoints: { type: Type.INTEGER },
+    clues: { type: Type.ARRAY, items: { type: Type.STRING } },
+    ladderPoints: { type: Type.ARRAY, items: { type: Type.INTEGER } }
   };
   if (geotagLandmarks) {
     questionItemProperties.latitude = { type: Type.NUMBER };
@@ -137,7 +257,7 @@ Ensure URLs are valid and safe.\n`;
       items: {
         type: Type.OBJECT,
         properties: questionItemProperties,
-        required: ["text", "options", "correctAnswer"]
+        required: ["text"]
       }
     };
     required.push("barnQuestions");
@@ -149,14 +269,13 @@ Ensure URLs are valid and safe.\n`;
       items: {
         type: Type.OBJECT,
         properties: questionItemProperties,
-        required: ["text", "options", "correctAnswer"]
+        required: ["text"]
       }
     };
     required.push("vuxenQuestions");
   }
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+  const response = await generateContentWithFallback(ai, {
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -177,13 +296,62 @@ Ensure URLs are valid and safe.\n`;
       ? q.optionImages.map((img: any) => typeof img === 'string' && img.trim() ? img.trim() : undefined)
       : undefined;
 
+    // Detect type safely with fallbacks
+    let qType: QuestionType = 'options';
+    if (q.type && ['options', 'text', 'points', 'ladder'].includes(q.type)) {
+      qType = q.type as QuestionType;
+    } else if (Array.isArray(q.clues) && q.clues.length > 0) {
+      qType = 'ladder';
+    } else if (typeof q.maxPoints === 'number' && q.maxPoints > 0 && (!q.options || q.options.length === 0)) {
+      qType = 'points';
+    } else if (q.correctTextAnswer && (!q.options || q.options.length === 0)) {
+      qType = 'text';
+    } else if (selectedTypes.length === 1) {
+      qType = selectedTypes[0];
+    }
+
+    const options = qType === 'options'
+      ? (Array.isArray(q.options) && q.options.length > 0 ? q.options.map(String) : ['Svar 1', 'Svar X', 'Svar 2'])
+      : [];
+
+    const correctAnswers = qType === 'options'
+      ? [typeof q.correctAnswer === 'number' ? q.correctAnswer : (Array.isArray(q.correctAnswers) ? q.correctAnswers[0] : 0)]
+      : [];
+
+    const correctTextAnswer = (qType === 'text' || qType === 'ladder')
+      ? (typeof q.correctTextAnswer === 'string' && q.correctTextAnswer.trim() ? q.correctTextAnswer.trim() : (q.options?.[0] || 'Rätt svar'))
+      : undefined;
+
+    const acceptedTextAnswers = (qType === 'text' || qType === 'ladder') && Array.isArray(q.acceptedTextAnswers)
+      ? q.acceptedTextAnswers.map((s: any) => String(s).trim()).filter(Boolean)
+      : undefined;
+
+    const maxPoints = qType === 'points'
+      ? (typeof q.maxPoints === 'number' && q.maxPoints > 0 ? q.maxPoints : 10)
+      : undefined;
+
+    const clues = qType === 'ladder'
+      ? (Array.isArray(q.clues) && q.clues.length > 0 ? q.clues.map(String) : ['Ledtråd 1 (svår)', 'Ledtråd 2 (medel)', 'Ledtråd 3 (lätt)'])
+      : undefined;
+
+    const ladderPoints = qType === 'ladder'
+      ? (Array.isArray(q.ladderPoints) && q.ladderPoints.length > 0 ? q.ladderPoints.map(Number) : [10, 7, 4])
+      : undefined;
+
     return {
       ...q,
       id: Math.random().toString(36).substring(2, 9),
-      options: q.options || [],
+      type: qType,
+      text: q.text || 'Frågetext...',
+      options,
       imageUrl: rawImageUrl,
-      optionImages: rawOptionImages,
-      correctAnswers: [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
+      optionImages: qType === 'options' ? rawOptionImages : undefined,
+      correctAnswers,
+      correctTextAnswer,
+      acceptedTextAnswers,
+      maxPoints,
+      clues,
+      ladderPoints,
       originalLanguage: currentLang,
       location: hasCoords ? {
         lat: q.latitude,
@@ -245,6 +413,8 @@ Ensure URLs are valid and safe.\n`;
       id: q.id,
       text: q.text,
       options: q.options || [],
+      clues: q.clues || [],
+      correctTextAnswer: q.correctTextAnswer,
       originalLanguage: currentLang
     }));
 
@@ -258,7 +428,9 @@ Ensure URLs are valid and safe.\n`;
               bQ.translations = bQ.translations || {};
               bQ.translations[tgtLang] = {
                 text: item.text,
-                options: item.options || bQ.options
+                options: item.options || bQ.options,
+                clues: item.clues || bQ.clues,
+                correctTextAnswer: item.correctTextAnswer || bQ.correctTextAnswer
               };
             }
             const vQ = quizData.vuxenQuestions?.find((vq: any) => vq.id === item.id);
@@ -266,7 +438,9 @@ Ensure URLs are valid and safe.\n`;
               vQ.translations = vQ.translations || {};
               vQ.translations[tgtLang] = {
                 text: item.text,
-                options: item.options || vQ.options
+                options: item.options || vQ.options,
+                clues: item.clues || vQ.clues,
+                correctTextAnswer: item.correctTextAnswer || vQ.correctTextAnswer
               };
             }
           }
@@ -281,7 +455,7 @@ Ensure URLs are valid and safe.\n`;
 }
 
 export async function batchTranslateQuizQuestions(params: {
-  questions: Array<{ id: string; text: string; options?: string[]; originalLanguage?: string; translations?: Record<string, { text: string; options: string[] }> }>;
+  questions: Array<{ id: string; text: string; options?: string[]; clues?: string[]; correctTextAnswer?: string; originalLanguage?: string; translations?: Record<string, { text: string; options: string[]; clues?: string[]; correctTextAnswer?: string }> }>;
   targetLanguages: string[];
   apiKey?: string;
   onProgress?: (current: number, total: number, langCode: string) => void;
@@ -309,6 +483,8 @@ export async function batchTranslateQuizQuestions(params: {
           id: q.id,
           text: q.text,
           options: q.options || [],
+          clues: q.clues || [],
+          correctTextAnswer: q.correctTextAnswer,
           originalLanguage: q.originalLanguage || 'sv'
         }));
 
@@ -320,7 +496,9 @@ export async function batchTranslateQuizQuestions(params: {
               targetQ.translations = targetQ.translations || {};
               targetQ.translations[tgtLang] = {
                 text: item.text,
-                options: item.options || targetQ.options
+                options: item.options || targetQ.options,
+                clues: item.clues || targetQ.clues,
+                correctTextAnswer: item.correctTextAnswer || targetQ.correctTextAnswer
               };
             }
           }
@@ -340,7 +518,7 @@ export async function batchTranslateQuizQuestions(params: {
 }
 
 export async function translateQuestionsClient(
-  questions: Array<{ id: string; text: string; options?: string[]; originalLanguage?: string }>,
+  questions: Array<{ id: string; text: string; options?: string[]; clues?: string[]; correctTextAnswer?: string; originalLanguage?: string }>,
   targetLanguage: string,
   apiKeyOverride?: string
 ) {
@@ -355,13 +533,15 @@ export async function translateQuestionsClient(
 
   const { ai, Type } = await getGeminiSdk(apiKey);
 
-  const prompt = `Translate the following quiz questions and options directly into target language code: "${targetLanguage}".
-Each question object has an "id", "text", "originalLanguage", and optional "options".
-Translate "text" and each option in "options" accurately into target language "${targetLanguage}".
-Keep the exact same "id" for each question. Preserve the original meaning and order of options.`;
+  const prompt = `Translate the following quiz questions directly into target language code: "${targetLanguage}".
+Each question object has an "id", "text", "originalLanguage", and optional "options", "clues", and "correctTextAnswer".
+- Translate "text" accurately into "${targetLanguage}".
+- If "options" array is present, translate each option preserving original order.
+- If "clues" array is present, translate each clue text preserving order.
+- If "correctTextAnswer" is present, translate it into "${targetLanguage}" if it is a general noun or phrase, or keep proper name unchanged.
+Keep the exact same "id" for each question. Preserve the original meaning.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+  const response = await generateContentWithFallback(ai, {
     contents: prompt + "\nInput Questions JSON:\n" + JSON.stringify(questions),
     config: {
       responseMimeType: "application/json",
@@ -375,7 +555,9 @@ Keep the exact same "id" for each question. Preserve the original meaning and or
               properties: {
                 id: { type: Type.STRING },
                 text: { type: Type.STRING },
-                options: { type: Type.ARRAY, items: { type: Type.STRING } }
+                options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                clues: { type: Type.ARRAY, items: { type: Type.STRING } },
+                correctTextAnswer: { type: Type.STRING }
               },
               required: ["id", "text"]
             }
@@ -438,8 +620,7 @@ Output structure:
   "detected_language": "sv" | "en" | "de" | "fr" | "es" | "no" | "da" | "fi" | "it" | "et" | "lv" | "lt" | "uk"
 }`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+  const response = await generateContentWithFallback(ai, {
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -486,8 +667,7 @@ Text/Question: "${textOrPlace}"
 
 If a specific location or landmark can be identified, provide its coordinates. If the text has no connection to any physical place on Earth, return found: false.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3.6-flash",
+  const response = await generateContentWithFallback(ai, {
     contents: prompt,
     config: {
       responseMimeType: "application/json",

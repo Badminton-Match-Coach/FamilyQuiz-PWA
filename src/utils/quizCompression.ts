@@ -30,7 +30,7 @@ import { assertValidQuizConfig } from './quizValidation';
 
 interface MinifiedQuestion {
   i?: string;
-  y?: 'options' | 'text' | 'points';
+  y?: 'options' | 'text' | 'points' | 'ladder';
   q: string;
   j?: string; // imageUrl (URL link)
   p?: string[]; // optionImages (URL links)
@@ -39,6 +39,8 @@ interface MinifiedQuestion {
   l?: [number, number];
   h?: boolean; // hideLocationOnMap (treasure hunt)
   m?: number;
+  e?: string[]; // clues
+  lp?: number[]; // ladderPoints
   f?: string;
   w?: 'always' | 'correct' | 'incorrect';
   a?: string;
@@ -78,6 +80,8 @@ function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
   }
   if (q.hideLocationOnMap || q.location?.hideOnMap) min.h = true;
   if (typeof q.maxPoints === 'number') min.m = q.maxPoints;
+  if (q.clues && q.clues.length > 0) min.e = q.clues;
+  if (q.ladderPoints && q.ladderPoints.length > 0) min.lp = q.ladderPoints;
   if (q.followUpQuestionId) min.f = q.followUpQuestionId;
   if (q.followUpMode && q.followUpMode !== 'always') min.w = q.followUpMode;
   if (q.correctTextAnswer) min.a = q.correctTextAnswer;
@@ -135,6 +139,8 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
     location: min.l ? { lat: min.l[0], lng: min.l[1], hideOnMap: min.h || undefined } : undefined,
     hideLocationOnMap: min.h || undefined,
     maxPoints: min.m,
+    clues: min.e,
+    ladderPoints: min.lp,
     followUpQuestionId: min.f,
     followUpMode: min.w || 'always',
     correctTextAnswer: min.a,

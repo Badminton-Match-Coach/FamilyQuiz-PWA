@@ -21,7 +21,7 @@ export interface Location {
   hideOnMap?: boolean;
 }
 
-export type QuestionType = 'options' | 'points' | 'text';
+export type QuestionType = 'options' | 'points' | 'text' | 'ladder';
 
 export interface Question {
   id: string;
@@ -34,12 +34,14 @@ export interface Question {
   correctTextAnswer?: string; // Correct text answer for 'text' type (e.g. "Stockholm")
   acceptedTextAnswers?: string[]; // Optional alternative accepted answers (e.g. ["Sthlm", "Hufvudstaden"])
   maxPoints?: number; // Optional max points for points questions
+  clues?: string[]; // Array of clues for 'ladder' type
+  ladderPoints?: number[]; // Array of points per clue level for 'ladder' type
   followUpQuestionId?: string;
   followUpMode?: 'always' | 'correct' | 'incorrect';
   location?: Location;
   hideLocationOnMap?: boolean; // When true: question position is hidden from participants on the map (treasure hunt)
   originalLanguage?: Language; // Language code when created (e.g. 'sv', 'fr', 'en', 'es')
-  translations?: Record<string, { text: string; options: string[]; correctTextAnswer?: string }>;
+  translations?: Record<string, { text: string; options: string[]; correctTextAnswer?: string; clues?: string[] }>;
 }
 
 export interface QuizConfig {
@@ -74,6 +76,7 @@ export interface AnswerRecord {
   textAnswer?: string;
   pointsScored?: number;
   isCorrect?: boolean;
+  cluesCount?: number;
   timestamp: number;
 }
 

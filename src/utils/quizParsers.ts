@@ -92,11 +92,26 @@ export function formatImportedQuestion(q: any, idx: number, lang: Language = 'sv
   const qId = q.id || crypto.randomUUID();
   const origLang = (q.originalLanguage as Language) || lang;
   const text = q.text || q.question || `${t(lang, 'question')} ${idx + 1}`;
-  const options = Array.isArray(q.options) && q.options.length > 0
-    ? q.options.map(String)
-    : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')];
 
-  let translationsObj: Record<string, { text: string; options: string[] }> | undefined = undefined;
+  // Robust question type detection
+  let detectedType: QuestionType = 'options';
+  if (q.type === 'points' || q.type === 'text' || q.type === 'ladder' || q.type === 'options') {
+    detectedType = q.type as QuestionType;
+  } else if (Array.isArray(q.clues) && q.clues.length > 0) {
+    detectedType = 'ladder';
+  } else if (typeof q.maxPoints === 'number' && q.maxPoints > 0 && (!q.options || q.options.length === 0)) {
+    detectedType = 'points';
+  } else if (typeof q.correctTextAnswer === 'string' && q.correctTextAnswer.trim() && (!q.options || q.options.length === 0)) {
+    detectedType = 'text';
+  }
+
+  const options = detectedType === 'options'
+    ? (Array.isArray(q.options) && q.options.length > 0
+        ? q.options.map(String)
+        : [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')])
+    : (Array.isArray(q.options) ? q.options.map(String) : []);
+
+  let translationsObj: Record<string, { text: string; options: string[]; correctTextAnswer?: string; clues?: string[] }> | undefined = undefined;
   if (q.translations && typeof q.translations === 'object') {
     translationsObj = {};
     Object.keys(q.translations).forEach((tLang) => {
@@ -104,7 +119,14 @@ export function formatImportedQuestion(q: any, idx: number, lang: Language = 'sv
       if (item && typeof item === 'object' && item.text) {
         const transText = String(item.text);
         const transOpts = Array.isArray(item.options) ? item.options.map(String) : options;
-        translationsObj![tLang] = { text: transText, options: transOpts };
+        const transClues = Array.isArray(item.clues) ? item.clues.map(String) : undefined;
+        const transCorrectText = typeof item.correctTextAnswer === 'string' ? item.correctTextAnswer : undefined;
+        translationsObj![tLang] = { 
+          text: transText, 
+          options: transOpts,
+          clues: transClues,
+          correctTextAnswer: transCorrectText
+        };
 
         registerQuestionTranslation(qId, origLang, text, tLang as Language, { text: transText, options: transOpts });
       }
@@ -140,13 +162,27 @@ export function formatImportedQuestion(q: any, idx: number, lang: Language = 'sv
     id: qId,
     text,
     imageUrl,
-    type: (q.type === 'points' || q.type === 'text' || q.type === 'options') ? (q.type as QuestionType) : 'options',
+    type: detectedType,
     options,
-    optionImages,
-    correctAnswers: Array.isArray(q.correctAnswers) ? q.correctAnswers : [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0],
-    correctTextAnswer: typeof q.correctTextAnswer === 'string' ? q.correctTextAnswer : undefined,
-    acceptedTextAnswers: Array.isArray(q.acceptedTextAnswers) ? q.acceptedTextAnswers.map(String) : undefined,
-    maxPoints: typeof q.maxPoints === 'number' ? q.maxPoints : undefined,
+    optionImages: detectedType === 'options' ? optionImages : undefined,
+    correctAnswers: detectedType === 'options'
+      ? (Array.isArray(q.correctAnswers) ? q.correctAnswers : [typeof q.correctAnswer === 'number' ? q.correctAnswer : 0])
+      : [],
+    correctTextAnswer: (detectedType === 'text' || detectedType === 'ladder')
+      ? (typeof q.correctTextAnswer === 'string' ? q.correctTextAnswer : undefined)
+      : undefined,
+    acceptedTextAnswers: (detectedType === 'text' || detectedType === 'ladder')
+      ? (Array.isArray(q.acceptedTextAnswers) ? q.acceptedTextAnswers.map(String) : undefined)
+      : undefined,
+    maxPoints: detectedType === 'points'
+      ? (typeof q.maxPoints === 'number' && q.maxPoints > 0 ? q.maxPoints : 10)
+      : undefined,
+    clues: detectedType === 'ladder'
+      ? (Array.isArray(q.clues) && q.clues.length > 0 ? q.clues.map(String) : ['Ledtråd 1 (svår)', 'Ledtråd 2 (medel)', 'Ledtråd 3 (lätt)'])
+      : undefined,
+    ladderPoints: detectedType === 'ladder'
+      ? (Array.isArray(q.ladderPoints) && q.ladderPoints.length > 0 ? q.ladderPoints.map(Number) : [10, 7, 4])
+      : undefined,
     followUpQuestionId: typeof q.followUpQuestionId === 'string' ? q.followUpQuestionId : undefined,
     followUpMode: q.followUpMode === 'correct' || q.followUpMode === 'incorrect' ? q.followUpMode : 'always',
     originalLanguage: origLang,

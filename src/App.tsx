@@ -63,13 +63,14 @@ import { UrlHelpModal } from './components/Modals/UrlHelpModal';
 import { BackupChoiceModal } from './components/Settings/BackupChoiceModal';
 
 import { defaultQuiz } from './data/defaultQuiz';
+import { INTRO_SV_QUIZ, INTRO_EN_QUIZ } from './data/defaultCatalogQuizzes';
 import { 
   calculateDistanceMeters, 
   formatDistance, 
   calculateWalkingTimeMinutes,
   calculatePathDistance 
 } from './utils/geoUtils';
-import { generateQuizClient, batchTranslateQuizQuestions, getStoredApiKey, setStoredApiKey, getStoredAiUseImages, setStoredAiUseImages, validateTextAnswerWithGemini, findLocationCoordinatesWithGemini } from './geminiClient';
+import { generateQuizClient, batchTranslateQuizQuestions, getStoredApiKey, setStoredApiKey, getStoredAiUseImages, setStoredAiUseImages, getStoredAiQuestionTypes, validateTextAnswerWithGemini, findLocationCoordinatesWithGemini } from './geminiClient';
 import { Language, SUPPORTED_LANGUAGES, detectLanguage, t, translateQuestion, unpackLanguage } from './i18n';
 import { subscribeTranslationCache, requestQuestionTranslations, registerQuestionTranslation } from './translationCache';
 import { evaluateTextAnswer, soundex, detectLinguisticLanguage } from './utils/soundex';
@@ -840,6 +841,11 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
   const quizUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleQuizIconClick = () => {
+    if (quizUnlockTimerRef.current) {
+      clearTimeout(quizUnlockTimerRef.current);
+      quizUnlockTimerRef.current = null;
+    }
+
     quizUnlockClickCountRef.current += 1;
 
     if (quizUnlockClickCountRef.current === 7) {
@@ -862,12 +868,14 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
     }
 
     if (quizUnlockClickCountRef.current > 7) {
-      if (quizUnlockTimerRef.current) {
-        clearTimeout(quizUnlockTimerRef.current);
-        quizUnlockTimerRef.current = null;
-      }
       quizUnlockClickCountRef.current = 0;
+      return;
     }
+
+    quizUnlockTimerRef.current = setTimeout(() => {
+      quizUnlockClickCountRef.current = 0;
+      quizUnlockTimerRef.current = null;
+    }, 3000);
   };
 
   useEffect(() => {
@@ -1334,7 +1342,7 @@ ${exampleJson}`;
   }, [view, quizConfig]);
 
   const totalQuestions = useMemo(() => {
-    return Math.max(quizConfig.barnQuestions.length, quizConfig.vuxenQuestions.length, 1);
+    return Math.max(quizConfig.barnQuestions.length, quizConfig.vuxenQuestions.length, 0);
   }, [quizConfig]);
 
   const followUpQuestionIds = useMemo(() => new Set(
@@ -1650,6 +1658,80 @@ ${exampleJson}`;
     }
   };
 
+  const submitLadderAnswer = (rawUserText: string, pointsEarned: number, cluesCount?: number) => {
+    const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+    if (!activePartId || selectedQuestionIndex === null) return;
+
+    // Check if already answered in this quiz run
+    const alreadyAnswered = answers.some(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
+    if (alreadyAnswered) return;
+
+    const participant = participants.find(p => p.id === activePartId);
+    if (!participant) return;
+
+    const questions = participant.type === 'barn' ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+    const question = questions[selectedQuestionIndex];
+    if (!question) return;
+
+    const targetLang = question.originalLanguage || lang;
+    const evalResult = evaluateTextAnswer(
+      rawUserText,
+      question.correctTextAnswer || '',
+      question.acceptedTextAnswers || [],
+      targetLang,
+      quizConfig.textMatchStrictness || 'normal'
+    );
+
+    const targetPartId = activePartId;
+    const targetQIdx = selectedQuestionIndex;
+    const finalPoints = evalResult.isCorrect ? pointsEarned : 0;
+
+    const newAnswer: AnswerRecord = {
+      participantId: targetPartId,
+      questionIndex: targetQIdx,
+      textAnswer: rawUserText.trim(),
+      isCorrect: evalResult.isCorrect,
+      pointsScored: finalPoints,
+      cluesCount: cluesCount ?? 1,
+      timestamp: Date.now()
+    };
+
+    setAnswers([...answers, newAnswer]);
+
+    // Optional AI Linguistic Engine check when online with Gemini key if initial offline test was inconclusive
+    const storedApiKey = getStoredApiKey();
+    if (!evalResult.isCorrect && storedApiKey && typeof navigator !== 'undefined' && navigator.onLine) {
+      validateTextAnswerWithGemini({
+        userInput: rawUserText,
+        targetWord: question.correctTextAnswer || '',
+        acceptedAlternatives: question.acceptedTextAnswers || [],
+        language: targetLang,
+        apiKey: storedApiKey
+      }).then(aiResult => {
+        if (aiResult.match) {
+          setAnswers(prev => prev.map(a => 
+            (a.participantId === targetPartId && a.questionIndex === targetQIdx)
+              ? { ...a, isCorrect: true, pointsScored: pointsEarned }
+              : a
+          ));
+        }
+      }).catch(() => {
+        // Silently preserve offline engine result on network/API errors
+      });
+    }
+
+    const openedFollowUp = openFollowUpQuestion(question, targetPartId, evalResult.isCorrect);
+    if (!openedFollowUp) {
+      const allAnswered = isQuestionFullyAnswered(selectedQuestionIndex);
+      if (allAnswered) {
+        setSelectedParticipantId(participants.length === 1 ? participants[0].id : null);
+        setSelectedQuestionIndex(null);
+      } else {
+        setSelectedParticipantId(null);
+      }
+    }
+  };
+
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
   const processImportConfig = async (rawInput: string) => {
@@ -1877,7 +1959,6 @@ ${exampleJson}`;
 
     setSelectedQuestionIndex(null);
     setView('setup');
-    setIsPasswordCorrect(false);
     setPasswordInput('');
     setFacitPasswordInput('');
     setIsFacitUnlocked(false);
@@ -2194,7 +2275,6 @@ ${exampleJson}`;
     setEditingParticipantId(null);
     setQuestionToDelete(null);
     setParticipantToDelete(null);
-    setIsPasswordCorrect(false);
     setPasswordInput('');
     setFacitPasswordInput('');
     setIsFacitUnlocked(false);
@@ -2307,10 +2387,6 @@ ${exampleJson}`;
   });
   const [customCatalogInput, setCustomCatalogInput] = useState<string>('');
   const [showCatalogConfig, setShowCatalogConfig] = useState<boolean>(false);
-  const [quizLibrary, setQuizLibrary] = useState<any[]>([]);
-  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
-  const [libraryError, setLibraryError] = useState<string | null>(null);
-
   const BUILTIN_DEFAULT_QUIZZES: QuizMetadata[] = [
     {
       id: 'intro-sv',
@@ -2335,6 +2411,10 @@ ${exampleJson}`;
       resolvedUrl: `${import.meta.env.BASE_URL}quizzes/intro_en.json`
     }
   ];
+
+  const [quizLibrary, setQuizLibrary] = useState<any[]>(BUILTIN_DEFAULT_QUIZZES);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
 
   const CATALOG_REQUEST_TIMEOUT_MS = 10000;
 
@@ -2433,17 +2513,37 @@ ${exampleJson}`;
       
       let rawData: any;
       if (!isCustom) {
-        const res = await fetchWithTimeout(fullManifestUrl, CATALOG_REQUEST_TIMEOUT_MS);
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        rawData = await res.json();
+        try {
+          const res = await fetchWithTimeout(fullManifestUrl, CATALOG_REQUEST_TIMEOUT_MS);
+          if (res.ok) {
+            rawData = await res.json();
+          } else {
+            const fallbackRes = await fetchWithTimeout(manifestUrl, CATALOG_REQUEST_TIMEOUT_MS);
+            if (fallbackRes.ok) {
+              rawData = await fallbackRes.json();
+            }
+          }
+        } catch (fetchErr) {
+          console.warn('Network fetch of manifest.json failed (offline or local fallback):', fetchErr);
+        }
+
+        if (!rawData) {
+          setQuizLibrary(BUILTIN_DEFAULT_QUIZZES);
+          setLibraryError(null);
+          return;
+        }
       } else {
         try {
           rawData = await fetchWithCorsFallback(fullManifestUrl, true);
         } catch (manifestErr) {
           // If manifest.json failed, try fetching index.html or baseUrl directly
           console.warn('manifest.json failed, trying index.html or baseUrl:', manifestErr);
-          const indexUrl = `${baseUrl}index.html?_t=${Date.now()}`;
-          rawData = await fetchWithCorsFallback(indexUrl, true);
+          try {
+            const indexUrl = `${baseUrl}index.html?_t=${Date.now()}`;
+            rawData = await fetchWithCorsFallback(indexUrl, true);
+          } catch (indexErr) {
+            console.warn('Fallback indexUrl failed for custom catalog:', indexErr);
+          }
         }
       }
       
@@ -2540,13 +2640,13 @@ ${exampleJson}`;
         }
       }
     } catch (err: any) {
-      console.error('Failed to load quiz library from:', err);
+      console.warn('Notice: Could not load quiz library from remote catalog, using default quizzes:', err);
+      setQuizLibrary(BUILTIN_DEFAULT_QUIZZES);
       const { isCustom } = normalizeCatalogUrl(targetCatalogUrl || catalogUrl);
       if (!isCustom) {
-        setQuizLibrary(BUILTIN_DEFAULT_QUIZZES);
         setLibraryError(null);
       } else {
-        const errorMsg = err.message || 'Kunde inte läsa in katalogen';
+        const errorMsg = err.message || (lang === 'sv' ? 'Kunde inte läsa in katalogen' : 'Could not load catalog');
         setLibraryError(errorMsg);
       }
     } finally {
@@ -2600,11 +2700,30 @@ ${exampleJson}`;
         const relativeUrl = (typeof window !== 'undefined' && url.startsWith(window.location.origin))
           ? url.slice(window.location.origin.length)
           : url;
-        const res = await fetchWithTimeout(relativeUrl, CATALOG_REQUEST_TIMEOUT_MS);
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        content = await res.text();
+        try {
+          const res = await fetchWithTimeout(relativeUrl, CATALOG_REQUEST_TIMEOUT_MS);
+          if (res.ok) {
+            content = await res.text();
+          }
+        } catch (fetchErr) {
+          console.warn('Relative library quiz fetch failed, checking bundled fallbacks:', fetchErr);
+        }
       } else {
-        content = await fetchWithCorsFallback(url, false);
+        try {
+          content = await fetchWithCorsFallback(url, false);
+        } catch (corsErr) {
+          console.warn('External library quiz fetch failed, checking bundled fallbacks:', corsErr);
+        }
+      }
+
+      // If network fetch failed or returned empty, seamlessly use bundled intro quizzes
+      if (!content || !content.trim()) {
+        const checkStr = (typeof filenameOrItem === 'string' ? filenameOrItem : (filenameOrItem?.filename || filenameOrItem?.id || '')).toLowerCase();
+        if (checkStr.includes('sv') || checkStr.includes('intro_sv')) {
+          content = JSON.stringify(INTRO_SV_QUIZ);
+        } else if (checkStr.includes('en') || checkStr.includes('intro_en')) {
+          content = JSON.stringify(INTRO_EN_QUIZ);
+        }
       }
 
       if (!content || !content.trim()) {
@@ -3189,6 +3308,7 @@ ${exampleJson}`;
         geotagLandmarks: aiGeotagLandmarks,
         includeImages: aiIncludeImages,
         targetLanguages: selectedLangs,
+        questionTypes: getStoredAiQuestionTypes(),
       });
 
       // Register all newly generated translations into the local cache

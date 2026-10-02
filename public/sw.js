@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'family-quiz-v6';
+const CACHE_VERSION = 'family-quiz-v7';
 const STATIC_CACHE = `${CACHE_VERSION}-shell`;
 const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -18,7 +18,10 @@ const STATIC_ASSETS = [
   new URL('./pwa-512.png', APP_SCOPE).toString(),
   new URL('./apple-touch-icon.png', APP_SCOPE).toString(),
   new URL('./favicon.png', APP_SCOPE).toString(),
-  new URL('./icon.jpg', APP_SCOPE).toString()
+  new URL('./icon.jpg', APP_SCOPE).toString(),
+  new URL('./quizzes/manifest.json', APP_SCOPE).toString(),
+  new URL('./quizzes/intro_sv.json', APP_SCOPE).toString(),
+  new URL('./quizzes/intro_en.json', APP_SCOPE).toString()
 ];
 
 // Helper: Trim cache to max item count (LRU eviction) to protect mobile storage
@@ -150,9 +153,9 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-While-Revalidate for standard assets (scripts, styles, images, fonts)
+  // Stale-While-Revalidate for standard assets (scripts, styles, images, fonts, quizzes)
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
       const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
           if (
@@ -168,7 +171,18 @@ self.addEventListener('fetch', (event) => {
           }
           return networkResponse;
         })
-        .catch(() => cachedResponse);
+        .catch(async () => {
+          if (cachedResponse) return cachedResponse;
+          const fallbackMatch = await caches.match(event.request, { ignoreSearch: true });
+          if (fallbackMatch) return fallbackMatch;
+          if (url.pathname.endsWith('.json')) {
+            return new Response(JSON.stringify({ error: 'Asset not found or offline' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          return new Response('Asset not found or offline', { status: 503 });
+        });
 
       return cachedResponse || fetchPromise;
     })

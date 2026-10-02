@@ -549,7 +549,7 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                             {/* Question Type Switcher */}
                             <div className="space-y-3">
                               <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">{t(lang, 'questionTypeLabel')}</label>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                 <button 
                                   type="button"
                                   disabled={!isAdmin}
@@ -614,11 +614,222 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                   <Trophy className="w-4 h-4" />
                                   <span>{t(lang, 'pointsQuestionType')}</span>
                                 </button>
+
+                                <button 
+                                  type="button"
+                                  disabled={!isAdmin}
+                                  onClick={() => {
+                                    if (q.type !== 'ladder') {
+                                      updateQuestion(editingQuestionsCategory, q.id, { 
+                                        type: 'ladder',
+                                        clues: q.clues && q.clues.length > 0 ? q.clues : ['Ledtråd 1 (svår)', 'Ledtråd 2 (medel)', 'Ledtråd 3 (lätt)'],
+                                        ladderPoints: q.ladderPoints && q.ladderPoints.length > 0 ? q.ladderPoints : [10, 7, 4],
+                                        correctTextAnswer: q.correctTextAnswer || (q.options && q.options.length > 0 ? q.options[0] : 'Rätt svar')
+                                      });
+                                    }
+                                  }}
+                                  className={`p-3.5 sm:p-4 rounded-2xl border-2 flex items-center justify-center gap-2 font-black text-xs uppercase transition-all ${
+                                    q.type === 'ladder'
+                                      ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-200'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <span className="text-sm">🪜</span>
+                                  <span>{t(lang, 'ladderQuestionType')}</span>
+                                </button>
                               </div>
                             </div>
 
                             {/* Options, Text, or Points Configuration */}
-                            {q.type === 'points' ? (
+                                                         {q.type === 'ladder' ? (
+                               <div className="space-y-6 p-6 sm:p-8 bg-purple-50/80 border-2 border-purple-200 rounded-3xl">
+                                 <div className="flex items-center justify-between">
+                                   <div className="flex items-center gap-3">
+                                     <div className="w-10 h-10 bg-purple-600 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-sm">
+                                       🪜
+                                     </div>
+                                     <div>
+                                       <h4 className="font-black text-sm sm:text-base text-purple-950 uppercase tracking-wide">{t(lang, 'ladderQuestionType')}</h4>
+                                       <p className="text-xs text-purple-800 font-medium">{t(lang, 'cluesLabel')} &amp; {t(lang, 'textAnswerCorrectHeader')}</p>
+                                     </div>
+                                   </div>
+                                 </div>
+
+                                 {/* Clues Manager */}
+                                 <div className="space-y-4 pt-2">
+                                   <div className="flex items-center justify-between">
+                                     <label className="text-[11px] font-black text-purple-900 uppercase tracking-wider">
+                                       {t(lang, 'cluesLabel')} ({rawQ.clues?.length || 3})
+                                     </label>
+                                     <button
+                                       type="button"
+                                       disabled={!isAdmin}
+                                       onClick={() => {
+                                         if (!isAdmin) return;
+                                         const currentClues = rawQ.clues || ['Ledtråd 1', 'Ledtråd 2', 'Ledtråd 3'];
+                                         const currentPoints = rawQ.ladderPoints || [10, 7, 4];
+                                         const nextPoints = Math.max(1, (currentPoints[currentPoints.length - 1] || 4) - 3);
+                                         updateQuestion(editingQuestionsCategory, q.id, {
+                                           clues: [...currentClues, `Ledtråd ${currentClues.length + 1}`],
+                                           ladderPoints: [...currentPoints, nextPoints]
+                                         });
+                                       }}
+                                       className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-black shadow-sm transition-all flex items-center gap-1 cursor-pointer"
+                                     >
+                                       {t(lang, 'addClueBtn')}
+                                     </button>
+                                   </div>
+
+                                   <div className="space-y-3">
+                                     {(rawQ.clues || ['Ledtråd 1', 'Ledtråd 2', 'Ledtråd 3']).map((clueText: string, cIdx: number) => {
+                                       const points = (rawQ.ladderPoints || [10, 7, 4])[cIdx] || Math.max(1, 10 - cIdx * 3);
+                                       return (
+                                         <div key={cIdx} className="flex gap-2 sm:gap-3 items-center bg-white p-3 rounded-2xl border-2 border-purple-200 shadow-2xs">
+                                           <span className="w-7 h-7 bg-purple-100 text-purple-800 rounded-xl flex items-center justify-center font-black text-xs shrink-0">
+                                             #{cIdx + 1}
+                                           </span>
+                                           <input 
+                                             type="text"
+                                             disabled={!isAdmin}
+                                             value={clueText}
+                                             placeholder={`Ledtråd ${cIdx + 1}...`}
+                                             onChange={(e) => {
+                                               if (!isAdmin) return;
+                                               const updated = [...(rawQ.clues || [])];
+                                               updated[cIdx] = e.target.value;
+                                               updateQuestion(editingQuestionsCategory, q.id, { clues: updated });
+                                             }}
+                                             className="flex-1 p-2.5 bg-purple-50/50 border border-purple-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-purple-500"
+                                           />
+                                           <div className="flex items-center gap-1 shrink-0">
+                                             <input 
+                                               type="number"
+                                               min="1"
+                                               max="100"
+                                               disabled={!isAdmin}
+                                               value={points}
+                                               onChange={(e) => {
+                                                 if (!isAdmin) return;
+                                                 const val = parseInt(e.target.value, 10);
+                                                 const updatedPts = [...(rawQ.ladderPoints || [10, 7, 4])];
+                                                 updatedPts[cIdx] = isNaN(val) ? 1 : val;
+                                                 updateQuestion(editingQuestionsCategory, q.id, { ladderPoints: updatedPts });
+                                               }}
+                                               className="w-16 p-2 bg-purple-50/50 border border-purple-200 rounded-xl text-center text-xs font-black text-purple-950 outline-none"
+                                             />
+                                             <span className="text-xs font-bold text-purple-800">p</span>
+                                           </div>
+                                           {isAdmin && (rawQ.clues || []).length > 1 && (
+                                             <button
+                                               type="button"
+                                               onClick={() => {
+                                                 const updatedClues = (rawQ.clues || []).filter((_, i) => i !== cIdx);
+                                                 const updatedPts = (rawQ.ladderPoints || []).filter((_, i) => i !== cIdx);
+                                                 updateQuestion(editingQuestionsCategory, q.id, { clues: updatedClues, ladderPoints: updatedPts });
+                                               }}
+                                               className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                                               title="Ta bort ledtråd"
+                                             >
+                                               <Trash2 className="w-4 h-4" />
+                                             </button>
+                                           )}
+                                         </div>
+                                       );
+                                     })}
+                                   </div>
+                                 </div>
+
+                                 {/* Primary Correct Text Answer for Ladder */}
+                                 <div className="space-y-2 pt-2 border-t border-purple-200">
+                                   <label className="text-[11px] font-black text-purple-900 uppercase tracking-wider">
+                                     {t(lang, 'primaryCorrectAnswerLabel')}
+                                   </label>
+                                   <div className="relative">
+                                     <input 
+                                       type="text"
+                                       disabled={!isAdmin}
+                                       value={rawQ.correctTextAnswer || ''}
+                                       placeholder={t(lang, 'correctAnswerPlaceholder')}
+                                       onChange={(e) => {
+                                         updateQuestion(editingQuestionsCategory, q.id, {
+                                           correctTextAnswer: e.target.value
+                                         });
+                                       }}
+                                       className="w-full p-4 bg-white border-2 border-purple-300 focus:border-purple-500 rounded-2xl text-base font-bold text-slate-800 shadow-inner outline-none transition-all"
+                                     />
+                                   </div>
+                                 </div>
+
+                                 {/* Accepted Alternatives */}
+                                 <div className="space-y-2">
+                                   <label className="text-[11px] font-black text-purple-900 uppercase tracking-wider">
+                                     {t(lang, 'acceptedAlternativesLabel')}
+                                   </label>
+                                   <input 
+                                     type="text"
+                                     disabled={!isAdmin}
+                                     value={(rawQ.acceptedTextAnswers || []).join(', ')}
+                                     placeholder={t(lang, 'acceptedAlternativesPlaceholder')}
+                                     onChange={(e) => {
+                                       const parts = e.target.value.split(',').map(s => s.trim()).filter(Boolean);
+                                       updateQuestion(editingQuestionsCategory, q.id, { acceptedTextAnswers: parts });
+                                     }}
+                                     className="w-full p-3.5 bg-white border-2 border-purple-200 focus:border-purple-500 rounded-2xl text-sm font-medium text-slate-800 shadow-inner outline-none"
+                                   />
+                                 </div>
+
+                                 {/* Target Groups */}
+                                 <div className="pt-3 border-t border-purple-200/80 space-y-3">
+                                   <div>
+                                     <h5 className="font-black text-xs sm:text-sm text-purple-950 uppercase tracking-wider">{t(lang, 'targetGroupsLabel')}</h5>
+                                     <p className="text-[11px] text-purple-800 font-medium">{t(lang, 'targetGroupsDesc')}</p>
+                                   </div>
+                                   <div className="flex flex-wrap items-center gap-3 pt-1">
+                                     <label 
+                                       className={`flex items-center gap-3 px-5 py-3 rounded-2xl border-2 font-black text-xs uppercase cursor-pointer transition-all active:scale-95 ${
+                                         isBarnChecked
+                                           ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-200'
+                                           : 'bg-white text-slate-600 border-purple-200 hover:bg-purple-100/50'
+                                       }`}
+                                     >
+                                       <input 
+                                         type="checkbox"
+                                         checked={isBarnChecked}
+                                         disabled={!isAdmin}
+                                         onChange={(e) => {
+                                           if (!isAdmin) return;
+                                           toggleQuestionTargetGroup(q.id, 'barn', e.target.checked);
+                                         }}
+                                         className="w-4 h-4 rounded accent-purple-600 cursor-pointer"
+                                       />
+                                       <span className="text-base leading-none">👶</span>
+                                       <span>{t(lang, 'kid')}</span>
+                                     </label>
+
+                                     <label 
+                                       className={`flex items-center gap-3 px-5 py-3 rounded-2xl border-2 font-black text-xs uppercase cursor-pointer transition-all active:scale-95 ${
+                                         isVuxenChecked
+                                           ? 'bg-purple-600 text-white border-purple-600 shadow-md ring-2 ring-purple-200'
+                                           : 'bg-white text-slate-600 border-purple-200 hover:bg-purple-100/50'
+                                       }`}
+                                     >
+                                       <input 
+                                         type="checkbox"
+                                         checked={isVuxenChecked}
+                                         disabled={!isAdmin}
+                                         onChange={(e) => {
+                                           if (!isAdmin) return;
+                                           toggleQuestionTargetGroup(q.id, 'vuxen', e.target.checked);
+                                         }}
+                                         className="w-4 h-4 rounded accent-purple-600 cursor-pointer"
+                                       />
+                                       <span className="text-base leading-none">🧑</span>
+                                       <span>{t(lang, 'adult')}</span>
+                                     </label>
+                                   </div>
+                                 </div>
+                               </div>
+                             ) : q.type === 'points' ? (
                               <div className="space-y-5 p-6 sm:p-8 bg-amber-50/80 border-2 border-amber-200 rounded-3xl">
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 bg-amber-500 text-white rounded-2xl flex items-center justify-center font-black text-lg shadow-sm">

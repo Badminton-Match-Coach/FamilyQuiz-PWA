@@ -297,15 +297,23 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                         );
                       }
 
-                      if (question.type === 'text') {
+                      const isLadderQ = question.type === 'ladder' || (Array.isArray(question.clues) && question.clues.length > 0);
+                      if (question.type === 'text' || question.type === 'ladder' || isLadderQ) {
+                        const isLadder = isLadderQ;
                         return (
-                          <div key={idx} className="p-4 sm:p-5 rounded-xl sm:rounded-2xl bg-sky-50/60 border border-sky-200/80 space-y-3">
+                          <div key={idx} className={`p-4 sm:p-5 rounded-xl sm:rounded-2xl ${isLadder ? 'bg-purple-50/60 border border-purple-200/80' : 'bg-sky-50/60 border border-sky-200/80'} space-y-3`}>
                             <div className="flex justify-between gap-4">
                               <h4 className="font-bold text-slate-800 text-xs sm:text-sm leading-tight">
-                                <span className="text-sky-600 mr-2">{idx + 1}.</span>
+                                <span className={`${isLadder ? 'text-purple-600' : 'text-sky-600'} mr-2`}>{idx + 1}.</span>
+                                {isLadder && <span className="mr-1">🪜</span>}
                                 {question.text}
                               </h4>
-                              <div className="shrink-0">
+                              <div className="shrink-0 flex items-center gap-2">
+                                {isLadder && typeof answer?.pointsScored === 'number' && (
+                                  <span className="bg-purple-100 text-purple-900 px-2 py-0.5 rounded text-[10px] font-black">
+                                    {answer.pointsScored} p
+                                  </span>
+                                )}
                                 {answer ? (
                                   answer.isCorrect ? (
                                     <div className="flex items-center gap-1 text-emerald-600 font-black text-[8px] sm:text-[10px] uppercase bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-100">
@@ -327,16 +335,46 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                             </div>
                             
                             <div className="space-y-2 text-xs">
-                              <div className="p-3 bg-white rounded-xl border border-sky-100 flex items-center justify-between">
+                              <div className={`p-3 bg-white rounded-xl border ${isLadder ? 'border-purple-100' : 'border-sky-100'} flex items-center justify-between`}>
                                 <span className="font-bold text-slate-600">{t(lang, 'participantAnswerLabel')}:</span>
                                 <span className="font-black text-slate-800 text-sm">
                                   {answer?.textAnswer || <span className="italic text-slate-400 font-normal">{t(lang, 'notAnsweredBadge')}</span>}
                                 </span>
                               </div>
 
-                              {isFacitUnlocked && question.correctTextAnswer && (
+                              {isLadder && (() => {
+                                const clues = question.clues && question.clues.length > 0 ? question.clues : [question.text];
+                                const ladderPoints = question.ladderPoints && question.ladderPoints.length > 0 ? question.ladderPoints : clues.map((_, i) => Math.max(1, 10 - i * 3));
+                                const cluesShownCount = answer?.cluesCount || clues.length;
+                                return (
+                                  <div className="p-3 bg-white rounded-xl border border-purple-100 space-y-2">
+                                    <span className="font-bold text-purple-900 block text-[11px] uppercase tracking-wider">💡 Ledtrådar deltagaren fick (visade {cluesShownCount} av {clues.length}):</span>
+                                    <div className="space-y-1.5">
+                                      {clues.slice(0, cluesShownCount).map((clueText, cIdx) => {
+                                        const pts = ladderPoints[cIdx] || Math.max(1, 10 - cIdx * 3);
+                                        return (
+                                          <div key={cIdx} className="text-xs text-slate-700 bg-purple-50/60 p-2 rounded-xl border border-purple-100 flex items-start gap-2">
+                                            <span className="w-5 h-5 bg-purple-600 text-white rounded-md flex items-center justify-center font-black text-[9px] shrink-0">
+                                              #{cIdx + 1}
+                                            </span>
+                                            <div className="flex-1">
+                                              <div className="flex justify-between items-center mb-0.5">
+                                                <span className="text-[9px] font-black text-purple-800 uppercase">Ledtråd {cIdx + 1}</span>
+                                                <span className="text-[10px] font-black text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">{pts} p</span>
+                                              </div>
+                                              <p className="font-bold text-slate-800">{clueText}</p>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              {(isFacitUnlocked || isLadder) && question.correctTextAnswer && (
                                 <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 flex items-center justify-between text-emerald-900">
-                                  <span className="font-bold">{t(lang, 'correctAnswer')}:</span>
+                                  <span className="font-bold">{t(lang, "correctAnswer")}:</span>
                                   <span className="font-black text-sm">{question.correctTextAnswer}</span>
                                 </div>
                               )}
@@ -767,6 +805,122 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                           );
                         }
 
+                        const renderFacitQuestion = (q: any) => {
+                                const isPoint = q.type === 'points';
+                                const isLadder = q.type === 'ladder' || (Array.isArray(q.clues) && q.clues.length > 0);
+                                const isText = !isLadder && (q.type === 'text' || (Boolean(q.correctTextAnswer) && (!q.options || q.options.length === 0)));
+
+                                if (isPoint) {
+                                  return (
+                                    <div className="p-3.5 bg-amber-50 rounded-2xl text-xs font-bold border border-amber-200 text-amber-900 flex items-center justify-between">
+                                      <span className="flex items-center gap-2">
+                                        <span className="text-base">🎯</span>
+                                        <span>Poängfråga (inget facit för svarsalternativ)</span>
+                                      </span>
+                                      {q.maxPoints && (
+                                        <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                                          Max: {q.maxPoints} p
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
+                                if (isLadder) {
+                                  const clues: string[] = Array.isArray(q.clues) && q.clues.length > 0 ? q.clues : [q.text];
+                                  const ladderPoints: number[] = Array.isArray(q.ladderPoints) && q.ladderPoints.length > 0 
+                                    ? q.ladderPoints 
+                                    : clues.map((_: any, i: number) => Math.max(1, 10 - i * 3));
+                                  return (
+                                    <div className="p-4 sm:p-5 rounded-2xl bg-purple-50/70 border-2 border-purple-200 text-purple-950 space-y-3 shadow-xs">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-black flex items-center gap-1.5 text-xs sm:text-sm text-purple-900">
+                                          <span>🪜</span> Poängtrappa (Trappsteg)
+                                        </span>
+                                        <span className="bg-purple-200 text-purple-900 px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase">
+                                          {clues.length} ledtrådar
+                                        </span>
+                                      </div>
+
+                                      <div className="p-3 bg-white rounded-xl border border-purple-100 space-y-2">
+                                        <span className="font-bold text-purple-900 block text-[11px] uppercase tracking-wider">💡 Alla ledtrådar & poängvärden:</span>
+                                        <div className="space-y-1.5">
+                                          {clues.map((clueText: string, cIdx: number) => {
+                                            const lPts = ladderPoints[cIdx] || Math.max(1, 10 - cIdx * 3);
+                                            return (
+                                              <div key={cIdx} className="text-xs text-slate-700 bg-purple-50/60 p-2.5 rounded-xl border border-purple-100 flex items-start gap-2.5">
+                                                <span className="w-5 h-5 bg-purple-600 text-white rounded-md flex items-center justify-center font-black text-[9px] shrink-0 mt-0.5 shadow-xs">
+                                                  #{cIdx + 1}
+                                                </span>
+                                                <div className="flex-1 min-w-0">
+                                                  <div className="flex justify-between items-center mb-0.5">
+                                                    <span className="text-[10px] font-black text-purple-800 uppercase">Ledtråd {cIdx + 1}</span>
+                                                    <span className="text-[10px] font-black text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">{lPts} p</span>
+                                                  </div>
+                                                  <p className="font-bold text-slate-800 text-xs sm:text-sm">{clueText}</p>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+
+                                      <div className="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 flex items-center justify-between text-emerald-950">
+                                        <span className="font-bold text-xs sm:text-sm">{t(lang, 'correctAnswer')}:</span>
+                                        <span className="font-black text-sm sm:text-base text-emerald-800">{q.correctTextAnswer || '—'}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+
+                                if (isText) {
+                                  return (
+                                    <div className="p-4 bg-sky-50 rounded-2xl text-xs border border-sky-200 text-sky-950 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-black flex items-center gap-1.5">
+                                          <span>🔤</span> {t(lang, 'textQuestionType')}
+                                        </span>
+                                        <span className="bg-sky-200 text-sky-900 px-2 py-0.5 rounded-lg text-[10px] font-black">
+                                          {t(lang, 'soundexPhoneticTag')}
+                                        </span>
+                                      </div>
+                                      <div className="bg-white p-3 rounded-xl border border-sky-200 flex items-center justify-between">
+                                        <span className="font-bold text-slate-600">{t(lang, 'correctAnswer')}:</span>
+                                        <span className="font-black text-emerald-700 text-sm">{q.correctTextAnswer || '—'}</span>
+                                      </div>
+                                      {q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0 && (
+                                        <div className="text-[11px] text-slate-500 font-medium">
+                                          <span className="font-bold">{t(lang, 'acceptedAlternativesLabel')}:</span> {q.acceptedTextAnswers.join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
+                                return (
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                                    {(q.options || []).map((opt: string, oIdx: number) => (
+                                      <div 
+                                        key={oIdx}
+                                        className={`p-3 rounded-2xl text-xs font-bold text-center border transition-all flex items-center justify-center gap-3 ${
+                                          (q?.correctAnswers || []).includes(oIdx) 
+                                            ? 'bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-100 scale-[1.02]' 
+                                            : 'bg-white border-slate-100 text-slate-400 opacity-60'
+                                        }`}
+                                      >
+                                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
+                                          (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
+                                        }`}>
+                                          {getOptionLabel(oIdx, q.options?.length)}
+                                        </span>
+                                        <span className="flex-1">{opt}</span>
+                                        {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              };
+
                         return (
                         <div className="space-y-6">
                           <div className="flex items-center justify-between gap-4 bg-emerald-500 p-4 rounded-2xl shadow-lg border border-emerald-400">
@@ -811,60 +965,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                                         <span className="w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-xs font-black text-indigo-600 shadow-sm shrink-0">{idx + 1}</span>
                                         <p className="text-base font-bold text-slate-800 leading-tight pt-1">{q.text}</p>
                                       </div>
-                                      {q.type === 'points' ? (
-                                        <div className="p-3.5 bg-amber-50 rounded-2xl text-xs font-bold border border-amber-200 text-amber-900 flex items-center justify-between">
-                                          <span className="flex items-center gap-2">
-                                            <span className="text-base">🎯</span>
-                                            <span>Poängfråga (inget facit för svarsalternativ)</span>
-                                          </span>
-                                          {q.maxPoints && (
-                                            <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                                              Max: {q.maxPoints} p
-                                            </span>
-                                          )}
-                                        </div>
-                                      ) : q.type === 'text' ? (
-                                        <div className="p-4 bg-sky-50 rounded-2xl text-xs border border-sky-200 text-sky-950 space-y-2">
-                                          <div className="flex items-center justify-between">
-                                            <span className="font-black flex items-center gap-1.5">
-                                              <span>🔤</span> {t(lang, 'textQuestionType')}
-                                            </span>
-                                            <span className="bg-sky-200 text-sky-900 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                                              {t(lang, 'soundexPhoneticTag')}
-                                            </span>
-                                          </div>
-                                          <div className="bg-white p-3 rounded-xl border border-sky-200 flex items-center justify-between">
-                                            <span className="font-bold text-slate-600">{t(lang, 'correctAnswer')}:</span>
-                                            <span className="font-black text-emerald-700 text-sm">{q.correctTextAnswer || '—'}</span>
-                                          </div>
-                                          {q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0 && (
-                                            <div className="text-[11px] text-slate-500 font-medium">
-                                              <span className="font-bold">{t(lang, 'acceptedAlternativesLabel')}:</span> {q.acceptedTextAnswers.join(', ')}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                                          {q.options.map((opt, oIdx) => (
-                                            <div 
-                                              key={oIdx}
-                                              className={`p-3 rounded-2xl text-xs font-bold text-center border transition-all flex items-center justify-center gap-3 ${
-                                                (q?.correctAnswers || []).includes(oIdx) 
-                                                  ? 'bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-100 scale-[1.02]' 
-                                                  : 'bg-white border-slate-100 text-slate-400 opacity-60'
-                                              }`}
-                                            >
-                                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
-                                                (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
-                                              }`}>
-                                                {getOptionLabel(oIdx, q.options?.length)}
-                                              </span>
-                                              <span className="flex-1">{opt}</span>
-                                              {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
+                                      {renderFacitQuestion(q)}
                                     </div>
                                   );
                                   })}
@@ -891,60 +992,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                                         <span className="w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-xs font-black text-indigo-600 shadow-sm shrink-0">{idx + 1}</span>
                                         <p className="text-base font-bold text-slate-800 leading-tight pt-1">{q.text}</p>
                                       </div>
-                                      {q.type === 'points' ? (
-                                        <div className="p-3.5 bg-amber-50 rounded-2xl text-xs font-bold border border-amber-200 text-amber-900 flex items-center justify-between">
-                                          <span className="flex items-center gap-2">
-                                            <span className="text-base">🎯</span>
-                                            <span>Poängfråga (inget facit för svarsalternativ)</span>
-                                          </span>
-                                          {q.maxPoints && (
-                                            <span className="bg-amber-200 text-amber-950 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                                              Max: {q.maxPoints} p
-                                            </span>
-                                          )}
-                                        </div>
-                                      ) : q.type === 'text' ? (
-                                        <div className="p-4 bg-sky-50 rounded-2xl text-xs border border-sky-200 text-sky-950 space-y-2">
-                                          <div className="flex items-center justify-between">
-                                            <span className="font-black flex items-center gap-1.5">
-                                              <span>🔤</span> {t(lang, 'textQuestionType')}
-                                            </span>
-                                            <span className="bg-sky-200 text-sky-900 px-2 py-0.5 rounded-lg text-[10px] font-black">
-                                              {t(lang, 'soundexPhoneticTag')}
-                                            </span>
-                                          </div>
-                                          <div className="bg-white p-3 rounded-xl border border-sky-200 flex items-center justify-between">
-                                            <span className="font-bold text-slate-600">{t(lang, 'correctAnswer')}:</span>
-                                            <span className="font-black text-emerald-700 text-sm">{q.correctTextAnswer || '—'}</span>
-                                          </div>
-                                          {q.acceptedTextAnswers && q.acceptedTextAnswers.length > 0 && (
-                                            <div className="text-[11px] text-slate-500 font-medium">
-                                              <span className="font-bold">{t(lang, 'acceptedAlternativesLabel')}:</span> {q.acceptedTextAnswers.join(', ')}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                                          {q.options.map((opt, oIdx) => (
-                                            <div 
-                                              key={oIdx}
-                                              className={`p-3 rounded-2xl text-xs font-bold text-center border transition-all flex items-center justify-center gap-3 ${
-                                                (q?.correctAnswers || []).includes(oIdx) 
-                                                  ? 'bg-emerald-500 border-emerald-600 text-white shadow-md shadow-emerald-100 scale-[1.02]' 
-                                                  : 'bg-white border-slate-100 text-slate-400 opacity-60'
-                                              }`}
-                                            >
-                                              <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] ${
-                                                (q?.correctAnswers || []).includes(oIdx) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'
-                                              }`}>
-                                                {getOptionLabel(oIdx, q.options?.length)}
-                                              </span>
-                                              <span className="flex-1">{opt}</span>
-                                              {(q?.correctAnswers || []).includes(oIdx) && <CheckCircle2 className="w-4 h-4 text-white/80" />}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
+                                      {renderFacitQuestion(q)}
                                     </div>
                                   );
                                   })}

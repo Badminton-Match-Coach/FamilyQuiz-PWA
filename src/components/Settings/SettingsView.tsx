@@ -335,7 +335,6 @@ export const SettingsView = React.memo<SettingsViewProps>(({
               <button
                 onClick={() => {
                   setView('setup');
-                  setIsConfigUnlocked(false);
                   setConfigMasterPasswordInput('');
                 }}
                 className="w-9 h-9 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 hover:bg-slate-200 transition-colors font-black text-lg active:scale-95"
@@ -423,6 +422,7 @@ export const SettingsView = React.memo<SettingsViewProps>(({
             <AiGeneratorTab
               lang={lang}
               quizConfig={quizConfig}
+              setQuizConfig={setQuizConfig}
               aiPrompt={aiPrompt}
               setAiPrompt={setAiPrompt}
               aiBarnCount={aiBarnCount}

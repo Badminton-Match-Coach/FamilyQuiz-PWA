@@ -59,6 +59,7 @@ export interface QuizWalkViewProps {
   textInputValue: string;
   setTextInputValue: (val: string | ((prev: string) => string)) => void;
   submitTextAnswer: (text: string) => void;
+  submitLadderAnswer?: (text: string, points: number) => void;
   submitAnswer: (optionIndex: number) => void;
   setZoomedImageUrl: (url: string | null) => void;
   isFacitUnlocked: boolean;
@@ -93,6 +94,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
   textInputValue,
   setTextInputValue,
   submitTextAnswer,
+  submitLadderAnswer: submitLadderAnswerProp,
   submitAnswer,
   setZoomedImageUrl,
 
@@ -109,6 +111,8 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
   visibleQuestionCount
 }) => {
   const [showQuestionMiniMap, setShowQuestionMiniMap] = useState(true);
+  const [ladderCluesState, setLadderCluesState] = useState<Record<number, number>>({});
+  const submitLadderAnswer = submitLadderAnswerProp || ((text: string) => submitTextAnswer(text));
 
   return (
             <motion.div 
@@ -1037,6 +1041,118 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                       : t(lang, 'savePointsBtn', { points: pointsInputValue.toString() })}
                                   </span>
                                 </button>
+                              </div>
+                            ) : activeQ.type === 'ladder' ? (
+                              <div className="bg-purple-50/80 border-4 border-purple-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">
+                                <div className="space-y-1">
+                                  <div className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm">
+                                    <span>🪜</span>
+                                    <span>{t(lang, 'ladderQuestionType')}</span>
+                                  </div>
+                                  <p className="text-xs text-purple-700 font-medium">
+                                    {t(lang, 'soundexOfflineNote')}
+                                  </p>
+                                </div>
+
+                                {(() => {
+                                  const clues = activeQ.clues && activeQ.clues.length > 0 ? activeQ.clues : [activeQ.text];
+                                  const ladderPoints = activeQ.ladderPoints && activeQ.ladderPoints.length > 0 ? activeQ.ladderPoints : clues.map((_, i) => Math.max(1, 10 - i * 3));
+                                  const currentRevealed = ladderCluesState[selectedQuestionIndex!] ?? 0;
+                                  const currentPoints = ladderPoints[currentRevealed] || Math.max(1, 10 - currentRevealed * 3);
+
+                                  return (
+                                    <div className="space-y-4 max-w-lg mx-auto">
+                                      {/* Revealed Clues List */}
+                                      <div className="space-y-3 text-left">
+                                        {clues.slice(0, currentRevealed + 1).map((clueText, cIdx) => {
+                                          const pts = ladderPoints[cIdx] || Math.max(1, 10 - cIdx * 3);
+                                          return (
+                                            <div key={cIdx} className="p-4 bg-white border-2 border-purple-300 rounded-2xl shadow-sm flex items-start gap-3">
+                                              <span className="w-8 h-8 bg-purple-600 text-white rounded-xl flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
+                                                #{cIdx + 1}
+                                              </span>
+                                              <div className="flex-1">
+                                                <div className="flex justify-between items-center mb-1">
+                                                  <span className="text-[10px] font-black text-purple-900 uppercase tracking-wider">Ledtråd {cIdx + 1}</span>
+                                                  <span className="text-[11px] font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">Värde: {pts} p</span>
+                                                </div>
+                                                <p className="text-sm sm:text-base font-bold text-slate-800">{clueText}</p>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+
+                                      {/* Next Clue Button */}
+                                      {!isParticipantAnswered && currentRevealed < clues.length - 1 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setLadderCluesState(prev => ({
+                                              ...prev,
+                                              [selectedQuestionIndex!]: currentRevealed + 1
+                                            }));
+                                          }}
+                                          className="w-full py-3 bg-purple-100 hover:bg-purple-200 text-purple-900 border-2 border-purple-300 rounded-2xl font-black text-xs uppercase transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                                        >
+                                          <span>💡 {t(lang, 'nextClueBtn')}</span>
+                                          <span className="text-[10px] opacity-75">(Nästa ger {ladderPoints[currentRevealed + 1]} p)</span>
+                                        </button>
+                                      )}
+
+                                      {/* Current Points Badge */}
+                                      <div className="p-3 bg-purple-200/80 border border-purple-300 rounded-2xl text-xs font-black text-purple-950 flex items-center justify-center gap-2">
+                                        <span>🎯 Poäng vid rätt svar just nu:</span>
+                                        <span className="text-base text-amber-700 font-black">{currentPoints} p</span>
+                                      </div>
+
+                                      {/* Text Answer Input */}
+                                      <input
+                                        type="text"
+                                        disabled={isParticipantAnswered}
+                                        value={isParticipantAnswered ? (participantAnswer?.textAnswer || '') : textInputValue}
+                                        onChange={(e) => {
+                                          if (!isParticipantAnswered) setTextInputValue(e.target.value);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (!isParticipantAnswered && e.key === 'Enter' && textInputValue.trim()) {
+                                            submitLadderAnswer(textInputValue, currentPoints, currentRevealed + 1);
+                                          }
+                                        }}
+                                        placeholder={t(lang, 'textAnswerPlaceholder')}
+                                        className={`w-full p-4 sm:p-5 border-4 rounded-2xl text-center text-lg sm:text-xl font-black shadow-inner outline-none transition-all placeholder:text-slate-300 placeholder:font-bold ${
+                                          isParticipantAnswered
+                                            ? 'bg-slate-100 border-slate-300 text-slate-700 cursor-not-allowed'
+                                            : 'bg-white border-purple-400 focus:border-purple-600 text-slate-800'
+                                        }`}
+                                        autoFocus={!isParticipantAnswered}
+                                      />
+
+                                      {isParticipantAnswered && shouldShowFacit && activeQ.correctTextAnswer && (
+                                        <div className="p-3 bg-emerald-100 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-800 flex items-center justify-center gap-2">
+                                          <span>✅ {t(lang, 'correctAnswer')}:</span>
+                                          <span className="font-black underline">{activeQ.correctTextAnswer}</span>
+                                        </div>
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        disabled={isParticipantAnswered || !textInputValue.trim()}
+                                        onClick={() => submitLadderAnswer(textInputValue, currentPoints, currentRevealed + 1)}
+                                        className={`w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg uppercase transition-all flex items-center justify-center gap-2 ${
+                                          isParticipantAnswered
+                                            ? 'bg-slate-300 text-slate-600 cursor-not-allowed shadow-none'
+                                            : 'bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-xl shadow-purple-200 active:scale-95'
+                                        }`}
+                                      >
+                                        <CheckCircle2 className="w-5 h-5 stroke-[3]" />
+                                        <span>
+                                          {isParticipantAnswered ? t(lang, 'answerAlreadySubmitted') : t(lang, 'submitTextAnswerBtn')}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ) : activeQ.type === 'text' ? (
                               <div className="bg-sky-50/80 border-4 border-sky-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">

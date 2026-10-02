@@ -76,12 +76,14 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
     const newQuestion: Question = {
       id: crypto.randomUUID(),
       type,
-      text: type === 'points' ? 'Ny poängfråga...' : type === 'text' ? 'Ny textfråga...' : 'Ny fråga...',
-      options: type === 'points' || type === 'text' ? [] : ['Svar 1', 'Svar X', 'Svar 2'],
-      correctAnswers: type === 'points' || type === 'text' ? [] : [0],
+      text: type === 'points' ? 'Ny poängfråga...' : type === 'text' ? 'Ny textfråga...' : type === 'ladder' ? 'Ny poängtrappa...' : 'Ny fråga...',
+      options: type === 'points' || type === 'text' || type === 'ladder' ? [] : ['Svar 1', 'Svar X', 'Svar 2'],
+      correctAnswers: type === 'points' || type === 'text' || type === 'ladder' ? [] : [0],
       maxPoints: type === 'points' ? 10 : undefined,
-      correctTextAnswer: type === 'text' ? 'Rätt svar' : undefined,
-      acceptedTextAnswers: type === 'text' ? [] : undefined,
+      correctTextAnswer: type === 'text' || type === 'ladder' ? 'Rätt svar' : undefined,
+      acceptedTextAnswers: type === 'text' || type === 'ladder' ? [] : undefined,
+      clues: type === 'ladder' ? ['Ledtråd 1 (svår)', 'Ledtråd 2 (medel)', 'Ledtråd 3 (lätt)'] : undefined,
+      ladderPoints: type === 'ladder' ? [10, 7, 4] : undefined,
       originalLanguage: lang,
     };
     
@@ -974,6 +976,31 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
                                   </p>
                                 </div>
                                 <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-600 transition-colors shrink-0" />
+                              </button>
+
+                              {/* Option 4: Clues Ladder Question */}
+                              <button
+                                type="button"
+                                onClick={() => handleAddNewQuestion('ladder')}
+                                className="w-full text-left p-4 bg-white hover:bg-purple-50/70 active:scale-[0.98] border-2 border-slate-200/90 hover:border-purple-500 rounded-2xl transition-all shadow-sm group cursor-pointer flex items-center gap-4"
+                              >
+                                <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 border border-purple-100 flex items-center justify-center shrink-0 group-hover:bg-purple-600 group-hover:text-white transition-all shadow-sm">
+                                  <span className="text-xl">🪜</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-sm text-slate-900 group-hover:text-purple-700">
+                                      {t(lang, 'questionTypeLadderTitle')}
+                                    </span>
+                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 rounded-full">
+                                      Trappa
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5 font-medium leading-relaxed">
+                                    {t(lang, 'questionTypeLadderDesc')}
+                                  </p>
+                                </div>
+                                <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-purple-600 transition-colors shrink-0" />
                               </button>
                             </div>
 

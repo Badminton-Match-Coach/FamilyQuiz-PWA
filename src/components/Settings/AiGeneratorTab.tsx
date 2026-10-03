@@ -136,12 +136,12 @@ export const AiGeneratorTab: React.FC<AiGeneratorTabProps> = ({
 - "type": "options"
 - "text": "Frågetext"
 - "options": ["Alternativ 1", "Alternativ 2", "Alternativ 3"] (2 till 4 svarsalternativ)
-- "correctAnswer": 0-baserat heltal (0, 1 eller 2) för rätt alternativ i options-listan`;
+- "correctAnswers": [0] (en array med 0-baserat index för rätt alternativ, t.ex. [0] för första alternativet)`;
       sampleItems.push({
         type: "options",
         text: "Vad heter Sveriges huvudstad?",
         options: ["Stockholm", "Göteborg", "Malmö"],
-        correctAnswer: 0
+        correctAnswers: [0]
       });
     }
 
@@ -220,7 +220,14 @@ Språk: Frågorna, ledtrådarna och svaren MÅSTE vara på ${mainLang}.
 
 TILLÅTNA FRÅGETYPER (skapa en engagerande, varierad mix av följande):${typesDescription}
 
-Svara med ett giltigt JSON-objekt enligt följande struktur utan kodblock eller extra text:
+VIKTIGA JSON-KRAV (FÖLJ NOGGRANT FÖR ATT UNDVIKA SYNTAXFEL):
+1. Returnera strikt standard-JSON (RFC 8259).
+2. INGA AVSLUTANDE KOMMATECKEN (trailing commas): sätt aldrig ett kommatecken efter sista elementet i en array [...] eller efter sista egenskapen i ett objekt {...}.
+3. Kontrollera särskilt att den sista ledtråden i listan "clues" och den sista frågan i listorna INTE avslutas med ett kommatecken.
+4. Använd alltid vanliga dubbla raka citattecken ("...") runt alla nycklar och textsträngar.
+5. Svara enbart med det rena JSON-objektet utan markdown-kodblock (inga \`\`\`json) och utan någon inledande eller avslutande förklarande text.
+
+Strukturera svaret exakt enligt följande JSON-mall:
 ${JSON.stringify(templateObj, null, 2)}`;
 
     try {

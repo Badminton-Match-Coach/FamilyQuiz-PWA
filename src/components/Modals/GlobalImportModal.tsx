@@ -363,7 +363,41 @@ export const GlobalImportModal: React.FC<GlobalImportModalProps> = ({
               rows={4}
               className="w-full p-3 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
             />
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-between items-center gap-2">
+              <label className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs">
+                <Upload className="w-3.5 h-3.5 text-slate-600" />
+                <span>{lang === 'sv' ? 'Välj .json-fil...' : 'Select .json file...'}</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      let text = '';
+                      if (typeof file.text === 'function') {
+                        text = await file.text();
+                      } else {
+                        text = await new Promise<string>((resolve, reject) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(reader.result as string);
+                          reader.onerror = () => reject(new Error('Kunde inte läsa filen.'));
+                          reader.readAsText(file);
+                        });
+                      }
+                      if (text) {
+                        setConfigJsonInput(text);
+                      }
+                    } catch (err) {
+                      console.error('Failed to read json file:', err);
+                    } finally {
+                      if (e.target) e.target.value = '';
+                    }
+                  }}
+                />
+              </label>
+
               <button
                 onClick={() => {
                   handleImportConfig();

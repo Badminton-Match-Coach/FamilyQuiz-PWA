@@ -13,23 +13,23 @@ const validateQuestion = (question: unknown, index: number): string | null => {
   if (typeof question.text !== 'string' || question.text.trim().length === 0) {
     return `Fråga ${index + 1} saknar frågetext.`;
   }
-  if (!Array.isArray(question.options)) return `Fråga ${index + 1} saknar svarsalternativ.`;
-  const options = question.options as unknown[];
-
   const questionType = question.type || 'options';
-  if (questionType !== 'options' && questionType !== 'text' && questionType !== 'points') {
+  if (questionType !== 'options' && questionType !== 'text' && questionType !== 'points' && questionType !== 'ladder') {
     return `Fråga ${index + 1} har en ogiltig frågetyp.`;
   }
 
-  // Accept both correctAnswers (array) and correctAnswer (single integer index)
-  let answersList: number[] | null = null;
-  if (Array.isArray(question.correctAnswers)) {
-    answersList = question.correctAnswers;
-  } else if (typeof question.correctAnswer === 'number') {
-    answersList = [question.correctAnswer];
-  }
+  if (questionType === 'options') {
+    if (!Array.isArray(question.options)) return `Fråga ${index + 1} saknar svarsalternativ.`;
+    const options = question.options as unknown[];
 
-  if (questionType !== 'text' && questionType !== 'points') {
+    // Accept both correctAnswers (array) and correctAnswer (single integer index)
+    let answersList: number[] | null = null;
+    if (Array.isArray(question.correctAnswers)) {
+      answersList = question.correctAnswers;
+    } else if (typeof question.correctAnswer === 'number') {
+      answersList = [question.correctAnswer];
+    }
+
     if (!answersList || answersList.length === 0 || answersList.some(
       answer => !Number.isInteger(answer) || answer < 0 || answer >= options.length
     )) {

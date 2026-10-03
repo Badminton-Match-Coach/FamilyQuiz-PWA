@@ -6,6 +6,7 @@
 import { AnswerRecord, Participant, QuizConfig } from './types';
 import { assertValidQuizConfig } from './utils/quizValidation';
 import { cacheAllQuizImages } from './utils/offlineImageCache';
+import { robustParseQuizJson } from './utils/quizParsers';
 
 export interface QuizSessionState {
   participants: Participant[];
@@ -389,19 +390,21 @@ export async function exportIndexedDBToJSON(): Promise<string> {
  * Import quizzes from JSON backup into IndexedDB
  */
 export async function importIndexedDBFromJSON(jsonString: string): Promise<number> {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(jsonString);
-  } catch {
-    throw new Error('Ogiltigt JSON-format.');
+  let parsed: any = robustParseQuizJson(jsonString);
+  if (!parsed) {
+    try {
+      parsed = JSON.parse(jsonString);
+    } catch {
+      throw new Error('Ogiltigt JSON-format.');
+    }
   }
 
   const list: any[] = Array.isArray(parsed)
     ? parsed
     : Array.isArray(parsed?.quizzes)
     ? parsed.quizzes
-    : parsed?.quizConfig
-    ? [parsed]
+    : (parsed?.quizConfig || parsed?.barnQuestions || parsed?.vuxenQuestions || parsed?.quiz)
+    ? [parsed?.quiz ? (parsed.quiz.quizConfig || parsed.quiz.barnQuestions || parsed.quiz.vuxenQuestions ? parsed.quiz : parsed) : parsed]
     : [];
 
   if (list.length === 0) {

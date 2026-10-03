@@ -103,7 +103,6 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
   const quizTitleInputRef = useRef<HTMLInputElement>(null);
   const [newQuizLogoUrl, setNewQuizLogoUrl] = useState(quizConfig.logoUrl || '');
   const [newQuizPassword, setNewQuizPassword] = useState(quizConfig.password || '');
-  const [saveConfirmationMessage, setSaveConfirmationMessage] = useState<string | null>(null);
 
   React.useEffect(() => {
     setNewQuizLogoUrl(quizConfig.logoUrl || '');
@@ -151,103 +150,165 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
 
                       {/* Quiz Title */}
                       <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Edit2 className="w-4 h-4 text-indigo-600" />
-                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'quizTitleHeading')}</h3>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Edit2 className="w-4 h-4 text-indigo-600" />
+                            <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'quizTitleHeading')}</h3>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                            <Check className="w-3 h-3 text-emerald-500 stroke-[3]" />
+                            {lang === 'sv' ? 'Sparas direkt' : 'Auto-saved'}
+                          </span>
                         </div>
-                        <div className="space-y-3">
-                          <div className="flex gap-2">
-                            <input 
-                              ref={quizTitleInputRef}
-                              type="text" 
-                              placeholder={t(lang, 'quizTitlePlaceholder')}
-                              className={`flex-1 p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
-                                isAdmin 
-                                  ? 'bg-white border-slate-200 focus:border-indigo-500' 
-                                  : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
-                              }`}
-                              value={newQuizTitle}
-                              readOnly={!isAdmin}
-                              onChange={(e) => setNewQuizTitle(e.target.value)}
-                            />
-                            {isAdmin && (
-                              <button 
-                                onClick={() => {
-                                  setQuizConfig({ ...quizConfig, title: newQuizTitle });
-                                  setSaveConfirmationMessage(t(lang, 'titleUpdatedAlert'));
+                        <div>
+                          <input 
+                            ref={quizTitleInputRef}
+                            type="text" 
+                            placeholder={t(lang, 'quizTitlePlaceholder')}
+                            className={`w-full p-3 border rounded-xl text-sm font-bold outline-none transition-all ${
+                              isAdmin 
+                                ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-sm' 
+                                : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                            }`}
+                            value={newQuizTitle}
+                            readOnly={!isAdmin}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setNewQuizTitle(val);
+                              setQuizConfig(prev => ({ ...prev, title: val }));
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Quiz Logo */}
+                      <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <ImageIcon className="w-4 h-4 text-indigo-600" />
+                            <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'logoUrlLabel')}</h3>
+                          </div>
+                          {quizConfig.logoUrl && (
+                            <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                              <Check className="w-3 h-3 text-emerald-500 stroke-[3]" />
+                              {lang === 'sv' ? 'Aktiv logotyp' : 'Active logo'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Current Logo Preview */}
+                        {quizConfig.logoUrl && (
+                          <div className="flex items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <img 
+                                src={quizConfig.logoUrl} 
+                                alt="Logo" 
+                                className="w-12 h-12 object-contain rounded-lg border border-slate-100 bg-slate-50 p-1 shrink-0"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
                                 }}
-                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
+                              />
+                              <div className="text-xs min-w-0">
+                                <p className="font-bold text-slate-800">{lang === 'sv' ? 'Aktuell logotyp' : 'Current logo'}</p>
+                                <p className="text-[11px] text-slate-400 truncate max-w-[220px]">
+                                  {quizConfig.logoUrl.startsWith('data:') ? (lang === 'sv' ? 'Uppladdad bildfil' : 'Uploaded image') : quizConfig.logoUrl}
+                                </p>
+                              </div>
+                            </div>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleRemoveLogo();
+                                  setNewQuizLogoUrl('');
+                                }}
+                                className="px-2.5 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 shrink-0"
                               >
-                                {t(lang, 'saveBtn')}
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>{lang === 'sv' ? 'Ta bort' : 'Remove'}</span>
                               </button>
                             )}
                           </div>
+                        )}
 
-                          <div className="space-y-2">
-                            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500">
-                              {t(lang, 'logoUrlLabel')}
-                            </label>
-                            <div className="flex gap-2">
-                              <input
-                                type="url"
-                                placeholder="https://example.com/logo.png"
-                                className={`flex-1 p-3 border rounded-xl text-xs font-medium outline-none transition-all ${
-                                  isAdmin
-                                    ? 'bg-white border-slate-200 focus:border-indigo-500'
-                                    : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
-                                }`}
-                                value={newQuizLogoUrl}
-                                readOnly={!isAdmin}
-                                onChange={(e) => setNewQuizLogoUrl(e.target.value)}
-                              />
-                              {isAdmin && (
-                                <button
-                                  onClick={async () => {
-                                    const cachedLogoUrl = await cacheLogoAsDataUrl(newQuizLogoUrl.trim() || undefined);
-                                    setQuizConfig({ ...quizConfig, logoUrl: cachedLogoUrl });
-                                    setSaveConfirmationMessage(t(lang, 'logoUpdatedAlert'));
+                        <div className="space-y-2">
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              type="url"
+                              placeholder="https://example.com/logo.png"
+                              className={`flex-1 p-3 border rounded-xl text-xs font-medium outline-none transition-all ${
+                                isAdmin
+                                  ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-sm'
+                                  : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                              }`}
+                              value={newQuizLogoUrl}
+                              readOnly={!isAdmin}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setNewQuizLogoUrl(val);
+                                setQuizConfig(prev => ({ ...prev, logoUrl: val.trim() || undefined }));
+                              }}
+                              onBlur={async () => {
+                                if (newQuizLogoUrl.trim()) {
+                                  const cached = await cacheLogoAsDataUrl(newQuizLogoUrl.trim());
+                                  setQuizConfig(prev => ({ ...prev, logoUrl: cached }));
+                                }
+                              }}
+                            />
+
+                            {isAdmin && (
+                              <label className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0">
+                                <Upload className="w-3.5 h-3.5 text-slate-700" />
+                                <span>{lang === 'sv' ? 'Välj bild...' : 'Upload...'}</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    await handleLogoUpload(e);
+                                    if (e.target.files?.[0]) {
+                                      setNewQuizLogoUrl('');
+                                    }
                                   }}
-                                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
-                                >
-                                  {t(lang, 'saveBtn')}
-                                </button>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'logoUrlExplainer')}</p>
+                                />
+                              </label>
+                            )}
                           </div>
+                          <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'logoUrlExplainer')}</p>
                         </div>
                       </div>
 
                       {/* Password for Results */}
                       <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200/70 space-y-3">
-                        <div className="flex items-center gap-2">
-                          <Lock className="w-4 h-4 text-indigo-600" />
-                          <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'resultsPasswordHeading')}</h3>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Lock className="w-4 h-4 text-indigo-600" />
+                            <h3 className="font-black text-xs text-slate-500 uppercase tracking-widest">{t(lang, 'resultsPasswordHeading')}</h3>
+                          </div>
+                          {quizConfig.password && (
+                            <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                              <Check className="w-3 h-3 text-emerald-500 stroke-[3]" />
+                              {lang === 'sv' ? 'Skyddat' : 'Protected'}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex gap-2">
+                        <div>
                           <input 
                             type="text" 
                             placeholder={t(lang, 'newPasswordPlaceholder')}
-                            className={`flex-1 p-3 border rounded-xl text-sm font-mono outline-none transition-all ${
+                            className={`w-full p-3 border rounded-xl text-sm font-mono outline-none transition-all ${
                               isAdmin 
-                                ? 'bg-white border-slate-200 focus:border-indigo-500' 
+                                ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-sm' 
                                 : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
                             }`}
                             value={newQuizPassword}
                             readOnly={!isAdmin}
-                            onChange={(e) => setNewQuizPassword(e.target.value)}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setNewQuizPassword(val);
+                              setQuizConfig(prev => ({ ...prev, password: val }));
+                            }}
                           />
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                setQuizConfig({ ...quizConfig, password: newQuizPassword });
-                                setSaveConfirmationMessage(t(lang, 'passwordUpdatedAlert'));
-                              }}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95"
-                            >
-                              {t(lang, 'saveBtn')}
-                            </button>
-                          )}
                         </div>
                         <p className="text-[11px] text-slate-400 font-medium">{t(lang, 'currentPasswordLabel')} <span className="font-mono font-bold text-slate-600">{quizConfig.password || t(lang, 'noPasswordSet')}</span></p>
                         <div className="p-3 bg-amber-50/90 border border-amber-200/80 rounded-xl text-amber-900 text-xs font-medium leading-relaxed space-y-2">
@@ -490,31 +551,21 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 const val = parseInt(e.target.value);
                                 if (!isNaN(val)) {
                                   setNewGeotagDistance(val);
+                                  if (val >= 5) {
+                                    setQuizConfig(prev => ({ ...prev, geotagUnlockDistance: val }));
+                                  }
                                 } else {
                                   setNewGeotagDistance(5);
                                 }
                               }}
                               onBlur={() => {
-                                if (newGeotagDistance < 5) {
-                                  setNewGeotagDistance(5);
-                                }
+                                const safeVal = Math.max(5, newGeotagDistance || 20);
+                                setNewGeotagDistance(safeVal);
+                                setQuizConfig(prev => ({ ...prev, geotagUnlockDistance: safeVal }));
                               }}
                             />
                             <span className="text-xs font-bold text-slate-400">m</span>
                           </div>
-                          {isAdmin && (
-                            <button 
-                              onClick={() => {
-                                const safeVal = Math.max(5, newGeotagDistance || 20);
-                                setNewGeotagDistance(safeVal);
-                                setQuizConfig({ ...quizConfig, geotagUnlockDistance: safeVal });
-                                setSaveConfirmationMessage(t(lang, 'geotagDistanceUpdatedAlert'));
-                              }}
-                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase shadow-sm transition-all active:scale-95 shrink-0"
-                            >
-                              {t(lang, 'saveBtn')}
-                            </button>
-                          )}
                         </div>
 
                         {/* Quick preset buttons: 5m, 10m, 15m, 20m (Standard), 35m, 50m */}
@@ -663,52 +714,6 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                       </div>
                     )}
                   </AnimatePresence>
-      <AnimatePresence>
-        {saveConfirmationMessage && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSaveConfirmationMessage(null)}
-              className="absolute inset-0 bg-slate-900/70 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-md overflow-hidden rounded-[2.5rem] bg-white shadow-2xl"
-            >
-              <div className="bg-emerald-600 p-7 text-white sm:p-8">
-                <button
-                  type="button"
-                  aria-label={t(lang, 'close')}
-                  onClick={() => setSaveConfirmationMessage(null)}
-                  className="absolute right-6 top-6 rounded-full bg-white/20 p-2 transition-colors hover:bg-white/30"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
-                  <CheckCircle2 className="h-8 w-8" />
-                </div>
-                <h2 className="text-2xl font-black">{saveConfirmationMessage}</h2>
-              </div>
-              <div className="space-y-5 p-7 sm:p-8">
-                <p className="text-sm font-medium leading-relaxed text-slate-500">
-                  {lang === 'sv' ? 'Ändringen har sparats.' : 'Your change has been saved.'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSaveConfirmationMessage(null)}
-                  className="w-full rounded-2xl bg-slate-800 py-4 font-black uppercase tracking-widest text-white shadow-md transition-all hover:bg-slate-900 active:scale-95"
-                >
-                  {t(lang, 'confirm')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </>
   );
 };

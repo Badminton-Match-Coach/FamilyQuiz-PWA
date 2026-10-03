@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'family-quiz-v7';
+const CACHE_VERSION = 'family-quiz-v8';
 const STATIC_CACHE = `${CACHE_VERSION}-shell`;
 const TILES_CACHE = `${CACHE_VERSION}-tiles`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
@@ -153,7 +153,37 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-While-Revalidate for standard assets (scripts, styles, images, fonts, quizzes)
+  // Network-First for JSON files (quizzes, manifests) so changes on the server reflect immediately when online
+  if (url.pathname.endsWith('.json')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (
+            networkResponse && 
+            networkResponse.status === 200 && 
+            (networkResponse.type === 'basic' || networkResponse.type === 'cors')
+          ) {
+            const responseToCache = networkResponse.clone();
+            caches.open(RUNTIME_CACHE).then((cache) => {
+              cache.put(event.request, responseToCache);
+              trimCache(RUNTIME_CACHE, MAX_RUNTIME_ITEMS);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(async () => {
+          const cachedResponse = await caches.match(event.request) || await caches.match(event.request, { ignoreSearch: true });
+          if (cachedResponse) return cachedResponse;
+          return new Response(JSON.stringify({ error: 'Quiz-fil inte tillgänglig offline' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        })
+    );
+    return;
+  }
+
+  // Stale-While-Revalidate for standard assets (scripts, styles, images, fonts)
   event.respondWith(
     caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
       const fetchPromise = fetch(event.request)

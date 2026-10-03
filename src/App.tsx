@@ -2430,14 +2430,26 @@ ${exampleJson}`;
   };
 
   // Helper to fetch JSON/Text with backend proxy and CORS fallbacks for external domains
-  const fetchWithCorsFallback = async (targetUrl: string, asJson = true): Promise<any> => {
+  const fetchWithCorsFallback = async (rawTargetUrl: string, asJson = true): Promise<any> => {
+    // Normalize well-known file hosting URLs to raw direct endpoints
+    let targetUrl = rawTargetUrl.trim();
+    if (targetUrl.startsWith('https://github.com/') || targetUrl.startsWith('http://github.com/')) {
+      // Convert github.com/.../blob/... to raw.githubusercontent.com/...
+      targetUrl = targetUrl.replace(/https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)/i, 'https://raw.githubusercontent.com/$1/$2/$3');
+    } else if (targetUrl.includes('dropbox.com')) {
+      targetUrl = targetUrl.replace('?dl=0', '?raw=1').replace('&dl=0', '&raw=1');
+      if (!targetUrl.includes('raw=1')) {
+        targetUrl += targetUrl.includes('?') ? '&raw=1' : '?raw=1';
+      }
+    }
+
     const parseResponseText = (text: string) => {
       if (!asJson) return text;
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text;
+      const parsed = robustParseQuizJson(text);
+      if (parsed !== null && parsed !== undefined && typeof parsed === 'object') {
+        return parsed;
       }
+      return JSON.parse(text);
     };
 
     const tryFetchText = async (requestUrl: string): Promise<string> => {
@@ -2445,7 +2457,15 @@ ${exampleJson}`;
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
-      return await res.text();
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      const text = await res.text();
+      // If we expect JSON, reject HTML responses (e.g. 404 SPA fallback returning index.html)
+      if (asJson || text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+        if (contentType.includes('text/html') || text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+          throw new Error('Mottog HTML-webbsida istället för giltig JSON-data');
+        }
+      }
+      return text;
     };
 
     // If targetUrl is local or on same origin, fetch directly without proxying
@@ -2460,16 +2480,16 @@ ${exampleJson}`;
       return parseResponseText(text);
     }
 
-    // Attempt 1: Server-side proxy (/api/proxy)
+    // Attempt 1: Server-side proxy (/api/proxy) - works in full-stack Node environments
     try {
       const serverProxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
       const text = await tryFetchText(serverProxyUrl);
       return parseResponseText(text);
     } catch (e) {
-      console.warn('Backend /api/proxy failed or not available, trying direct fetch:', e);
+      console.warn('Backend /api/proxy failed or not available (normal on static sites), trying direct fetch:', e);
     }
 
-    // Attempt 2: Direct browser fetch
+    // Attempt 2: Direct browser fetch (works if upstream server allows CORS, e.g. raw.githubusercontent.com)
     try {
       const text = await tryFetchText(targetUrl);
       return parseResponseText(text);
@@ -2495,7 +2515,7 @@ ${exampleJson}`;
       console.warn('Corsproxy failed:', e);
     }
 
-    throw new Error('Kunde inte hämta katalogen inom tidsgränsen (kontrollera URL, CORS och nätverk)');
+    throw new Error('Kunde inte läsa in quiz-JSON (kontrollera URL, CORS och nätverk)');
   };
 
   const fetchQuizLibrary = async (targetCatalogUrl?: any) => {

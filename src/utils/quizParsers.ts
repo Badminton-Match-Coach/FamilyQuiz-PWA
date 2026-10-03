@@ -37,10 +37,15 @@ export function robustParseQuizJson(rawInput: string): any {
   if (!rawInput || typeof rawInput !== 'string') return null;
   let clean = rawInput.trim();
 
-  // 1. Strip markdown fences
+  // 1. Replace typographic / smart quotes with standard ASCII quotes
+  clean = clean
+    .replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+
+  // 2. Strip markdown fences
   clean = clean.replace(/```(?:json|text|markdown)?\s*/gi, '').replace(/```\s*$/gi, '').replace(/```/g, '').trim();
 
-  // 2. Extract substring between outer { } or [ ] if surrounded by explanatory text
+  // 3. Extract substring between outer { } or [ ] if surrounded by explanatory text
   const firstBrace = clean.indexOf('{');
   const firstBracket = clean.indexOf('[');
   let startIdx = -1;
@@ -58,8 +63,20 @@ export function robustParseQuizJson(rawInput: string): any {
     clean = clean.substring(startIdx, endIdx + 1);
   }
 
-  // 3. Clean trailing commas in objects and arrays
-  const sanitized = clean.replace(/,\s*([\]}])/g, '$1');
+  // 4. Strip single line and multi-line comments
+  clean = clean.replace(/\/\*[\s\S]*?\*\//g, '');
+  clean = clean.replace(/(^|[^:])\/\/[^\r\n]*/g, '$1');
+
+  // 5. Clean trailing commas in objects and arrays repeatedly until stable
+  let prevSanitized = '';
+  let sanitized = clean;
+  while (prevSanitized !== sanitized) {
+    prevSanitized = sanitized;
+    sanitized = sanitized.replace(/,(\s*[\]}])/g, '$1');
+  }
+
+  // 6. Clean consecutive commas
+  sanitized = sanitized.replace(/,(\s*,)+/g, ',');
 
   try {
     return JSON.parse(sanitized);
@@ -67,22 +84,28 @@ export function robustParseQuizJson(rawInput: string): any {
     try {
       return JSON.parse(clean);
     } catch (e2) {
-      // 4. Try repairing truncated JSON (if AI stopped due to token limit)
+      // 7. Try replacing single quotes with double quotes
       try {
-        let repaired = sanitized;
-        const openBraces = (repaired.match(/{/g) || []).length;
-        const closeBraces = (repaired.match(/}/g) || []).length;
-        const openBrackets = (repaired.match(/\[/g) || []).length;
-        const closeBrackets = (repaired.match(/\]/g) || []).length;
-
-        // Remove trailing incomplete property if cut off
-        repaired = repaired.replace(/,\s*("[^"]*"?\s*:?\s*[^,}\]]*)$/, '');
-
-        for (let i = 0; i < (openBrackets - closeBrackets); i++) repaired += ']';
-        for (let i = 0; i < (openBraces - closeBraces); i++) repaired += '}';
-        return JSON.parse(repaired);
+        const doubleQuoted = sanitized.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+        return JSON.parse(doubleQuoted);
       } catch (e3) {
-        return null;
+        // 8. Try repairing truncated JSON (if AI stopped due to token limit)
+        try {
+          let repaired = sanitized;
+          const openBraces = (repaired.match(/{/g) || []).length;
+          const closeBraces = (repaired.match(/}/g) || []).length;
+          const openBrackets = (repaired.match(/\[/g) || []).length;
+          const closeBrackets = (repaired.match(/\]/g) || []).length;
+
+          // Remove trailing incomplete property if cut off
+          repaired = repaired.replace(/,\s*("[^"]*"?\s*:?\s*[^,}\]]*)$/, '');
+
+          for (let i = 0; i < (openBrackets - closeBrackets); i++) repaired += ']';
+          for (let i = 0; i < (openBraces - closeBraces); i++) repaired += '}';
+          return JSON.parse(repaired);
+        } catch (e4) {
+          return null;
+        }
       }
     }
   }

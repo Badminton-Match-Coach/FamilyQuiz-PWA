@@ -6,7 +6,7 @@ async function getGeminiSdk(apiKey: string) {
 }
 
 async function generateContentWithFallback(ai: any, options: { contents: any; config?: any }) {
-  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"];
+  const modelsToTry = ["gemini-3.8-flash", "gemini-3.1-flash-lite"];
   let lastError: any = null;
   for (const model of modelsToTry) {
     try {

@@ -40,7 +40,7 @@ export interface AiGeneratorTabProps {
   setQuizConfig: React.Dispatch<React.SetStateAction<QuizConfig>>;
   isBatchTranslating: boolean;
   batchTranslateProgress: { current: number; total: number; langCode?: string; lang?: string } | null;
-  handleBatchTranslateQuiz: () => Promise<void>;
+  handleBatchTranslateQuiz: (targetLangs?: Language[]) => Promise<void>;
   pastedJsonInput: string;
   setPastedJsonInput: (v: string) => void;
   handleImportPastedJson: (json: string) => Promise<void>;
@@ -77,7 +77,7 @@ export const AiGeneratorTab: React.FC<AiGeneratorTabProps> = ({
   const [aiGeotagLandmarks, setAiGeotagLandmarks] = useState(false);
   const [aiIncludeImages, setAiIncludeImages] = useState<boolean>(() => getStoredAiUseImages());
   const [selectedQuestionTypes, setSelectedQuestionTypes] = useState<QuestionType[]>(() => getStoredAiQuestionTypes());
-  const [promptLanguages, setPromptLanguages] = useState<Language[]>(['sv']);
+  const [promptLanguages, setPromptLanguages] = useState<Language[]>(() => [lang]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedCustomPrompt, setCopiedCustomPrompt] = useState(false);
 
@@ -805,7 +805,7 @@ ${JSON.stringify(templateObj, null, 2)}`;
 
             <button
               type="button"
-              onClick={handleBatchTranslateQuiz}
+              onClick={() => handleBatchTranslateQuiz(promptLanguages)}
               disabled={isBatchTranslating || isGenerating || (quizConfig.barnQuestions.length + quizConfig.vuxenQuestions.length === 0)}
               className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-md shadow-indigo-200 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
             >

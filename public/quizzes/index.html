@@ -10,6 +10,12 @@
   body { margin:0; font:14px/1.4 system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--ink); }
   header { display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; padding:.75rem 1rem; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; }
   header h1 { font-size:1.1rem; margin:0 auto 0 0; }
+  #appLogo { width:40px; height:40px; object-fit:contain; border-radius:8px; }
+  .logo-field { display:flex; gap:.5rem; align-items:center; }
+  .logo-field input { min-width:0; flex:1; }
+  .logo-preview { margin:.25rem 0 .75rem; }
+  .logo-preview img { width:min(100%, 320px); height:180px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fff; }
+  .locmap { margin-top:.5rem; }
   main { display:grid; grid-template-columns:260px 1fr; gap:1rem; padding:1rem; max-width:1100px; margin:0 auto; }
   @media (max-width:760px) { main { grid-template-columns:1fr; } }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:.75rem; }
@@ -28,10 +34,15 @@
   .row { display:flex; gap:.4rem; align-items:center; margin:.25rem 0; }
   .row > input[type=checkbox] { width:auto; flex:none; }
   .row > .num { width:5rem; flex:none; }
+  .coordinate-entry input { min-width:0; flex:1; }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+  .follow-up-grid { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; }
+  .follow-up-grid select { min-width:0; width:100%; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:inherit; font:inherit; }
+  @media (max-width:520px) { .follow-up-grid { grid-template-columns:1fr; } }
   .list button.item { display:block; width:100%; text-align:left; margin:0 0 .3rem; }
   .list button.item.act { border-color:var(--pri); background:#eef2ff; }
   .list small { display:block; color:var(--mut); }
+  .question-follow-up { border-left:3px solid var(--ok); margin-left:1rem; }
   .tabs { display:flex; gap:.4rem; margin:.75rem 0 .5rem; }
   .tabs button.act { background:var(--pri); border-color:var(--pri); color:#fff; }
   details { border:1px solid var(--line); border-radius:10px; margin:.4rem 0; background:#fff; }
@@ -40,6 +51,9 @@
   .tag { font-size:11px; background:#eef2ff; color:var(--pri2); border-radius:6px; padding:1px 6px; margin-left:.3rem; }
   .mut { color:var(--mut); font-size:12px; }
   .warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; border-radius:8px; padding:.4rem .6rem; margin:.4rem 0; font-size:12px; }
+  .ai-panel { background:linear-gradient(135deg,#eef2ff,#faf5ff); border-color:#c7d2fe; }
+  .ai-panel .body { display:grid; gap:.5rem; }
+  .ai-help { color:#4338ca; font-size:12px; }
   .bar { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
   .grow { flex:1; }
   #status { position:fixed; left:50%; bottom:1rem; transform:translateX(-50%); background:#0f172a; color:#fff; padding:.5rem 1rem; border-radius:10px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; z-index:9; }
@@ -49,6 +63,7 @@
 </head>
 <body>
 <header>
+  <img id="appLogo" alt="Family Quiz">
   <h1>📝 Quizeditor</h1>
   <button id="openDir" class="pri">📂 Öppna mapp…</button>
   <button id="newQuiz">＋ Ny quiz</button>
@@ -69,7 +84,8 @@
 const TYPES = { options:'Flerval', text:'Fritext', points:'Poäng', ladder:'Ledtrådsstege' };
 const GROUPS = { barnQuestions:'Barn', vuxenQuestions:'Vuxen' };
 const FS = 'showDirectoryPicker' in window;
-const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, group:'barnQuestions', dirty:false, open:new Set() };
+const APP_LOGO = new URL('../Quiz/icon.png', location.href).href;
+const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, group:'barnQuestions', dirty:false, open:new Set(), logoPreview:null };
 const $ = id => document.getElementById(id);
 
 /* ---------- helpers ---------- */
@@ -94,6 +110,84 @@ const dirUrl = () => location.href.slice(0, location.href.lastIndexOf('/') + 1);
 let toastTimer;
 function toast(msg) { const s = $('status'); s.textContent = msg; s.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => s.classList.remove('show'), 3500); }
 function markDirty() { S.dirty = true; $('save').disabled = false; }
+function updateLogoPreview(logoUrl) {
+  for (const image of [$('appLogo'), $('quizLogoPreview')].filter(Boolean)) {
+    image.alt = logoUrl ? 'Quizens logotyp' : 'Family Quiz';
+    image.onerror = () => {
+      if (image.src !== APP_LOGO) image.src = APP_LOGO;
+      else image.hidden = true;
+    };
+    image.hidden = false;
+    try {
+      image.src = logoUrl
+        ? (S.logoPreview && S.logoPreview.name === logoUrl ? S.logoPreview.url : new URL(logoUrl, dirUrl()).href)
+        : APP_LOGO;
+    }
+    catch { image.src = APP_LOGO; }
+  }
+}
+function fileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Kunde inte läsa bildfilen'));
+    reader.readAsDataURL(file);
+  });
+}
+async function copyLogoToFolder(sourceHandle, file) {
+  const dot = file.name.lastIndexOf('.');
+  const stem = dot > 0 ? file.name.slice(0, dot) : file.name;
+  const extension = dot > 0 ? file.name.slice(dot) : '';
+  let name = file.name;
+  let suffix = 2;
+  while (true) {
+    let existing;
+    try { existing = await S.dir.getFileHandle(name); }
+    catch (e) { if (e.name === 'NotFoundError') break; throw e; }
+    if (typeof existing.isSameEntry === 'function' && await existing.isSameEntry(sourceHandle)) {
+      return { name, file: await existing.getFile() };
+    }
+    name = `${stem}_${suffix++}${extension}`;
+  }
+  const destination = await S.dir.getFileHandle(name, { create: true });
+  const writable = await destination.createWritable();
+  await writable.write(file);
+  await writable.close();
+  return { name, file: await destination.getFile() };
+}
+async function chooseLogo(quiz, logoInput) {
+  if (!('showOpenFilePicker' in window)) {
+    toast('Webbläsaren saknar filväljare för logotyper – använd Chrome eller Edge');
+    return;
+  }
+  try {
+    const [handle] = await window.showOpenFilePicker({
+      multiple: false,
+      startIn: S.dir || 'pictures',
+      types: [{ description: 'Bildfiler', accept: { 'image/*': ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.svg', '.avif', '.ico'] } }]
+    });
+    const file = await handle.getFile();
+    if (!file.type.startsWith('image/') && !/\.(png|jpe?g|webp|gif|svg|avif|ico)$/i.test(file.name)) {
+      throw new Error('Den valda filen är inte en bild');
+    }
+    let previewFile = file;
+    if (S.dir) {
+      const copied = await copyLogoToFolder(handle, file);
+      quiz.logoUrl = copied.name;
+      previewFile = copied.file;
+    } else {
+      quiz.logoUrl = await fileAsDataUrl(file);
+    }
+    logoInput.value = quiz.logoUrl;
+    if (S.logoPreview) URL.revokeObjectURL(S.logoPreview.url);
+    S.logoPreview = { name: quiz.logoUrl, url: URL.createObjectURL(previewFile) };
+    updateLogoPreview(quiz.logoUrl);
+    markDirty();
+    toast(S.dir ? `Logotyp kopierad till quizmappen: ${previewFile.name} – spara quizet` : 'Logotyp inbäddad i quizet – spara quizet');
+  } catch (e) {
+    if (e.name !== 'AbortError') toast('Kunde inte välja logotyp: ' + e.message);
+  }
+}
 
 function input(obj, key, o = {}) {
   const e = el(o.area ? 'textarea' : 'input', { type: o.area ? null : (o.type || 'text'), rows: o.area ? 2 : null, placeholder: o.ph || '', step: o.type === 'number' ? 'any' : null, value: obj[key] ?? '' });
@@ -108,6 +202,156 @@ function input(obj, key, o = {}) {
   return e;
 }
 const field = (label, ctl) => el('label', { class: 'f' }, el('span', {}, label), ctl);
+
+const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+const AI_KEY_STORAGE = 'bgl_quiz_editor_gemini_api_key';
+
+function aiPrompt(topic, count, target) {
+  const audience = target === 'barn' ? 'barn i åldern 5–10 år'
+    : target === 'vuxen' ? 'vuxna' : 'både barn i åldern 5–10 år och vuxna';
+  const groups = target === 'barn' ? 'barnQuestions'
+    : target === 'vuxen' ? 'vuxenQuestions' : 'barnQuestions och vuxenQuestions';
+  return `Skapa ett quiz på svenska med temat "${topic}" för ${audience}.
+Skapa ${count} frågor per vald målgrupp. Returnera ENDAST giltig JSON utan markdown eller annan text.
+JSON-objektet ska innehålla dessa arrayer: ${groups}.
+Varje fråga ska ha "type" och "text". Använd en varierad blandning av följande format:
+- options: "options" med 2–4 svarsalternativ och "correctAnswers" som array med 0-baserat index, till exempel [1].
+- text: "correctTextAnswer" och gärna "acceptedTextAnswers", samt "options": [].
+- points: "maxPoints" och "options": [].
+- ladder: exakt tre "clues", "ladderPoints": [10,7,4], "correctTextAnswer" och "options": [].
+Använd bara de arrayer som hör till målgrupperna ovan. Skriv alla frågor, svar och ledtrådar på svenska.`;
+}
+
+function aiJsonFromResponse(response) {
+  const text = response.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
+  if (!text) throw new Error('AI-tjänsten returnerade inget JSON-svar');
+  return parseJson(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''));
+}
+
+async function requestAiQuiz(apiKey, prompt) {
+  let lastError;
+  for (const model of AI_MODELS) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Gemini svarade ${response.status}: ${detail.slice(0, 180)}`);
+      }
+      return aiJsonFromResponse(await response.json());
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error('AI-genereringen misslyckades');
+}
+
+function appendQuestions(raw) {
+  const source = quizOf(raw);
+  if (!source || typeof source !== 'object') throw new Error('Svaret är inte ett quiz-objekt');
+  const quiz = quizOf(S.cur.raw);
+  normalize(source);
+  let count = 0;
+  for (const group of Object.keys(GROUPS)) {
+    if (!Array.isArray(source[group])) continue;
+    for (const question of source[group]) {
+      ensureType(question);
+      question.id = uid();
+      quiz[group].push(question);
+      count++;
+    }
+  }
+  if (!count) throw new Error('JSON innehåller inga barnQuestions eller vuxenQuestions');
+  markDirty();
+  renderEditor();
+  toast(`${count} frågor tillagda i quizet`);
+}
+
+async function generateAiQuestions() {
+  if (!S.cur) { toast('Öppna eller skapa ett quiz först'); return; }
+  const topic = $('aiTopic').value.trim();
+  const apiKey = $('aiApiKey').value.trim();
+  const count = Math.min(20, Math.max(1, Number($('aiCount').value) || 5));
+  const target = $('aiTarget').value;
+  if (!topic) { toast('Skriv ett ämne för AI-frågorna'); return; }
+  if (!apiKey) { toast('Ange en Gemini API-nyckel först'); return; }
+  localStorage.setItem(AI_KEY_STORAGE, apiKey);
+  const button = $('generateAi');
+  button.disabled = true;
+  button.textContent = '⏳ Skapar frågor…';
+  try {
+    appendQuestions(await requestAiQuiz(apiKey, aiPrompt(topic, count, target)));
+  } catch (e) {
+    toast('Kunde inte skapa AI-frågor: ' + e.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '✨ Skapa frågor med AI';
+  }
+}
+
+async function copyAiPrompt() {
+  const topic = $('aiTopic').value.trim();
+  const count = Math.min(20, Math.max(1, Number($('aiCount').value) || 5));
+  const target = $('aiTarget').value;
+  if (!topic) { toast('Skriv ett ämne för AI-frågorna'); return; }
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    toast('Webbläsaren saknar stöd för att kopiera till urklipp');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(aiPrompt(topic, count, target));
+    toast('AI-prompt kopierad – klistra in den i valfri AI-tjänst');
+  } catch (e) {
+    toast('Kunde inte kopiera AI-prompten: ' + e.message);
+  }
+}
+
+function importAiJson() {
+  if (!S.cur) { toast('Öppna eller skapa ett quiz först'); return; }
+  try {
+    appendQuestions(parseJson($('aiJson').value.replace(/^\uFEFF/, '')));
+    $('aiJson').value = '';
+  } catch (e) {
+    toast('Ogiltig AI-JSON: ' + e.message);
+  }
+}
+
+function aiTools() {
+  const savedKey = localStorage.getItem(AI_KEY_STORAGE) || '';
+  const key = el('input', { id: 'aiApiKey', type: 'password', value: savedKey, placeholder: 'AIza…' });
+  key.addEventListener('change', () => localStorage.setItem(AI_KEY_STORAGE, key.value.trim()));
+  return el('details', { class: 'ai-panel' },
+    el('summary', {}, '🤖 Skapa frågor med AI eller klistra in AI-JSON'),
+    el('div', { class: 'body' },
+      el('div', { class: 'ai-help' }, 'Använd en Gemini API-nyckel. Nyckeln sparas endast lokalt i denna webbläsare. AI-frågorna läggs till i aktuell quiz och bör alltid granskas före publicering.'),
+      el('div', { class: 'grid2' },
+        field('Gemini API-nyckel', key),
+        field('Ämne', el('input', { id: 'aiTopic', type: 'text', placeholder: 'Till exempel svensk historia' }))),
+      el('div', { class: 'mut' },
+        'Har du ingen API-nyckel? ',
+        el('a', { href: 'https://aistudio.google.com/app/apikey', target: '_blank', rel: 'noopener noreferrer' }, 'Skapa eller hantera Gemini API-nycklar i Google AI Studio ↗')),
+      el('div', { class: 'grid2' },
+        field('Frågor per målgrupp', el('input', { id: 'aiCount', type: 'number', min: 1, max: 20, value: 5 })),
+        field('Målgrupp', el('select', { id: 'aiTarget' },
+          el('option', { value: 'båda' }, 'Barn och vuxna'),
+          el('option', { value: 'barn' }, 'Barn'),
+          el('option', { value: 'vuxen' }, 'Vuxna')))),
+      el('div', { class: 'bar' },
+        el('button', { id: 'generateAi', class: 'pri', onclick: generateAiQuestions }, '✨ Skapa frågor med AI'),
+        el('button', { onclick: copyAiPrompt, title: 'Kopiera en prompt för ChatGPT, Claude eller en annan AI-tjänst' }, '📋 Kopiera AI-prompt')),
+      el('div', { class: 'mut' }, 'Använd den kopierade prompten i ChatGPT, Claude eller en annan AI-tjänst och klistra sedan in dess JSON-svar nedan.'),
+      el('div', { class: 'mut' }, 'Har du redan fått JSON från ChatGPT, Gemini eller Claude? Klistra in den här för att lägga till frågorna:'),
+      el('textarea', { id: 'aiJson', rows: 7, spellcheck: false, placeholder: '{"barnQuestions":[...],"vuxenQuestions":[...]}' }),
+      el('button', { onclick: importAiJson }, '📥 Lägg till inklistrad JSON')
+    )
+  );
+}
 
 /* ---------- normalisering ---------- */
 function ensureType(q) {
@@ -215,6 +459,7 @@ function renderList() {
 function renderEditor() {
   const ed = $('editor'); ed.replaceChildren();
   const c = S.cur;
+  updateLogoPreview(c ? quizOf(c.raw).logoUrl : '');
   if (!c) { ed.append(el('p', { class: 'mut' }, 'Välj en quiz i listan eller skapa en ny.')); return; }
   const quiz = quizOf(c.raw);
 
@@ -238,18 +483,26 @@ function renderEditor() {
   sb.append(
     el('div', { class: 'grid2' },
       field('Tidsgräns (minuter, 0 = ingen)', input(quiz, 'timeLimit', { type: 'number' })),
-      field('Lösenord för redigering', input(quiz, 'password', { optional: true })),
-      field('Logotyp (URL)', input(quiz, 'logoUrl', { optional: true })),
+      field('Quiz-lösenord (facit)', input(quiz, 'password', { optional: true }))),
+    el('div', { class: 'mut' },
+      'Detta lösenord används i appen för att låsa upp facit och slutresultat. Om fältet lämnas tomt låses facit normalt upp automatiskt när alla deltagare har svarat. Det är inte samma lösenord som appens adminlösenord för att öppna Redigera/Inställningar.'),
+    field('Logotyp (URL)', el('div', { class: 'logo-field' },
+      input(quiz, 'logoUrl', { optional: true, after: () => updateLogoPreview(quiz.logoUrl) }),
+      el('button', { type: 'button', onclick: event => { event.preventDefault(); chooseLogo(quiz, event.currentTarget.parentElement.querySelector('input')); } }, 'Välj logga…'))),
+    el('div', { class: 'logo-preview' }, el('img', { id: 'quizLogoPreview', alt: 'Förhandsvisning av quizets logotyp' })),
+    el('div', { class: 'grid2' },
       field('Upplåsningsavstånd för platsfrågor (m)', input(quiz, 'geotagUnlockDistance', { type: 'number' })),
       field('Textmatchning', strict)),
     el('label', { class: 'row' }, seq, 'Frågorna måste besvaras i ordning'));
   set.append(sb); ed.append(set);
+  updateLogoPreview(quiz.logoUrl);
 
   ed.append(el('div', { class: 'tabs' }, ...Object.entries(GROUPS).map(([g, name]) =>
     el('button', { class: S.group === g ? 'act' : '', onclick: () => { S.group = g; renderEditor(); } }, `${name} (${quiz[g].length})`))));
 
+  ed.append(aiTools());
   const list = quiz[S.group];
-  list.forEach((q, i) => ed.append(questionCard(list, i)));
+  questionRows(list).forEach(row => ed.append(questionCard(list, row.index, row)));
   const add = el('button', { class: 'pri', onclick: () => { const q = newQuestion(); list.push(q); S.open.add(q.id); markDirty(); renderEditor(); } }, '＋ Ny fråga');
   ed.append(add);
 
@@ -263,11 +516,45 @@ function renderEditor() {
   ed.append(raw);
 }
 
-function questionCard(list, i) {
+function questionRows(list) {
+  const questionsById = new Map(list.map(q => [q.id, q]));
+  const followUpTargetIds = new Set(
+    list.map(q => q.followUpQuestionId).filter(id => questionsById.has(id))
+  );
+  const rows = [];
+  const rendered = new Set();
+
+  const appendGroup = (question, number, depth, ancestors) => {
+    if (rendered.has(question.id) || ancestors.has(question.id)) return;
+    rendered.add(question.id);
+    rows.push({ index: list.indexOf(question), number, depth, isFollowUp: depth > 0 });
+
+    const nextAncestors = new Set(ancestors);
+    nextAncestors.add(question.id);
+    const child = questionsById.get(question.followUpQuestionId);
+    if (child) appendGroup(child, `${number}.1`, depth + 1, nextAncestors);
+  };
+
+  list.forEach((question, index) => {
+    if (!followUpTargetIds.has(question.id)) appendGroup(question, String(index + 1), 0, new Set());
+  });
+
+  // Keep malformed links and cycles visible rather than silently hiding questions.
+  list.forEach((question, index) => {
+    if (!rendered.has(question.id)) appendGroup(question, String(index + 1), 0, new Set());
+  });
+  return rows;
+}
+
+function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollowUp: false }) {
   const q = list[i];
-  const label = () => `${i + 1}. ${(q.text || '(ingen text)').slice(0, 70)}`;
+  const label = () => `${row.number}. ${row.isFollowUp ? '↳ Följdfråga: ' : ''}${(q.text || '(ingen text)').slice(0, 70)}`;
   const sum = el('summary', {}, label(), el('span', { class: 'tag' }, TYPES[q.type]));
-  const d = el('details', { open: S.open.has(q.id), ontoggle: e => { e.target.open ? S.open.add(q.id) : S.open.delete(q.id); } }, sum);
+  const d = el('details', {
+    class: row.isFollowUp ? 'question-follow-up' : '',
+    open: S.open.has(q.id),
+    ontoggle: e => { e.target.open ? S.open.add(q.id) : S.open.delete(q.id); }
+  }, sum);
   const body = el('div', { class: 'body' });
   const retag = () => sum.firstChild.textContent = label();
 
@@ -286,9 +573,67 @@ function questionCard(list, i) {
   if (q.type === 'points') body.append(field('Maxpoäng', input(q, 'maxPoints', { type: 'number' })));
   if (q.type === 'ladder') body.append(cluesEditor(q));
 
-  const loc = el('details', {}, el('summary', {}, 'Plats (valfritt)'), el('div', { class: 'body' }, el('div', { class: 'grid2' },
-    field('Latitud', locInput(q, 'lat', true)), field('Longitud', locInput(q, 'lng', true)), field('Platsnamn', locInput(q, 'name', false)))));
-  if (q.location) loc.open = true;
+  const latIn = locInput(q, 'lat', true), lngIn = locInput(q, 'lng', true), nameIn = locInput(q, 'name', false);
+  const coordinatesIn = el('input', {
+    type: 'text',
+    placeholder: 't.ex. [56,2432187, 12,8614824] eller OpenStreetMap-länk',
+    'aria-label': 'Klistra in koordinater eller OpenStreetMap-länk'
+  });
+  const useCoordinates = () => {
+    const coordinates = parseCoordinates(coordinatesIn.value);
+    if (!coordinates) { toast('Ogiltigt koordinatformat eller koordinater utanför tillåtna gränser'); return; }
+    latIn.value = coordinates.lat;
+    lngIn.value = coordinates.lng;
+    latIn.dispatchEvent(new Event('input', { bubbles: true }));
+    lngIn.dispatchEvent(new Event('input', { bubbles: true }));
+    coordinatesIn.value = '';
+    toast('Koordinater tillagda');
+  };
+  coordinatesIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); useCoordinates(); }
+  });
+  const coordinatesButton = el('button', { type: 'button', class: 'pri', onclick: useCoordinates }, 'Använd');
+  const followUpQuestion = el('select', {},
+    el('option', { value: '' }, 'Ingen följdfråga'),
+    ...list.filter(item => item.id !== q.id).map(item =>
+      el('option', { value: item.id, selected: q.followUpQuestionId === item.id }, item.text || item.id)));
+  followUpQuestion.value = q.followUpQuestionId || '';
+  followUpQuestion.addEventListener('change', () => {
+    if (followUpQuestion.value) {
+      q.followUpQuestionId = followUpQuestion.value;
+      q.followUpMode = q.followUpMode || 'always';
+    } else {
+      delete q.followUpQuestionId;
+      delete q.followUpMode;
+    }
+    followUpMode.disabled = !q.followUpQuestionId;
+    markDirty();
+  });
+  const followUpMode = el('select', { disabled: !q.followUpQuestionId },
+    ...[
+      ['always', 'Alltid'],
+      ['correct', 'Endast vid rätt svar'],
+      ['incorrect', 'Endast vid fel svar']
+    ].map(([value, label]) => el('option', { value, selected: (q.followUpMode || 'always') === value }, label)));
+  followUpMode.value = q.followUpMode || 'always';
+  followUpMode.addEventListener('change', () => {
+    q.followUpMode = followUpMode.value;
+    markDirty();
+  });
+  const mapBox = el('div', { class: 'locmap' });
+  const loc = el('details', { ontoggle: e => { if (e.target.open) initLocationLink(mapBox, latIn, lngIn); } },
+    el('summary', {}, 'Plats (valfritt)'),
+    el('div', { class: 'body' },
+      field('Klistra in koordinater', el('div', { class: 'row coordinate-entry' }, coordinatesIn, coordinatesButton)),
+      el('div', { class: 'grid2' }, field('Latitud', latIn), field('Longitud', lngIn), field('Platsnamn', nameIn)),
+      mapBox,
+      el('section', { class: 'follow-up' },
+        el('h3', {}, 'Följdfråga'),
+        el('p', { class: 'mut' }, 'Välj en fråga som ska visas efter den här frågan och när den ska visas.'),
+        el('div', { class: 'follow-up-grid' },
+          field('Fråga', followUpQuestion),
+          field('Villkor', followUpMode)))));
+  if (q.location || q.followUpQuestionId) loc.open = true;
   body.append(loc);
 
   if (q.translations && Object.keys(q.translations).length) {
@@ -353,6 +698,28 @@ function cluesEditor(q) {
   return box;
 }
 
+function initLocationLink(box, latIn, lngIn) {
+  if (box.dataset.ready) return;
+  box.dataset.ready = '1';
+  const link = el('a', { class: 'btn', target: '_blank', rel: 'noopener noreferrer' }, '📍 Visa position i OpenStreetMap');
+  const hint = el('div', { class: 'mut' });
+  const updateLink = () => {
+    const la = parseFloat(latIn.value), ln = parseFloat(lngIn.value);
+    const valid = Number.isFinite(la) && Number.isFinite(ln) && la >= -90 && la <= 90 && ln >= -180 && ln <= 180;
+    link.hidden = !valid;
+    if (valid) {
+      link.href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(la)}&mlon=${encodeURIComponent(ln)}#map=15/${la}/${ln}`;
+      hint.textContent = 'Öppnas i OpenStreetMaps egen kartvy.';
+    } else {
+      hint.textContent = 'Fyll i giltig latitud och longitud för att visa positionen på kartan.';
+    }
+  };
+  latIn.addEventListener('input', updateLink);
+  lngIn.addEventListener('input', updateLink);
+  updateLink();
+  box.append(link, hint);
+}
+
 function locInput(q, key, num) {
   const e = el('input', { type: num ? 'number' : 'text', step: num ? 'any' : null, value: q.location?.[key] ?? '' });
   e.addEventListener('input', () => {
@@ -363,6 +730,52 @@ function locInput(q, key, num) {
     markDirty();
   });
   return e;
+}
+
+function parseCoordinates(input) {
+  const text = String(input || '').trim();
+  if (!text) return null;
+  const patterns = [
+    /[?&]mlat=(-?\d+(?:\.\d+)?)[^#]*[?&]mlon=(-?\d+(?:\.\d+)?)/i,
+    /[?&]mlon=(-?\d+(?:\.\d+)?)[^#]*[?&]mlat=(-?\d+(?:\.\d+)?)/i,
+    /#map=\d+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/i,
+    /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const coordinates = validCoordinates(Number(match[1]), Number(match[2]));
+      if (coordinates) return coordinates;
+    }
+  }
+
+  const cleaned = text.replace(/[\[\]()]/g, '').trim();
+  const decimalComma = cleaned.match(/^\s*(-?\d+),(\d+)\s*,\s*(-?\d+),(\d+)\s*$/);
+  if (decimalComma) {
+    const coordinates = validCoordinates(
+      Number(`${decimalComma[1]}.${decimalComma[2]}`),
+      Number(`${decimalComma[3]}.${decimalComma[4]}`)
+    );
+    if (coordinates) return coordinates;
+  }
+
+  const decimalPoint = cleaned.match(/^\s*(-?\d+\.\d+)\s*(?:,|;|\/|\s)\s*(-?\d+\.\d+)\s*$/);
+  if (decimalPoint) return validCoordinates(Number(decimalPoint[1]), Number(decimalPoint[2]));
+
+  const separated = cleaned.match(/^\s*(-?\d+(?:[.,]\d+)?)\s*(?:;|\/|\s+)\s*(-?\d+(?:[.,]\d+)?)\s*$/);
+  if (separated) {
+    return validCoordinates(
+      Number(separated[1].replace(',', '.')),
+      Number(separated[2].replace(',', '.'))
+    );
+  }
+  return null;
+}
+
+function validCoordinates(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
 }
 
 /* ---------- manifest ---------- */
@@ -453,11 +866,46 @@ async function syncManifest() {
 
 async function openDir() {
   if (!FS) { toast('Webbläsaren saknar mappåtkomst – använd Chrome eller Edge'); return; }
-  try { S.dir = await window.showDirectoryPicker({ mode: 'readwrite' }); }
-  catch { return; }
+  let savedDir = null;
+  try { savedDir = await readSavedDirectory(); }
+  catch (e) { toast('Kunde inte läsa sparad mapp: ' + e.message); }
+
+  let selectedDir;
+  try {
+    // Visa alltid mappväljaren så att användaren kan kontrollera eller byta mapp.
+    selectedDir = await window.showDirectoryPicker({ mode: 'readwrite', ...(savedDir ? { startIn: savedDir } : {}) });
+  } catch (e) {
+    if (e.name !== 'AbortError') toast('Kunde inte öppna mapp: ' + e.message);
+    return;
+  }
+  S.dir = selectedDir;
+  try { await saveDirectory(S.dir); }
+  catch (e) { toast('Mappen öppnades men kunde inte kommas ihåg: ' + e.message); }
   S.cur = null; S.dirty = false; $('save').disabled = true;
   await refresh(); renderEditor();
 }
+
+function directoryStore(mode, operation) {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) { reject(new Error('IndexedDB stöds inte')); return; }
+    const request = indexedDB.open('bgl-quiz-editor', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('settings');
+    request.onerror = () => reject(request.error || new Error('Kunde inte öppna lokal lagring'));
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction('settings', mode);
+      const query = operation(tx.objectStore('settings'));
+      let result;
+      query.onsuccess = () => { result = query.result; };
+      query.onerror = () => reject(query.error || new Error('Kunde inte använda lokal lagring'));
+      tx.oncomplete = () => { db.close(); resolve(result); };
+      tx.onerror = () => { db.close(); reject(tx.error || new Error('Kunde inte spara lokal lagring')); };
+      tx.onabort = () => { db.close(); reject(tx.error || new Error('Lokal lagring avbröts')); };
+    };
+  });
+}
+const readSavedDirectory = () => directoryStore('readonly', store => store.get('lastDirectory'));
+const saveDirectory = handle => directoryStore('readwrite', store => store.put(handle, 'lastDirectory'));
 
 /* ---------- start ---------- */
 $('openDir').onclick = openDir;
@@ -467,7 +915,13 @@ $('syncMan').onclick = syncManifest;
 $('openDir').hidden = !FS;
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!$('save').disabled) save(); } });
 window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
-refresh().then(renderEditor);
+(async () => {
+  await refresh();
+  renderEditor();
+})().catch(e => {
+  toast('Kunde inte läsa quizmappen: ' + e.message);
+  renderList(); renderEditor();
+});
 </script>
 </body>
 </html>

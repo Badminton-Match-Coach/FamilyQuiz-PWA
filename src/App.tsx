@@ -3377,7 +3377,7 @@ ${exampleJson}`;
     }
   };
 
-  const handleBatchTranslateQuiz = async () => {
+  const handleBatchTranslateQuiz = async (customTargetLangs?: Language[]) => {
     const currentApiKey = getStoredApiKey();
     if (!currentApiKey) {
       setUserApiKeyInput('');
@@ -3392,7 +3392,9 @@ ${exampleJson}`;
       return;
     }
 
-    const targetLangs = promptLanguages.length > 0 ? promptLanguages : (SUPPORTED_LANGUAGES.map(l => l.code) as Language[]);
+    const targetLangs = (customTargetLangs && customTargetLangs.length > 0)
+      ? customTargetLangs
+      : (promptLanguages.length > 0 ? promptLanguages : (SUPPORTED_LANGUAGES.map(l => l.code) as Language[]));
     setIsBatchTranslating(true);
     setBatchTranslateProgress({ current: 0, total: targetLangs.length, langCode: targetLangs[0] || 'en' });
 

@@ -418,36 +418,35 @@ Ensure URLs are valid and safe.\n`;
       originalLanguage: currentLang
     }));
 
-    for (const tgtLang of extraLanguages) {
-      try {
-        const transResult = await translateQuestionsClient(questionsToTranslate, tgtLang, apiKey);
-        if (transResult.translations && Array.isArray(transResult.translations)) {
-          for (const item of transResult.translations) {
-            const bQ = quizData.barnQuestions?.find((bq: any) => bq.id === item.id);
-            if (bQ) {
-              bQ.translations = bQ.translations || {};
-              bQ.translations[tgtLang] = {
-                text: item.text,
-                options: item.options || bQ.options,
-                clues: item.clues || bQ.clues,
-                correctTextAnswer: item.correctTextAnswer || bQ.correctTextAnswer
-              };
-            }
-            const vQ = quizData.vuxenQuestions?.find((vq: any) => vq.id === item.id);
-            if (vQ) {
-              vQ.translations = vQ.translations || {};
-              vQ.translations[tgtLang] = {
-                text: item.text,
-                options: item.options || vQ.options,
-                clues: item.clues || vQ.clues,
-                correctTextAnswer: item.correctTextAnswer || vQ.correctTextAnswer
-              };
-            }
+    try {
+      const transResult = await translateQuestionsClient(questionsToTranslate, extraLanguages, apiKey);
+      if (transResult.translations && Array.isArray(transResult.translations)) {
+        for (const item of transResult.translations) {
+          const tgtLang = item.targetLanguage;
+          const bQ = quizData.barnQuestions?.find((bq: any) => bq.id === item.id);
+          if (bQ) {
+            bQ.translations = bQ.translations || {};
+            bQ.translations[tgtLang] = {
+              text: item.text,
+              options: item.options || bQ.options,
+              clues: item.clues || bQ.clues,
+              correctTextAnswer: item.correctTextAnswer || bQ.correctTextAnswer
+            };
+          }
+          const vQ = quizData.vuxenQuestions?.find((vq: any) => vq.id === item.id);
+          if (vQ) {
+            vQ.translations = vQ.translations || {};
+            vQ.translations[tgtLang] = {
+              text: item.text,
+              options: item.options || vQ.options,
+              clues: item.clues || vQ.clues,
+              correctTextAnswer: item.correctTextAnswer || vQ.correctTextAnswer
+            };
           }
         }
-      } catch (err) {
-        console.warn(`Could not pre-translate generated questions to ${tgtLang}:`, err);
       }
+    } catch (err) {
+      console.warn(`Could not pre-translate generated questions:`, err);
     }
   }
 
@@ -467,50 +466,45 @@ export async function batchTranslateQuizQuestions(params: {
   }
 
   const updatedQuestions = JSON.parse(JSON.stringify(questions));
-  const totalOperations = targetLanguages.length;
-  let completedOperations = 0;
 
-  for (const tgtLang of targetLanguages) {
-    // Filter questions that need translation for this language
-    const questionsToTranslate = updatedQuestions.filter((q: any) => {
-      const orig = q.originalLanguage || 'sv';
-      return orig !== tgtLang && (!q.translations || !q.translations[tgtLang]);
-    });
+  // Filter questions that need translation for any of the target languages
+  const questionsToTranslate = updatedQuestions.filter((q: any) => {
+    const orig = q.originalLanguage || 'sv';
+    return targetLanguages.some(tgtLang => orig !== tgtLang && (!q.translations || !q.translations[tgtLang]));
+  });
 
-    if (questionsToTranslate.length > 0) {
-      try {
-        const transPayload = questionsToTranslate.map((q: any) => ({
-          id: q.id,
-          text: q.text,
-          options: q.options || [],
-          clues: q.clues || [],
-          correctTextAnswer: q.correctTextAnswer,
-          originalLanguage: q.originalLanguage || 'sv'
-        }));
+  if (questionsToTranslate.length > 0) {
+    try {
+      const transPayload = questionsToTranslate.map((q: any) => ({
+        id: q.id,
+        text: q.text,
+        options: q.options || [],
+        clues: q.clues || [],
+        correctTextAnswer: q.correctTextAnswer,
+        originalLanguage: q.originalLanguage || 'sv'
+      }));
 
-        const result = await translateQuestionsClient(transPayload, tgtLang, apiKey);
-        if (result.translations && Array.isArray(result.translations)) {
-          for (const item of result.translations) {
-            const targetQ = updatedQuestions.find((q: any) => q.id === item.id);
-            if (targetQ) {
-              targetQ.translations = targetQ.translations || {};
-              targetQ.translations[tgtLang] = {
-                text: item.text,
-                options: item.options || targetQ.options,
-                clues: item.clues || targetQ.clues,
-                correctTextAnswer: item.correctTextAnswer || targetQ.correctTextAnswer
-              };
-            }
+      const result = await translateQuestionsClient(transPayload, targetLanguages, apiKey);
+      if (result.translations && Array.isArray(result.translations)) {
+        for (const item of result.translations) {
+          const targetQ = updatedQuestions.find((q: any) => q.id === item.id);
+          if (targetQ) {
+            targetQ.translations = targetQ.translations || {};
+            targetQ.translations[item.targetLanguage] = {
+              text: item.text,
+              options: item.options || targetQ.options,
+              clues: item.clues || targetQ.clues,
+              correctTextAnswer: item.correctTextAnswer || targetQ.correctTextAnswer
+            };
           }
         }
-      } catch (err) {
-        console.error(`Batch translation failed for language ${tgtLang}:`, err);
       }
-    }
-
-    completedOperations++;
-    if (onProgress) {
-      onProgress(completedOperations, totalOperations, tgtLang);
+      
+      if (onProgress) {
+        onProgress(targetLanguages.length, targetLanguages.length, 'all');
+      }
+    } catch (err) {
+      console.error(`Batch translation failed:`, err);
     }
   }
 
@@ -519,7 +513,7 @@ export async function batchTranslateQuizQuestions(params: {
 
 export async function translateQuestionsClient(
   questions: Array<{ id: string; text: string; options?: string[]; clues?: string[]; correctTextAnswer?: string; originalLanguage?: string }>,
-  targetLanguage: string,
+  targetLanguages: string[],
   apiKeyOverride?: string
 ) {
   const apiKey = apiKeyOverride || getStoredApiKey();
@@ -527,19 +521,17 @@ export async function translateQuestionsClient(
     return { translations: [] };
   }
 
-  if (!questions || questions.length === 0) {
+  if (!questions || questions.length === 0 || targetLanguages.length === 0) {
     return { translations: [] };
   }
 
   const { ai, Type } = await getGeminiSdk(apiKey);
 
-  const prompt = `Translate the following quiz questions directly into target language code: "${targetLanguage}".
+  const prompt = `Translate the following quiz questions into the target languages: ${targetLanguages.join(", ")}.
 Each question object has an "id", "text", "originalLanguage", and optional "options", "clues", and "correctTextAnswer".
-- Translate "text" accurately into "${targetLanguage}".
-- If "options" array is present, translate each option preserving original order.
-- If "clues" array is present, translate each clue text preserving order.
-- If "correctTextAnswer" is present, translate it into "${targetLanguage}" if it is a general noun or phrase, or keep proper name unchanged.
-Keep the exact same "id" for each question. Preserve the original meaning.`;
+Return a JSON object where each question "id" maps to an object containing translations for the requested languages.
+Format: { [questionId]: { [languageCode]: { "text": "...", "options": [...], "clues": [...], "correctTextAnswer": "..." } } }
+Preserve the exact "id" for each question. Preserve the original meaning for all languages.`;
 
   const response = await generateContentWithFallback(ai, {
     contents: prompt + "\nInput Questions JSON:\n" + JSON.stringify(questions),
@@ -547,29 +539,38 @@ Keep the exact same "id" for each question. Preserve the original meaning.`;
       responseMimeType: "application/json",
       responseSchema: {
         type: Type.OBJECT,
-        properties: {
-          translations: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                text: { type: Type.STRING },
-                options: { type: Type.ARRAY, items: { type: Type.STRING } },
-                clues: { type: Type.ARRAY, items: { type: Type.STRING } },
-                correctTextAnswer: { type: Type.STRING }
-              },
-              required: ["id", "text"]
-            }
+        additionalProperties: {
+          type: Type.OBJECT,
+          additionalProperties: {
+            type: Type.OBJECT,
+            properties: {
+              text: { type: Type.STRING },
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              clues: { type: Type.ARRAY, items: { type: Type.STRING } },
+              correctTextAnswer: { type: Type.STRING }
+            },
+            required: ["text"]
           }
-        },
-        required: ["translations"]
+        }
       }
     }
   });
 
   const data = JSON.parse(response.text || "{}");
-  return data;
+  
+  // Transform the response into the expected format { translations: [{ id, text, options, clues, correctTextAnswer, targetLanguage }] }
+  const formattedTranslations: any[] = [];
+  Object.entries(data).forEach(([id, langMap]) => {
+    Object.entries(langMap as Record<string, any>).forEach(([langCode, translation]) => {
+      formattedTranslations.push({
+        id,
+        targetLanguage: langCode,
+        ...translation
+      });
+    });
+  });
+
+  return { translations: formattedTranslations };
 }
 
 /**

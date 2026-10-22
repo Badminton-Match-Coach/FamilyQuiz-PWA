@@ -104,7 +104,7 @@ export async function requestQuestionTranslations(questions: Question[], targetL
         options: q.options || [],
         originalLanguage: q.originalLanguage || 'sv'
       })),
-      targetLang
+      [targetLang]
     );
 
     if (data.translations && Array.isArray(data.translations)) {

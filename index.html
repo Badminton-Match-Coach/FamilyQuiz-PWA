@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Family Quiz PWA</title>
-    <meta name="description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna." />
+    <meta name="description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna, inklusive AI-generering och JSON-import av frågor." />
     <meta property="og:title" content="Family Quiz PWA" />
-    <meta property="og:description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna." />
+    <meta property="og:description" content="En interaktiv PWA-frågesport för hela familjen med separata frågor för barn och vuxna, inklusive AI-generering och JSON-import av frågor." />
     <meta name="theme-color" content="#4f46e5" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -48,6 +48,11 @@
         https://dinapp.se/?quizFile=https://minsajt.se/quizzes/sommarquiz.json
       - Låst deltagarläge:
         https://dinapp.se/?catalog=https://minsajt.se/quizzes/&quizFile=sommarquiz.json&lock=1
+
+      AI-FRÅGOR:
+      - Under Redigera > AI kan appen skapa frågor med Gemini.
+      - Frågor kan också importeras genom att klistra in quiz-JSON.
+      - Gemini API-nyckel och AI-inställningar hanteras i appens AI-panel.
       =============================================================================
     -->
   </head>
@@ -63,6 +68,8 @@
           <li><strong>Låst läge:</strong> <code>lock=1</code></li>
         </ul>
         <p><strong>Exempel:</strong> <code>?catalog=https://minsajt.se/quizzes/&amp;quizFile=sommarquiz.json</code></p>
+        <h2>AI-frågor</h2>
+        <p>Öppna <strong>Redigera</strong> och välj AI för att skapa frågor med Gemini eller klistra in quiz-JSON från en annan AI-tjänst.</p>
       </div>
     </noscript>
 
@@ -70,4 +77,3 @@
     <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
-

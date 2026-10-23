@@ -54,8 +54,12 @@
   .ai-panel { background:linear-gradient(135deg,#eef2ff,#faf5ff); border-color:#c7d2fe; }
   .ai-panel .body { display:grid; gap:.5rem; }
   .ai-help { color:#4338ca; font-size:12px; }
+  .language-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.25rem .5rem; }
+  .language-option { display:flex; align-items:center; gap:.35rem; font-size:12px; }
+  .language-option input { width:auto; }
   .bar { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
   .grow { flex:1; }
+  select.ui-lang { width:auto; }
   #status { position:fixed; left:50%; bottom:1rem; transform:translateX(-50%); background:#0f172a; color:#fff; padding:.5rem 1rem; border-radius:10px; opacity:0; transition:opacity .2s; pointer-events:none; max-width:90vw; z-index:9; }
   #status.show { opacity:1; }
   code { background:#f1f5f9; padding:0 4px; border-radius:4px; }
@@ -65,6 +69,7 @@
 <header>
   <img id="appLogo" alt="Family Quiz">
   <h1>📝 Quizeditor</h1>
+  <select id="uiLang" class="ui-lang" aria-label="Språk"></select>
   <button id="openDir" class="pri">📂 Öppna mapp…</button>
   <button id="newQuiz">＋ Ny quiz</button>
   <button id="syncMan" title="Bygg om manifest.json från filerna i mappen">🔄 Synka manifest</button>
@@ -79,14 +84,31 @@
 </main>
 <div id="status"></div>
 
+<script src="i18n.js"></script>
 <script>
 'use strict';
 const TYPES = { options:'Flerval', text:'Fritext', points:'Poäng', ladder:'Ledtrådsstege' };
 const GROUPS = { barnQuestions:'Barn', vuxenQuestions:'Vuxen' };
 const FS = 'showDirectoryPicker' in window;
 const APP_LOGO = new URL('../Quiz/icon.png', location.href).href;
-const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, group:'barnQuestions', dirty:false, open:new Set(), logoPreview:null };
+const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, lang:'', group:'barnQuestions', dirty:false, open:new Set(), logoPreview:null };
 const $ = id => document.getElementById(id);
+const TEXT_ATTRS = new Set(['placeholder', 'title', 'alt', 'aria-label']);
+
+function applyStaticText() {
+  document.documentElement.lang = UI_LANG;
+  document.title = tr('Quizeditor – Family Quiz');
+  document.querySelectorAll('header h1, header button').forEach(node => {
+    node.dataset.sv = node.dataset.sv || node.textContent;
+    node.textContent = tr(node.dataset.sv);
+  });
+  const sync = $('syncMan');
+  sync.dataset.svTitle = sync.dataset.svTitle || sync.title;
+  sync.title = tr(sync.dataset.svTitle);
+  const select = $('uiLang');
+  select.setAttribute('aria-label', tr('Språk'));
+  select.value = UI_LANG;
+}
 
 /* ---------- helpers ---------- */
 function el(tag, props, ...kids) {
@@ -95,10 +117,10 @@ function el(tag, props, ...kids) {
     if (v == null || v === false) continue;
     if (k === 'class') e.className = v;
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
-    else if (k in e) e[k] = v;
-    else e.setAttribute(k, v);
+    else if (k in e) e[k] = TEXT_ATTRS.has(k) && typeof v === 'string' ? tr(v) : v;
+    else e.setAttribute(k, TEXT_ATTRS.has(k) && typeof v === 'string' ? tr(v) : v);
   }
-  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(typeof c === 'string' ? tr(c) : c));
   return e;
 }
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
@@ -108,11 +130,16 @@ const quizOf = raw => isWrapped(raw) ? raw.quiz : raw;
 const fnOf = m => typeof m === 'string' ? m : (m.filename || m.file || '');
 const dirUrl = () => location.href.slice(0, location.href.lastIndexOf('/') + 1);
 let toastTimer;
-function toast(msg) { const s = $('status'); s.textContent = msg; s.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => s.classList.remove('show'), 3500); }
+function toast(key, ...args) {
+  const msg = tr(key, ...args);
+  const s = $('status'); s.textContent = msg; s.classList.add('show'); clearTimeout(toastTimer);
+  const isError = /^Kunde inte|^Ogiltig|misslyckades/.test(key);
+  toastTimer = setTimeout(() => s.classList.remove('show'), isError ? 15000 : 3500);
+}
 function markDirty() { S.dirty = true; $('save').disabled = false; }
 function updateLogoPreview(logoUrl) {
   for (const image of [$('appLogo'), $('quizLogoPreview')].filter(Boolean)) {
-    image.alt = logoUrl ? 'Quizens logotyp' : 'Family Quiz';
+    image.alt = logoUrl ? tr('Quizens logotyp') : 'Family Quiz';
     image.onerror = () => {
       if (image.src !== APP_LOGO) image.src = APP_LOGO;
       else image.hidden = true;
@@ -130,7 +157,7 @@ function fileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error('Kunde inte läsa bildfilen'));
+    reader.onerror = () => reject(reader.error || new Error(tr('Kunde inte läsa bildfilen')));
     reader.readAsDataURL(file);
   });
 }
@@ -168,7 +195,7 @@ async function chooseLogo(quiz, logoInput) {
     });
     const file = await handle.getFile();
     if (!file.type.startsWith('image/') && !/\.(png|jpe?g|webp|gif|svg|avif|ico)$/i.test(file.name)) {
-      throw new Error('Den valda filen är inte en bild');
+      throw new Error(tr('Den valda filen är inte en bild'));
     }
     let previewFile = file;
     if (S.dir) {
@@ -183,9 +210,10 @@ async function chooseLogo(quiz, logoInput) {
     S.logoPreview = { name: quiz.logoUrl, url: URL.createObjectURL(previewFile) };
     updateLogoPreview(quiz.logoUrl);
     markDirty();
-    toast(S.dir ? `Logotyp kopierad till quizmappen: ${previewFile.name} – spara quizet` : 'Logotyp inbäddad i quizet – spara quizet');
+    if (S.dir) toast('Logotyp kopierad till quizmappen: {0} – spara quizet', previewFile.name);
+    else toast('Logotyp inbäddad i quizet – spara quizet');
   } catch (e) {
-    if (e.name !== 'AbortError') toast('Kunde inte välja logotyp: ' + e.message);
+    if (e.name !== 'AbortError') toast('Kunde inte välja logotyp: {0}', e.message);
   }
 }
 
@@ -205,26 +233,52 @@ const field = (label, ctl) => el('label', { class: 'f' }, el('span', {}, label),
 
 const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
 const AI_KEY_STORAGE = 'bgl_quiz_editor_gemini_api_key';
+const QUIZ_LANGUAGES = [
+  ['sv', 'Svenska'], ['en', 'Engelska'], ['de', 'Tyska'], ['fr', 'Franska'], ['es', 'Spanska'],
+  ['no', 'Norska'], ['da', 'Danska'], ['fi', 'Finska'], ['it', 'Italienska'], ['et', 'Estniska'],
+  ['lv', 'Lettiska'], ['lt', 'Litauiska'], ['uk', 'Ukrainska'], ['is', 'Isländska'],
+  ['se', 'Nordsamiska'], ['nl', 'Nederländska'], ['be', 'Flamländska']
+];
 
-function aiPrompt(topic, count, target) {
-  const audience = target === 'barn' ? 'barn i åldern 5–10 år'
-    : target === 'vuxen' ? 'vuxna' : 'både barn i åldern 5–10 år och vuxna';
+const AI_LANGUAGE_NAMES = {
+  sv: 'Swedish', en: 'English', de: 'German', fr: 'French', es: 'Spanish', no: 'Norwegian', da: 'Danish', fi: 'Finnish',
+  it: 'Italian', et: 'Estonian', lv: 'Latvian', lt: 'Lithuanian', uk: 'Ukrainian', is: 'Icelandic', se: 'Northern Sami',
+  nl: 'Dutch', be: 'Flemish'
+};
+
+function aiPrompt(topic, count, target, lang = 'sv') {
   const groups = target === 'barn' ? 'barnQuestions'
-    : target === 'vuxen' ? 'vuxenQuestions' : 'barnQuestions och vuxenQuestions';
-  return `Skapa ett quiz på svenska med temat "${topic}" för ${audience}.
+    : target === 'vuxen' ? 'vuxenQuestions' : 'barnQuestions and vuxenQuestions';
+  if (lang === 'sv') {
+    const audience = target === 'barn' ? 'barn i åldern 5–10 år'
+      : target === 'vuxen' ? 'vuxna' : 'både barn i åldern 5–10 år och vuxna';
+    return `Skapa ett quiz på svenska med temat "${topic}" för ${audience}.
 Skapa ${count} frågor per vald målgrupp. Returnera ENDAST giltig JSON utan markdown eller annan text.
-JSON-objektet ska innehålla dessa arrayer: ${groups}.
+JSON-objektet ska innehålla dessa arrayer: ${groups.replace(' and ', ' och ')}.
 Varje fråga ska ha "type" och "text". Använd en varierad blandning av följande format:
 - options: "options" med 2–4 svarsalternativ och "correctAnswers" som array med 0-baserat index, till exempel [1].
 - text: "correctTextAnswer" och gärna "acceptedTextAnswers", samt "options": [].
 - points: "maxPoints" och "options": [].
 - ladder: exakt tre "clues", "ladderPoints": [10,7,4], "correctTextAnswer" och "options": [].
 Använd bara de arrayer som hör till målgrupperna ovan. Skriv alla frågor, svar och ledtrådar på svenska.`;
+  }
+  const language = AI_LANGUAGE_NAMES[lang] || lang;
+  const audience = target === 'barn' ? 'children aged 5–10'
+    : target === 'vuxen' ? 'adults' : 'both children aged 5–10 and adults';
+  return `Create a quiz in ${language} on the topic "${topic}" for ${audience}.
+Create ${count} questions per selected audience. Return ONLY valid JSON without markdown or any other text.
+The JSON object must contain these arrays: ${groups} (keep these English key names exactly; barnQuestions = children, vuxenQuestions = adults).
+Each question must have "type" and "text". Use a varied mix of the following formats:
+- options: "options" with 2–4 answer options and "correctAnswers" as an array of 0-based indexes, for example [1].
+- text: "correctTextAnswer" and preferably "acceptedTextAnswers", plus "options": [].
+- points: "maxPoints" and "options": [].
+- ladder: exactly three "clues", "ladderPoints": [10,7,4], "correctTextAnswer" and "options": [].
+Only use the arrays that belong to the audiences above. Write all questions, answers and clues in ${language}.`;
 }
 
 function aiJsonFromResponse(response) {
   const text = response.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('').trim();
-  if (!text) throw new Error('AI-tjänsten returnerade inget JSON-svar');
+  if (!text) throw new Error(tr('AI-tjänsten returnerade inget JSON-svar'));
   return parseJson(text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''));
 }
 
@@ -242,19 +296,206 @@ async function requestAiQuiz(apiKey, prompt) {
       });
       if (!response.ok) {
         const detail = await response.text();
-        throw new Error(`Gemini svarade ${response.status}: ${detail.slice(0, 180)}`);
+        throw new Error(tr('Gemini svarade {0}: {1}', response.status, detail.slice(0, 180)));
       }
       return aiJsonFromResponse(await response.json());
     } catch (e) {
       lastError = e;
     }
   }
-  throw lastError || new Error('AI-genereringen misslyckades');
+  throw lastError || new Error(tr('AI-genereringen misslyckades'));
 }
 
-function appendQuestions(raw) {
+async function requestQuizTranslations(apiKey, questions) {
+  let lastError;
+  for (const model of AI_MODELS) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Translate each quiz question into only the targetLanguages listed for that question. The source language is given as originalLanguage.
+Return a JSON object keyed by the exact question id, then by target language code. Each translation must contain text, and translated options/clues arrays when those fields are provided. Keep the options and clues in the same order and preserve quiz facts and answer meaning. Translate correctTextAnswer when it is provided.
+Required shape: { "question-id": { "en": { "text": "...", "options": ["..."], "clues": ["..."], "correctTextAnswer": "..." } } }
+Do not add explanations or markdown.
+Questions JSON:\n${JSON.stringify(questions)}` }] }],
+          generationConfig: {
+            responseMimeType: 'application/json'
+          }
+        })
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(tr('Gemini svarade {0}: {1}', response.status, detail.slice(0, 180)));
+      }
+      const data = aiJsonFromResponse(await response.json());
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error(tr('AI-tjänsten returnerade ett ogiltigt översättningssvar'));
+      }
+      return data;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error(tr('Översättningen misslyckades'));
+}
+
+function translationTools() {
+  const quiz = quizOf(S.cur.raw);
+  const knownLanguages = [...new Set([
+    ...quiz.barnQuestions.map(q => q.originalLanguage),
+    ...quiz.vuxenQuestions.map(q => q.originalLanguage)
+  ].filter(Boolean))];
+  const sourceLanguage = knownLanguages.length === 1 ? knownLanguages[0] : 'sv';
+  const source = el('select', { id: 'translationSource' },
+    ...QUIZ_LANGUAGES.map(([code, name]) => el('option', { value: code, selected: code === sourceLanguage }, name)));
+  const targetLanguages = el('div', { id: 'translationLanguages', class: 'language-grid' },
+    ...QUIZ_LANGUAGES.filter(([code]) => code !== sourceLanguage).map(([code, name]) =>
+      el('label', { class: 'language-option' },
+        el('input', { type: 'checkbox', value: code, checked: code === 'en' }),
+        name)));
+  const chooseAll = () => targetLanguages.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = input.value !== source.value; });
+  const clearTargets = () => targetLanguages.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+  source.addEventListener('change', () => {
+    targetLanguages.querySelectorAll('input[type="checkbox"]').forEach(input => {
+      const option = input.closest('label');
+      if (input.value === source.value) {
+        input.checked = false;
+        option.hidden = true;
+      } else option.hidden = false;
+    });
+  });
+  return el('details', { class: 'ai-panel' },
+    el('summary', {}, '🌐 Skapa språkvarianter av quizet'),
+    el('div', { class: 'body' },
+      el('div', { class: 'ai-help' }, 'Översättningarna sparas på frågorna i quizfilen och blir tillgängliga som språkval i appen. En befintlig översättning skrivs inte över.'),
+      field('Frågornas källspråk (för frågor som saknar språk)', source),
+      el('div', { class: 'mut' }, 'Välj ett eller flera språk att översätta till:'),
+      targetLanguages,
+      el('div', { class: 'bar' },
+        el('button', { type: 'button', onclick: chooseAll }, 'Välj alla'),
+        el('button', { type: 'button', onclick: clearTargets }, 'Rensa val'),
+        el('span', { class: 'grow' }),
+        el('button', { id: 'translateQuiz', class: 'pri', onclick: translateQuiz }, '🌐 Översätt quizet'))));
+}
+
+async function translateQuiz() {
+  if (!S.cur) { toast('Öppna eller skapa ett quiz först'); return; }
+  const apiKey = $('aiApiKey').value.trim();
+  if (!apiKey) { toast('Ange en Gemini API-nyckel i AI-panelen först'); return; }
+  const targetLanguages = [...$('translationLanguages').querySelectorAll('input[type="checkbox"]:checked')].map(input => input.value);
+  if (!targetLanguages.length) { toast('Välj minst ett målspråk'); return; }
+
+  const quiz = quizOf(S.cur.raw);
+  const questions = [...quiz.barnQuestions, ...quiz.vuxenQuestions];
+  if (!questions.length) { toast('Quizet innehåller inga frågor att översätta'); return; }
+  const sourceLanguage = $('translationSource').value;
+  let languageTagsChanged = false;
+  for (const question of questions) {
+    if (!question.originalLanguage) {
+      question.originalLanguage = sourceLanguage;
+      languageTagsChanged = true;
+    }
+  }
+  if (languageTagsChanged) markDirty();
+  localStorage.setItem(AI_KEY_STORAGE, apiKey);
+
+  const pending = questions.map(question => ({
+    question,
+    languages: targetLanguages.filter(language =>
+      question.originalLanguage !== language &&
+      !(question.translations && question.translations[language] &&
+        typeof question.translations[language].text === 'string' &&
+        question.translations[language].text.trim()))
+  })).filter(item => item.languages.length);
+  if (!pending.length) {
+    toast('Alla valda språk finns redan för frågorna');
+    return;
+  }
+
+  const button = $('translateQuiz');
+  button.disabled = true;
+  let completed = 0;
+  let progressLabel = 'Översätter…';
+  let progressArgs = [];
+  const startedAt = Date.now();
+  const tick = () => {
+    const secs = Math.floor((Date.now() - startedAt) / 1000);
+    button.textContent = `⏳ ${tr(progressLabel, ...progressArgs)} (${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')})`;
+  };
+  tick();
+  const timer = setInterval(tick, 1000);
+  try {
+    const batchSize = 8;
+    for (let start = 0; start < pending.length; start += batchSize) {
+      const batch = pending.slice(start, start + batchSize);
+      progressLabel = 'Översätter {0} av {1}';
+      progressArgs = [Math.min(start + batch.length, pending.length), pending.length];
+      tick();
+      const request = batch.map(({ question, languages }) => ({
+        id: question.id,
+        originalLanguage: question.originalLanguage,
+        targetLanguages: languages,
+        text: question.text,
+        ...(Array.isArray(question.options) ? { options: question.options } : {}),
+        ...(Array.isArray(question.clues) ? { clues: question.clues } : {}),
+        ...(typeof question.correctTextAnswer === 'string' ? { correctTextAnswer: question.correctTextAnswer } : {})
+      }));
+      const response = await requestQuizTranslations(apiKey, request);
+      const updates = [];
+      for (const { question, languages } of batch) {
+        const questionResult = response[question.id];
+        if (!questionResult || typeof questionResult !== 'object') {
+          throw new Error(tr('AI-svaret saknar fråga {0}', question.id));
+        }
+        for (const language of languages) {
+          const translation = questionResult[language];
+          if (!translation || typeof translation.text !== 'string' || !translation.text.trim()) {
+            throw new Error(tr('AI-svaret saknar {0}-översättning för "{1}"', language, question.text.slice(0, 50)));
+          }
+          if (Array.isArray(question.options) && question.options.length &&
+              (!Array.isArray(translation.options) || translation.options.length !== question.options.length)) {
+            throw new Error(tr('AI-svaret har fel antal svarsalternativ för {0}-översättningen av "{1}"', language, question.text.slice(0, 50)));
+          }
+          if (Array.isArray(question.clues) && question.clues.length &&
+              (!Array.isArray(translation.clues) || translation.clues.length !== question.clues.length)) {
+            throw new Error(tr('AI-svaret har fel antal ledtrådar för {0}-översättningen av "{1}"', language, question.text.slice(0, 50)));
+          }
+          if (typeof question.correctTextAnswer === 'string' &&
+              typeof translation.correctTextAnswer !== 'string') {
+            throw new Error(tr('AI-svaret saknar översatt rätt svar för "{0}"', question.text.slice(0, 50)));
+          }
+          updates.push({ question, language, translation });
+        }
+      }
+      for (const { question, language, translation } of updates) {
+        if (!question.translations || typeof question.translations !== 'object' || Array.isArray(question.translations)) {
+          question.translations = {};
+        }
+        question.translations[language] = {
+          text: translation.text,
+          ...(Array.isArray(translation.options) ? { options: translation.options } : {}),
+          ...(Array.isArray(translation.clues) ? { clues: translation.clues } : {}),
+          ...(typeof translation.correctTextAnswer === 'string' ? { correctTextAnswer: translation.correctTextAnswer } : {})
+        };
+      }
+      completed += batch.length;
+      markDirty();
+    }
+    toast('{0} språkvarianter skapade för {1} frågor – spara quizet', pending.reduce((total, item) => total + item.languages.length, 0), pending.length);
+  } catch (e) {
+    const progress = completed ? tr(' ({0} av {1} frågor klara; spara för att behålla dem)', completed, pending.length) : '';
+    toast('Kunde inte översätta quizet: {0}', e.message + progress);
+  } finally {
+    clearInterval(timer);
+    button.disabled = false;
+    button.textContent = tr('🌐 Översätt quizet');
+  }
+}
+
+function appendQuestions(raw, language) {
   const source = quizOf(raw);
-  if (!source || typeof source !== 'object') throw new Error('Svaret är inte ett quiz-objekt');
+  if (!source || typeof source !== 'object') throw new Error(tr('Svaret är inte ett quiz-objekt'));
   const quiz = quizOf(S.cur.raw);
   normalize(source);
   let count = 0;
@@ -263,14 +504,15 @@ function appendQuestions(raw) {
     for (const question of source[group]) {
       ensureType(question);
       question.id = uid();
+      if (language && !question.originalLanguage) question.originalLanguage = language;
       quiz[group].push(question);
       count++;
     }
   }
-  if (!count) throw new Error('JSON innehåller inga barnQuestions eller vuxenQuestions');
+  if (!count) throw new Error(tr('JSON innehåller inga barnQuestions eller vuxenQuestions'));
   markDirty();
   renderEditor();
-  toast(`${count} frågor tillagda i quizet`);
+  toast('{0} frågor tillagda i quizet', count);
 }
 
 async function generateAiQuestions() {
@@ -284,14 +526,15 @@ async function generateAiQuestions() {
   localStorage.setItem(AI_KEY_STORAGE, apiKey);
   const button = $('generateAi');
   button.disabled = true;
-  button.textContent = '⏳ Skapar frågor…';
+  button.textContent = tr('⏳ Skapar frågor…');
   try {
-    appendQuestions(await requestAiQuiz(apiKey, aiPrompt(topic, count, target)));
+    const lang = $('aiLang').value;
+    appendQuestions(await requestAiQuiz(apiKey, aiPrompt(topic, count, target, lang)), lang);
   } catch (e) {
-    toast('Kunde inte skapa AI-frågor: ' + e.message);
+    toast('Kunde inte skapa AI-frågor: {0}', e.message);
   } finally {
     button.disabled = false;
-    button.textContent = '✨ Skapa frågor med AI';
+    button.textContent = tr('✨ Skapa frågor med AI');
   }
 }
 
@@ -305,20 +548,20 @@ async function copyAiPrompt() {
     return;
   }
   try {
-    await navigator.clipboard.writeText(aiPrompt(topic, count, target));
+    await navigator.clipboard.writeText(aiPrompt(topic, count, target, $('aiLang').value));
     toast('AI-prompt kopierad – klistra in den i valfri AI-tjänst');
   } catch (e) {
-    toast('Kunde inte kopiera AI-prompten: ' + e.message);
+    toast('Kunde inte kopiera AI-prompten: {0}', e.message);
   }
 }
 
 function importAiJson() {
   if (!S.cur) { toast('Öppna eller skapa ett quiz först'); return; }
   try {
-    appendQuestions(parseJson($('aiJson').value.replace(/^\uFEFF/, '')));
+    appendQuestions(parseJson($('aiJson').value.replace(/^\uFEFF/, '')), $('aiLang').value);
     $('aiJson').value = '';
   } catch (e) {
-    toast('Ogiltig AI-JSON: ' + e.message);
+    toast('Ogiltig AI-JSON: {0}', e.message);
   }
 }
 
@@ -331,11 +574,13 @@ function aiTools() {
     el('div', { class: 'body' },
       el('div', { class: 'ai-help' }, 'Använd en Gemini API-nyckel. Nyckeln sparas endast lokalt i denna webbläsare. AI-frågorna läggs till i aktuell quiz och bör alltid granskas före publicering.'),
       el('div', { class: 'grid2' },
-        field('Gemini API-nyckel', key),
-        field('Ämne', el('input', { id: 'aiTopic', type: 'text', placeholder: 'Till exempel svensk historia' }))),
+        field('Gemini API-nyckel', key)),
       el('div', { class: 'mut' },
         'Har du ingen API-nyckel? ',
         el('a', { href: 'https://aistudio.google.com/app/apikey', target: '_blank', rel: 'noopener noreferrer' }, 'Skapa eller hantera Gemini API-nycklar i Google AI Studio ↗')),
+      field('Frågornas språk', el('select', { id: 'aiLang' },
+        ...QUIZ_LANGUAGES.map(([code, name]) => el('option', { value: code, selected: code === UI_LANG }, name)))),
+      field('Ämne', el('input', { id: 'aiTopic', type: 'text', placeholder: 'Till exempel svensk historia' })),
       el('div', { class: 'grid2' },
         field('Frågor per målgrupp', el('input', { id: 'aiCount', type: 'number', min: 1, max: 20, value: 5 })),
         field('Målgrupp', el('select', { id: 'aiTarget' },
@@ -432,27 +677,27 @@ async function refresh() {
 }
 
 async function openQuiz(filename) {
-  if (S.dirty && !confirm('Du har osparade ändringar. Fortsätta ändå?')) return;
+  if (S.dirty && !confirm(tr('Du har osparade ändringar. Fortsätta ändå?'))) return;
   try {
     const text = S.dir ? await readDirFile(filename) : await (await fetch(filename + '?_t=' + Date.now())).text();
     const raw = parseJson(text);
-    if (!looksLikeQuiz(raw)) throw new Error('Filen ser inte ut som en quiz');
+    if (!looksLikeQuiz(raw)) throw new Error(tr('Filen ser inte ut som en quiz'));
     normalize(raw);
     S.cur = { filename, raw, isNew: false };
     S.dirty = false; $('save').disabled = true;
     renderList(); renderEditor();
-  } catch (e) { toast('Kunde inte öppna ' + filename + ': ' + e.message); }
+  } catch (e) { toast('Kunde inte öppna {0}: {1}', filename, e.message); }
 }
 
 /* ---------- rendering ---------- */
 function renderList() {
-  $('where').textContent = S.dir ? '📂 ' + S.dir.name + ' (kan sparas direkt)' : (location.protocol === 'file:' ? 'Ingen mapp vald' : '🌐 ' + dirUrl() + ' (läsläge – sparar via nedladdning)');
+  $('where').textContent = S.dir ? tr('📂 {0} (kan sparas direkt)', S.dir.name) : (location.protocol === 'file:' ? tr('Ingen mapp vald') : tr('🌐 {0} (läsläge – sparar via nedladdning)', dirUrl()));
   $('syncMan').hidden = !S.dir;
   const box = $('list'); box.replaceChildren();
   if (!S.items.length) box.append(el('p', { class: 'mut' }, S.dir || location.protocol !== 'file:' ? 'Inga quizfiler hittades.' : (FS ? 'Klicka på "Öppna mapp…" och välj din quizzes-katalog.' : 'Webbläsaren saknar mappåtkomst – använd Chrome eller Edge, eller lägg katalogen på en webbserver.')));
   for (const it of S.items) {
     box.append(el('button', { class: 'item' + (S.cur && S.cur.filename === it.filename ? ' act' : ''), onclick: () => openQuiz(it.filename) },
-      it.title, el('small', {}, `${it.filename} · ${it.barn} barn · ${it.vuxen} vuxen${it.isNew ? ' · ny' : ''}`)));
+      it.title, el('small', {}, tr('{0} · {1} barn · {2} vuxen', it.filename, it.barn, it.vuxen) + (it.isNew ? tr(' · ny') : ''))));
   }
 }
 
@@ -469,7 +714,7 @@ function renderEditor() {
     bar.append(el('a', { class: 'btn', href: link, target: '_blank' }, '🚀 Starta'),
       el('button', { onclick: () => navigator.clipboard.writeText(link).then(() => toast('Länk kopierad')) }, '🔗 Kopiera länk'));
   }
-  if (S.dir && !c.isNew) bar.append(el('button', { class: 'del', onclick: deleteQuiz }, '🗑 Ta bort'));
+  if (S.dir || FS || c.isNew) bar.append(el('button', { class: 'del', onclick: deleteQuiz }, '🗑 Ta bort'));
   ed.append(bar);
 
   ed.append(field('Titel', input(quiz, 'title', { after: v => { const it = S.items.find(i => i.filename === c.filename); if (it) { it.title = v || c.filename; renderList(); } } })));
@@ -498,9 +743,11 @@ function renderEditor() {
   updateLogoPreview(quiz.logoUrl);
 
   ed.append(el('div', { class: 'tabs' }, ...Object.entries(GROUPS).map(([g, name]) =>
-    el('button', { class: S.group === g ? 'act' : '', onclick: () => { S.group = g; renderEditor(); } }, `${name} (${quiz[g].length})`))));
+    el('button', { class: S.group === g ? 'act' : '', onclick: () => { S.group = g; renderEditor(); } }, `${tr(name)} (${quiz[g].length})`))));
 
   ed.append(aiTools());
+  ed.append(translationTools());
+  ed.append(languageSwitcher(quiz));
   const list = quiz[S.group];
   questionRows(list).forEach(row => ed.append(questionCard(list, row.index, row)));
   const add = el('button', { class: 'pri', onclick: () => { const q = newQuestion(); list.push(q); S.open.add(q.id); markDirty(); renderEditor(); } }, '＋ Ny fråga');
@@ -510,10 +757,26 @@ function renderEditor() {
   const ta = el('textarea', { rows: 14, spellcheck: false });
   ta.style.fontFamily = 'monospace';
   raw.append(el('div', { class: 'body' }, ta, el('div', { class: 'bar' }, el('button', { onclick: () => {
-    try { const r = parseJson(ta.value); if (!looksLikeQuiz(r)) throw new Error('Saknar barnQuestions/vuxenQuestions'); normalize(r); c.raw = r; markDirty(); renderEditor(); toast('JSON tillämpad'); }
-    catch (e) { toast('Ogiltig JSON: ' + e.message); }
+    try { const r = parseJson(ta.value); if (!looksLikeQuiz(r)) throw new Error(tr('Saknar barnQuestions/vuxenQuestions')); normalize(r); c.raw = r; markDirty(); renderEditor(); toast('JSON tillämpad'); }
+    catch (e) { toast('Ogiltig JSON: {0}', e.message); }
   } }, 'Använd JSON'))));
   ed.append(raw);
+}
+
+function languageSwitcher(quiz) {
+  const codes = new Set();
+  for (const q of [...quiz.barnQuestions, ...quiz.vuxenQuestions]) {
+    codes.add(q.originalLanguage || 'sv');
+    Object.keys(q.translations || {}).forEach(code => codes.add(code));
+  }
+  if (S.lang) codes.add(S.lang);
+  const name = code => tr((QUIZ_LANGUAGES.find(([c]) => c === code) || [code, code])[1]);
+  const bar = el('div', { class: 'tabs' }, el('span', { class: 'mut' }, 'Visa/redigera språk:'),
+    el('button', { class: S.lang ? '' : 'act', onclick: () => { S.lang = ''; renderEditor(); } }, 'Original'));
+  for (const code of codes) {
+    bar.append(el('button', { class: S.lang === code ? 'act' : '', onclick: () => { S.lang = code; renderEditor(); } }, name(code)));
+  }
+  return bar;
 }
 
 function questionRows(list) {
@@ -548,7 +811,11 @@ function questionRows(list) {
 
 function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollowUp: false }) {
   const q = list[i];
-  const label = () => `${row.number}. ${row.isFollowUp ? '↳ Följdfråga: ' : ''}${(q.text || '(ingen text)').slice(0, 70)}`;
+  const lang = S.lang && S.lang !== (q.originalLanguage || 'sv') ? S.lang : '';
+  const label = () => {
+    const shown = lang ? (q.translations?.[lang]?.text || q.text) : q.text;
+    return `${row.number}. ${row.isFollowUp ? tr('↳ Följdfråga: ') : ''}${(shown || tr('(ingen text)')).slice(0, 70)}`;
+  };
   const sum = el('summary', {}, label(), el('span', { class: 'tag' }, TYPES[q.type]));
   const d = el('details', {
     class: row.isFollowUp ? 'question-follow-up' : '',
@@ -557,6 +824,12 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   }, sum);
   const body = el('div', { class: 'body' });
   const retag = () => sum.firstChild.textContent = label();
+
+  if (lang) {
+    body.append(translationEditor(q, lang, retag));
+    d.append(body);
+    return d;
+  }
 
   const sel = el('select', {}, ...Object.entries(TYPES).map(([v, t]) => el('option', { value: v, selected: q.type === v }, t)));
   sel.addEventListener('change', () => { q.type = sel.value; ensureType(q); markDirty(); S.open.add(q.id); renderEditor(); });
@@ -637,7 +910,7 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   body.append(loc);
 
   if (q.translations && Object.keys(q.translations).length) {
-    body.append(el('div', { class: 'warn' }, `Har översättningar (${Object.keys(q.translations).join(', ')}) som inte uppdateras när du ändrar texten. `,
+    body.append(el('div', { class: 'warn' }, tr('Har översättningar ({0}) som inte uppdateras när du ändrar texten. ', Object.keys(q.translations).join(', ')),
       el('button', { class: 'sm', onclick: () => { delete q.translations; markDirty(); renderEditor(); } }, 'Ta bort översättningar')));
   }
 
@@ -645,9 +918,46 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   body.append(el('div', { class: 'bar', style: 'margin-top:.5rem' },
     el('button', { class: 'sm', onclick: () => move(i - 1) }, '↑'), el('button', { class: 'sm', onclick: () => move(i + 1) }, '↓'),
     el('button', { class: 'sm', onclick: () => { const c = JSON.parse(JSON.stringify(q)); c.id = uid(); list.splice(i + 1, 0, c); S.open.add(c.id); markDirty(); renderEditor(); } }, 'Duplicera'),
-    el('button', { class: 'sm del', onclick: () => { if (confirm('Ta bort frågan?')) { list.splice(i, 1); markDirty(); renderEditor(); } } }, 'Ta bort')));
+    el('button', { class: 'sm del', onclick: () => { if (confirm(tr('Ta bort frågan?'))) { list.splice(i, 1); markDirty(); renderEditor(); } } }, 'Ta bort')));
   d.append(body);
   return d;
+}
+
+function translationEditor(q, lang, retag) {
+  const box = el('div');
+  const ensure = () => {
+    if (!q.translations || typeof q.translations !== 'object' || Array.isArray(q.translations)) q.translations = {};
+    return q.translations[lang] || (q.translations[lang] = {});
+  };
+  const view = new Proxy({}, {
+    get: (_, key) => q.translations?.[lang]?.[key],
+    set: (_, key, value) => { ensure()[key] = value; return true; },
+    deleteProperty: (_, key) => { if (q.translations?.[lang]) delete q.translations[lang][key]; return true; }
+  });
+  const langName = tr((QUIZ_LANGUAGES.find(([code]) => code === lang) || [lang, lang])[1]);
+  box.append(el('div', { class: 'mut' }, tr('Redigerar {0}. Originaltext: {1} – typ, rätt svar och plats ändras i originalspråket.', langName, q.text || tr('(ingen)'))));
+  box.append(field('Frågetext', input(view, 'text', { area: true, after: retag })));
+
+  const listEditor = (key, title, original) => {
+    const rows = el('div');
+    original.forEach((orig, r) => {
+      const txt = el('input', { type: 'text', value: q.translations?.[lang]?.[key]?.[r] ?? '', placeholder: orig });
+      txt.addEventListener('input', () => {
+        const t = ensure();
+        if (!Array.isArray(t[key])) t[key] = original.map(() => '');
+        t[key][r] = txt.value;
+        markDirty();
+      });
+      rows.append(el('div', { class: 'row' }, txt));
+    });
+    box.append(el('div', {}, el('div', { class: 'mut' }, title), rows));
+  };
+  if (q.type === 'options' && Array.isArray(q.options)) listEditor('options', 'Svarsalternativ', q.options);
+  if (q.type === 'ladder' && Array.isArray(q.clues)) listEditor('clues', 'Ledtrådar', q.clues);
+  if ((q.type === 'text' || q.type === 'ladder') && typeof q.correctTextAnswer === 'string') {
+    box.append(field('Rätt svar', Object.assign(input(view, 'correctTextAnswer'), { placeholder: q.correctTextAnswer })));
+  }
+  return box;
 }
 
 function optionsEditor(q) {
@@ -658,7 +968,7 @@ function optionsEditor(q) {
     q.options.forEach((o, r) => {
       const chk = el('input', { type: 'checkbox', title: 'Rätt svar', checked: q.correctAnswers.includes(r) });
       chk.addEventListener('change', () => { q.correctAnswers = chk.checked ? [...new Set([...q.correctAnswers, r])].sort() : q.correctAnswers.filter(x => x !== r); markDirty(); });
-      const txt = el('input', { type: 'text', value: o, placeholder: 'Svarsalternativ ' + (r + 1) });
+      const txt = el('input', { type: 'text', value: o, placeholder: tr('Svarsalternativ {0}', r + 1) });
       txt.addEventListener('input', () => { q.options[r] = txt.value; markDirty(); });
       const rm = el('button', { class: 'sm del', title: 'Ta bort', onclick: () => {
         q.options.splice(r, 1);
@@ -709,9 +1019,9 @@ function initLocationLink(box, latIn, lngIn) {
     link.hidden = !valid;
     if (valid) {
       link.href = `https://www.openstreetmap.org/?mlat=${encodeURIComponent(la)}&mlon=${encodeURIComponent(ln)}#map=15/${la}/${ln}`;
-      hint.textContent = 'Öppnas i OpenStreetMaps egen kartvy.';
+      hint.textContent = tr('Öppnas i OpenStreetMaps egen kartvy.');
     } else {
-      hint.textContent = 'Fyll i giltig latitud och longitud för att visa positionen på kartan.';
+      hint.textContent = tr('Fyll i giltig latitud och longitud för att visa positionen på kartan.');
     }
   };
   latIn.addEventListener('input', updateLink);
@@ -804,10 +1114,19 @@ function download(name, text) {
 }
 
 /* ---------- åtgärder ---------- */
+async function ensureSaveDir() {
+  if (S.dir || !FS) return;
+  try {
+    const saved = await readSavedDirectory();
+    if (saved && (await saved.requestPermission({ mode: 'readwrite' })) === 'granted') S.dir = saved;
+  } catch { /* använd nedladdning */ }
+}
+
 async function save() {
   const c = S.cur; if (!c) return;
   const quiz = quizOf(c.raw);
   if (!String(quiz.title || '').trim()) { toast('Titel saknas'); return; }
+  await ensureSaveDir();
   if (isWrapped(c.raw)) { c.raw.quizConfig = { ...c.raw.quizConfig, ...JSON.parse(JSON.stringify(quiz)) }; c.raw.exportedAt = new Date().toISOString(); }
   const text = JSON.stringify(c.raw, null, 2) + '\n';
   putManifestEntry(metaFor(c.filename, c.raw));
@@ -821,7 +1140,7 @@ async function save() {
       setTimeout(() => download('manifest.json', manifestText()), 500);
       toast('Filer nedladdade – ladda upp dem till din sajt');
     }
-  } catch (e) { toast('Kunde inte spara: ' + e.message); return; }
+  } catch (e) { toast('Kunde inte spara: {0}', e.message); return; }
   c.isNew = false; S.dirty = false; $('save').disabled = true;
   const it = itemOf(c.filename, c.raw); const i = S.items.findIndex(x => x.filename === c.filename);
   if (i >= 0) S.items[i] = it; else S.items.push(it);
@@ -829,8 +1148,8 @@ async function save() {
 }
 
 function newQuiz() {
-  if (S.dirty && !confirm('Du har osparade ändringar. Fortsätta ändå?')) return;
-  const title = (prompt('Titel på nya quizet:') || '').trim();
+  if (S.dirty && !confirm(tr('Du har osparade ändringar. Fortsätta ändå?'))) return;
+  const title = (prompt(tr('Titel på nya quizet:')) || '').trim();
   if (!title) return;
   let filename = slug(title) + '.json', n = 2;
   while (S.items.some(i => i.filename === filename)) filename = `${slug(title)}_${n++}.json`;
@@ -843,12 +1162,23 @@ function newQuiz() {
 
 async function deleteQuiz() {
   const c = S.cur;
-  if (!c || !confirm(`Ta bort ${c.filename} från mappen?`)) return;
+  if (!c) return;
+  if (c.isNew) {
+    if (!confirm(tr('Ta bort {0} från mappen?', c.filename))) return;
+    S.items = S.items.filter(i => i.filename !== c.filename);
+    S.cur = null; S.dirty = false; $('save').disabled = true;
+    renderList(); renderEditor(); toast('Borttagen');
+    return;
+  }
+  await ensureSaveDir();
+  if (!S.dir) { toast('Öppna quizmappen med "Öppna mapp…" för att kunna ta bort quiz'); return; }
+  if (!confirm(tr('Ta bort {0} från mappen?', c.filename))) return;
   try {
+    try { setManifest(parseJson(await readDirFile('manifest.json'))); } catch { /* behåll aktuell */ }
     await S.dir.removeEntry(c.filename);
     S.manifest.list = S.manifest.list.filter(m => fnOf(m) !== c.filename);
     await writeDirFile('manifest.json', manifestText());
-  } catch (e) { toast('Kunde inte ta bort: ' + e.message); return; }
+  } catch (e) { toast('Kunde inte ta bort: {0}', e.message); return; }
   S.cur = null; S.dirty = false; $('save').disabled = true;
   await refresh(); renderEditor(); toast('Borttagen');
 }
@@ -860,27 +1190,27 @@ async function syncManifest() {
     try { const raw = parseJson(await readDirFile(it.filename)); normalize(raw); list.push(metaFor(it.filename, raw)); } catch { /* hoppa över */ }
   }
   S.manifest.list = list;
-  try { await writeDirFile('manifest.json', manifestText()); toast(`manifest.json uppdaterad (${list.length} quiz)`); }
-  catch (e) { toast('Kunde inte skriva manifest.json: ' + e.message); }
+  try { await writeDirFile('manifest.json', manifestText());   toast('manifest.json uppdaterad ({0} quiz)', list.length); }
+    catch (e) { toast('Kunde inte skriva manifest.json: {0}', e.message); }
 }
 
 async function openDir() {
   if (!FS) { toast('Webbläsaren saknar mappåtkomst – använd Chrome eller Edge'); return; }
   let savedDir = null;
   try { savedDir = await readSavedDirectory(); }
-  catch (e) { toast('Kunde inte läsa sparad mapp: ' + e.message); }
+  catch (e) { toast('Kunde inte läsa sparad mapp: {0}', e.message); }
 
   let selectedDir;
   try {
     // Visa alltid mappväljaren så att användaren kan kontrollera eller byta mapp.
     selectedDir = await window.showDirectoryPicker({ mode: 'readwrite', ...(savedDir ? { startIn: savedDir } : {}) });
   } catch (e) {
-    if (e.name !== 'AbortError') toast('Kunde inte öppna mapp: ' + e.message);
+    if (e.name !== 'AbortError') toast('Kunde inte öppna mapp: {0}', e.message);
     return;
   }
   S.dir = selectedDir;
   try { await saveDirectory(S.dir); }
-  catch (e) { toast('Mappen öppnades men kunde inte kommas ihåg: ' + e.message); }
+  catch (e) { toast('Mappen öppnades men kunde inte kommas ihåg: {0}', e.message); }
   S.cur = null; S.dirty = false; $('save').disabled = true;
   await refresh(); renderEditor();
 }
@@ -912,6 +1242,16 @@ $('openDir').onclick = openDir;
 $('newQuiz').onclick = newQuiz;
 $('save').onclick = save;
 $('syncMan').onclick = syncManifest;
+{
+  const select = $('uiLang');
+  LANGUAGES.forEach(l => select.append(el('option', { value: l.code }, `${l.flag} ${l.label}`)));
+  select.addEventListener('change', () => {
+    setUiLang(select.value);
+    applyStaticText();
+    renderList(); renderEditor();
+  });
+  applyStaticText();
+}
 $('openDir').hidden = !FS;
 document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!$('save').disabled) save(); } });
 window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -919,7 +1259,7 @@ window.addEventListener('beforeunload', e => { if (S.dirty) { e.preventDefault()
   await refresh();
   renderEditor();
 })().catch(e => {
-  toast('Kunde inte läsa quizmappen: ' + e.message);
+  toast('Kunde inte läsa quizmappen: {0}', e.message);
   renderList(); renderEditor();
 });
 </script>

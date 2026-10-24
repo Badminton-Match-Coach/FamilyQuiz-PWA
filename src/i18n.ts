@@ -177,6 +177,25 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     it: 'Io',
     es: 'Yo'
   },
+  submitAnswersClipboardHint: {
+    sv: 'kopierar till urklipp',
+    en: 'copies to clipboard',
+    nl: 'kopieert naar klembord',
+    be: 'kopieert naar klembord',
+    no: 'kopierer til utklippstavle',
+    da: 'kopierer til udklipsholder',
+    fi: 'kopioi leikepöydälle',
+    it: 'copia negli appunti',
+    es: 'copia al portapapeles',
+    de: 'kopiert in Zwischenablage',
+    fr: 'copie dans le presse-papiers',
+    is: 'afritar á klemmuspjald',
+    se: 'máhcaha čoavddasadjái',
+    et: 'kopeerib lõikelauale',
+    lv: 'kopē starpliktuvē',
+    lt: 'kopijuoja į iškarpinę',
+    uk: 'копіює в буфер обміну'
+  },
   importAnswersBtn: {
     sv: 'Läs in svar',
     en: 'Import answers'

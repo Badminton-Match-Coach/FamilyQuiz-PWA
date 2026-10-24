@@ -626,7 +626,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                             className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black text-xs uppercase shadow-[0_4px_0_0_#047857] active:translate-y-1 active:shadow-none transition-all flex items-center justify-center gap-2"
                           >
                             <Share2 className="w-4 h-4" />
-                            <span>{t(lang, 'submitOurAnswersBtn')}</span>
+                            <span>{t(lang, 'submitOurAnswersBtn')} ({t(lang, 'submitAnswersClipboardHint')})</span>
                           </button>
                           {onOpenImportAnswers && (
                             <button

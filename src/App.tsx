@@ -3529,12 +3529,19 @@ ${exampleJson}`;
     if (!payload) return;
 
     const shareUrl = `${window.location.origin}${window.location.pathname}#${payload}`;
+    
+    // Copy to clipboard immediately for reliability
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+    } catch (e) {
+      console.warn('Clipboard copy failed', e);
+    }
 
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: quizConfig.title || 'FamilyQuiz',
-          text: t(lang, 'shareParticipantAnswersText') || 'Här är våra svar till tipspromenaden!',
+          title: `Svar: ${quizConfig.title || 'FamilyQuiz'}`,
+          text: `${t(lang, 'shareParticipantAnswersText') || 'Här är våra svar till tipspromenaden!'} \nQuiz: ${quizConfig.title || 'FamilyQuiz'}\nLänk: `,
           url: shareUrl,
         });
         return;
@@ -3543,12 +3550,8 @@ ${exampleJson}`;
       }
     }
 
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      window.prompt(t(lang, 'copyGroupAnswersManualPrompt') || 'Kopiera länken med era svar och skicka till den som leder quizet:', shareUrl);
-    } catch (e) {
-      window.prompt(t(lang, 'copyGroupAnswersManualPrompt') || 'Kopiera länken med era svar och skicka till den som leder quizet:', shareUrl);
-    }
+    // Fallback/Confirmation message
+    alert(t(lang, 'copyGroupAnswersManualPrompt') || 'Länken med era svar har kopierats till urklipp! Skicka den nu till tävlingsledaren.');
   };
 
   const handleImportParticipantAnswers = async (payload: ParticipantAnswerPayload) => {

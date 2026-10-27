@@ -40,6 +40,7 @@ import { getOptionLabel } from '../../utils/imageAndLabelUtils';
 import { OfflineImage } from '../Common/OfflineImage';
 
 import { AnswerRecord } from '../../types';
+import { THEMES } from '../../data/themes';
 
 export interface QuizWalkViewProps {
   lang: Language;
@@ -723,14 +724,46 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                     );
                   })() : (
                     <motion.div 
-                      initial={{ x: 50, opacity: 0 }}
-                      animate={{ x: 0, opacity: 1 }}
-                      className="bg-white rounded-[2rem] sm:rounded-[3rem] p-4 sm:p-6 flex-1 shadow-2xl flex flex-col border border-indigo-200/50 relative overflow-hidden"
+                      initial={{ y: 40, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      className="relative flex flex-col flex-1"
                     >
-                      {/* Big Decorative Number */}
-                      <div className="absolute top-0 right-0 -mt-6 -mr-6 sm:-mt-10 sm:-mr-10 opacity-[0.03] pointer-events-none">
-                        <span className="text-[10rem] sm:text-[20rem] font-black">{selectedQuestionIndex + 1}</span>
-                      </div>
+                      {/* Question Card Wrapper - Frame as background */}
+                      {(() => {
+                        const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
+                        const currentParticipant = participants.find(p => p.id === activePartId);
+                        const isBarn = currentParticipant?.type === 'barn';
+                        const primaryQuestions = isBarn ? quizConfig.barnQuestions : quizConfig.vuxenQuestions;
+                        const rawQ: Question = primaryQuestions[selectedQuestionIndex!] || {
+                          id: '',
+                          text: t(lang, 'noQuestionFound'),
+                          type: 'options',
+                          options: [t(lang, 'defaultOption1'), t(lang, 'defaultOptionX'), t(lang, 'defaultOption2')],
+                          correctAnswers: [],
+                          originalLanguage: lang,
+                        };
+                        
+                        const theme = (rawQ.themeId && THEMES.find(t => t.id === rawQ.themeId)) ||
+                                      (quizConfig.themeId && THEMES.find(t => t.id === quizConfig.themeId)) ||
+                                      THEMES[0];
+
+                        return (
+                          <div 
+                            className="relative z-10 p-16 sm:p-24 flex flex-col flex-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+                            style={{
+                              backgroundImage: `url(${theme.frameImageUrl})`,
+                              backgroundSize: '100% 100%',
+                              backgroundRepeat: 'no-repeat',
+                              backgroundColor: theme.backgroundColor
+                            }}
+                          >
+                            {/* Big Decorative Number */}
+                            <div className="absolute -top-10 -right-10 opacity-[0.1] pointer-events-none text-[12rem] font-black text-[#5d4037] select-none">
+                              {selectedQuestionIndex! + 1}
+                            </div>
+                            <div className="flex-1 flex flex-col relative">
+                            </div>
+
 
                       {(() => {
                         const activePartId = selectedParticipantId || (participants.length === 1 ? participants[0]?.id : null);
@@ -763,7 +796,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                         const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
                         const { isAllAnswered } = getQuizAnswerProgress();
                         const isAutoFacitRevealed = !hasQuizPassword && isQuestionAnsweredByAll;
-                        const shouldShowFacit = isFacitUnlocked || isAdmin || isAutoFacitRevealed;
+                        const shouldShowFacit = (isFacitUnlocked || isAdmin || !hasQuizPassword) && isQuestionAnsweredByAll;
 
                         const participantAnswer = answers.find(a => a.participantId === activePartId && a.questionIndex === selectedQuestionIndex);
                         const isParticipantAnswered = !!participantAnswer;
@@ -1219,7 +1252,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   const color = colors[idx % colors.length];
                                   const isCurrentAnswer = participantAnswer?.answerIndex === idx;
                                   const isCorrectAnswer = (activeQ?.correctAnswers || []).includes(idx);
-                                  const optImg = activeQ.optionImages?.[idx] || rawQ.optionImages?.[idx];
+                                  const optImg = activeQ.optionImages?.[idx];
 
                                   return (
                                     <button
@@ -1290,23 +1323,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   );
                                 })}
                               </div>
-                            )}
-                          </>
-                        );
-                      })()}
-                      
-                      {participants.length > 1 && (
-                        <button 
-                          onClick={() => setSelectedParticipantId(null)}
-                          className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
-                        >
-                          {t(lang, 'changePerson')}
-                        </button>
-                      )}
-                    </motion.div>
-                  )}
-                </div>
-              )}
-            </motion.div>
+                              })
+                            </>
   );
 });

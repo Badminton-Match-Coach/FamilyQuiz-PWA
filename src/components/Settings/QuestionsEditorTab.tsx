@@ -716,6 +716,21 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
                                       <div className="flex-1 min-w-0 space-y-1.5">
                                         <div className="text-xs sm:text-sm font-bold leading-snug text-slate-800 break-words">
                                           {q.text || t(lang, 'writeQuestionPlaceholder')}
+                                          {(!q.type || q.type === 'options' || q.type === 'text') && (
+                                            <span className="ml-2 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-md text-[10px] font-black">
+                                              {q.pointsValue ?? 1} p
+                                            </span>
+                                          )}
+                                          {q.type === 'points' && (
+                                            <span className="ml-2 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md text-[10px] font-black">
+                                              {q.maxPoints ?? 10} p max
+                                            </span>
+                                          )}
+                                          {q.type === 'ladder' && (
+                                            <span className="ml-2 bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded-md text-[10px] font-black">
+                                              {q.ladderPoints && q.ladderPoints.length > 0 ? Math.max(...q.ladderPoints) : 10} p max
+                                            </span>
+                                          )}
                                         </div>
                                         {isFollowUp && (
                                           <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">

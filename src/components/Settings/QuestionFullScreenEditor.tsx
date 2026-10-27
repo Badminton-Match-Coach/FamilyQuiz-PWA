@@ -35,6 +35,7 @@ import { compressImageFile, getOptionLabel } from '../../utils/imageAndLabelUtil
 import { registerQuestionTranslation } from '../../translationCache';
 import { OfflineImage } from '../Common/OfflineImage';
 import { cacheImageInIndexedDB } from '../../utils/offlineImageCache';
+import { THEMES } from '../../data/themes';
 
 export interface QuestionFullScreenEditorProps {
   questionId: string | null;
@@ -461,6 +462,62 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                 onChange={(e) => handleTextChange(e.target.value)}
                               />
                             </div>
+
+                            {/* Theme Override */}
+                            <div className="space-y-2.5">
+                              <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+                                {t(lang, 'themeLabel', { defaultValue: 'Tema' })}
+                              </label>
+                              <select
+                                className={`w-full p-4 border-2 rounded-2xl text-base outline-none font-bold transition-all ${
+                                  isAdmin 
+                                    ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-xs' 
+                                    : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                }`}
+                                value={rawQ.themeId || ''}
+                                disabled={!isAdmin}
+                                onChange={(e) => {
+                                  if (!isAdmin) return;
+                                  const val = e.target.value === '' ? undefined : e.target.value;
+                                  updateQuestion(editingQuestionsCategory, rawQ.id, { themeId: val });
+                                }}
+                              >
+                                <option value="">{t(lang, 'defaultTheme', { defaultValue: 'Standard' })}</option>
+                                {THEMES.map(theme => (
+                                  <option key={theme.id} value={theme.id}>{theme.name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Points Value */}
+                            {(rawQ.type === 'options' || rawQ.type === 'text') && (
+                              <div className="space-y-2.5">
+                                <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+                                  {t(lang, 'pointsValueLabel', { defaultValue: 'Poängvärde' })}
+                                </label>
+                                <input 
+                                  type="number"
+                                  min="0"
+                                  className={`w-full p-4 border-2 rounded-2xl text-base outline-none font-bold transition-all ${
+                                    isAdmin 
+                                      ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-xs' 
+                                      : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
+                                  }`}
+                                  value={rawQ.pointsValue !== undefined ? rawQ.pointsValue : 1}
+                                  placeholder="1"
+                                  readOnly={!isAdmin}
+                                  onChange={(e) => {
+                                    if (!isAdmin) return;
+                                    const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                                    updateQuestion(editingQuestionsCategory, rawQ.id, { pointsValue: isNaN(val as number) ? undefined : val });
+                                  }}
+                                />
+                                <p className="text-[10px] font-medium text-slate-400 ml-1 mt-1">
+                                  {t(lang, 'pointsValueExplainer')}
+                                </p>
+                              </div>
+                            )}
+
 
                             {/* Question Image Section */}
                             <div className="p-4 sm:p-5 bg-indigo-50/60 border border-indigo-100 rounded-3xl space-y-3">

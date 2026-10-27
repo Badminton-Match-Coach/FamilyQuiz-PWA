@@ -1535,6 +1535,7 @@ ${exampleJson}`;
       questionIndex: selectedQuestionIndex,
       answerIndex,
       isCorrect,
+      pointsScored: isCorrect ? (question.pointsValue ?? 1) : 0,
       timestamp: Date.now()
     };
 
@@ -1619,6 +1620,7 @@ ${exampleJson}`;
       questionIndex: targetQIdx,
       textAnswer: rawUserText.trim(),
       isCorrect: evalResult.isCorrect,
+      pointsScored: evalResult.isCorrect ? (question.pointsValue ?? 1) : 0,
       timestamp: Date.now()
     };
 
@@ -1637,7 +1639,7 @@ ${exampleJson}`;
         if (aiResult.match) {
           setAnswers(prev => prev.map(a => 
             (a.participantId === targetPartId && a.questionIndex === targetQIdx)
-              ? { ...a, isCorrect: true }
+              ? { ...a, isCorrect: true, pointsScored: question.pointsValue ?? 1 }
               : a
           ));
         }

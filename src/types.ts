@@ -41,6 +41,8 @@ export interface Question {
   location?: Location;
   hideLocationOnMap?: boolean; // When true: question position is hidden from participants on the map (treasure hunt)
   originalLanguage?: Language; // Language code when created (e.g. 'sv', 'fr', 'en', 'es')
+  pointsValue?: number; // Optional points value for correct answer in 'options' and 'text' types
+  themeId?: string; // Optional override theme for this specific question
   translations?: Record<string, { text: string; options: string[]; correctTextAnswer?: string; clues?: string[] }>;
 }
 
@@ -54,6 +56,7 @@ export interface QuizConfig {
   textMatchStrictness?: 'strict' | 'normal' | 'lenient'; // Soundex / spelling tolerance level for free text answers
   barnQuestions: Question[];
   vuxenQuestions: Question[];
+  themeId?: string; // Default theme for the entire quiz
 }
 
 export interface QuizMetadata {

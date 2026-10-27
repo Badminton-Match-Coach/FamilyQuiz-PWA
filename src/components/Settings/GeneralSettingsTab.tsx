@@ -22,8 +22,10 @@ import {
   ArrowUpDown,
   Check,
   Share2,
-  Sliders
+  Sliders,
+  Palette
 } from 'lucide-react';
+import { THEMES } from '../../data/themes';
 import { Language, t } from '../../i18n';
 import { QuizConfig, Participant } from '../../types';
 import { compressImageFile } from '../../utils/imageAndLabelUtils';
@@ -429,6 +431,44 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                   </button>
                                 );
                               })}
+                            </div>
+                          </div>
+
+                          {/* Separate themes for kids and adults */}
+                          <div className="p-4 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <Palette className="w-4 h-4 text-indigo-700 mt-0.5 shrink-0" />
+                              <div>
+                                <h4 className="font-black text-xs text-indigo-950 uppercase tracking-wide">
+                                  {t(lang, 'categoryThemesTitle')}
+                                </h4>
+                                <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                  {t(lang, 'categoryThemesDesc')}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {([
+                                { key: 'barnThemeId', label: t(lang, 'kid') },
+                                { key: 'vuxenThemeId', label: t(lang, 'adult') },
+                              ] as const).map(({ key, label }) => (
+                                <label key={key} className="space-y-1 block">
+                                  <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
+                                  <select
+                                    className="w-full p-2.5 border-2 border-indigo-200 rounded-xl text-sm font-bold bg-white outline-none focus:border-indigo-500"
+                                    value={quizConfig[key] || ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value || undefined;
+                                      setQuizConfig(prev => ({ ...prev, [key]: val }));
+                                    }}
+                                  >
+                                    <option value="">{t(lang, 'useQuizTheme')}</option>
+                                    {THEMES.map(theme => (
+                                      <option key={theme.id} value={theme.id}>{t(lang, theme.nameKey)}</option>
+                                    ))}
+                                  </select>
+                                </label>
+                              ))}
                             </div>
                           </div>
 

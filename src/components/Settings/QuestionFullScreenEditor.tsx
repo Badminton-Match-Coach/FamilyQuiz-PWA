@@ -466,7 +466,7 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                             {/* Theme Override */}
                             <div className="space-y-2.5">
                               <label className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
-                                {t(lang, 'themeLabel', { defaultValue: 'Tema' })}
+                                {t(lang, 'themeLabel')}
                               </label>
                               <select
                                 className={`w-full p-4 border-2 rounded-2xl text-base outline-none font-bold transition-all ${
@@ -482,9 +482,9 @@ export const QuestionFullScreenEditor: React.FC<QuestionFullScreenEditorProps> =
                                   updateQuestion(editingQuestionsCategory, rawQ.id, { themeId: val });
                                 }}
                               >
-                                <option value="">{t(lang, 'defaultTheme', { defaultValue: 'Standard' })}</option>
+                                <option value="">{t(lang, 'useQuizTheme')}</option>
                                 {THEMES.map(theme => (
-                                  <option key={theme.id} value={theme.id}>{theme.name}</option>
+                                  <option key={theme.id} value={theme.id}>{t(lang, theme.nameKey)}</option>
                                 ))}
                               </select>
                             </div>

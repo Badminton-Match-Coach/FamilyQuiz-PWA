@@ -60,7 +60,7 @@ export interface QuizWalkViewProps {
   textInputValue: string;
   setTextInputValue: (val: string | ((prev: string) => string)) => void;
   submitTextAnswer: (text: string) => void;
-  submitLadderAnswer?: (text: string, points: number) => void;
+  submitLadderAnswer?: (text: string, points: number, cluesCount?: number) => void;
   submitAnswer: (optionIndex: number) => void;
   setZoomedImageUrl: (url: string | null) => void;
   isFacitUnlocked: boolean;
@@ -113,7 +113,8 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
 }) => {
   const [showQuestionMiniMap, setShowQuestionMiniMap] = useState(true);
   const [ladderCluesState, setLadderCluesState] = useState<Record<number, number>>({});
-  const submitLadderAnswer = submitLadderAnswerProp || ((text: string) => submitTextAnswer(text));
+  const submitLadderAnswer = submitLadderAnswerProp
+    || ((text: string, _points: number, _cluesCount?: number) => submitTextAnswer(text));
 
   return (
             <motion.div 
@@ -743,18 +744,25 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                           originalLanguage: lang,
                         };
                         
+                        const categoryThemeId = isBarn ? quizConfig.barnThemeId : quizConfig.vuxenThemeId;
                         const theme = (rawQ.themeId && THEMES.find(t => t.id === rawQ.themeId)) ||
+                                      (categoryThemeId && THEMES.find(t => t.id === categoryThemeId)) ||
                                       (quizConfig.themeId && THEMES.find(t => t.id === quizConfig.themeId)) ||
                                       THEMES[0];
 
                         return (
                           <div 
                             className="relative z-10 p-16 sm:p-24 flex flex-col flex-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
-                            style={{
-                              backgroundImage: `url(${theme.frameImageUrl})`,
-                              backgroundSize: '100% 100%',
-                              backgroundRepeat: 'no-repeat',
-                              backgroundColor: theme.backgroundColor
+                            style={theme.frameImageUrl ? {
+                              backgroundColor: theme.backgroundColor,
+                              border: 'clamp(40px, 9vw, 80px) solid transparent',
+                              borderImage: `url(${theme.frameImageUrl}) 215 fill / clamp(40px, 9vw, 80px) stretch`,
+                              filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.5))'
+                            } : {
+                              backgroundColor: theme.backgroundColor,
+                              border: `10px solid ${theme.frameColor}`,
+                              borderRadius: '1.25rem',
+                              boxShadow: `inset 0 0 0 4px ${theme.backgroundColor}, inset 0 0 0 7px ${theme.frameAccentColor}, 0 10px 30px rgba(0,0,0,0.5)`
                             }}
                           >
                             {/* Big Decorative Number */}
@@ -762,7 +770,6 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                               {selectedQuestionIndex! + 1}
                             </div>
                             <div className="flex-1 flex flex-col relative">
-                            </div>
 
 
                       {(() => {
@@ -1323,7 +1330,27 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   );
                                 })}
                               </div>
-                              })
+                            )}
                             </>
+                          );
+                      })()}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                          {participants.length > 1 && (
+                            <button
+                              onClick={() => setSelectedParticipantId(null)}
+                              className="mt-6 sm:mt-8 text-slate-400 font-bold hover:text-slate-600 transition-colors text-sm"
+                            >
+                              {t(lang, 'changePerson')}
+                            </button>
+                          )}
+                    </motion.div>
+                  )}
+                </div>
+              )}
+            </motion.div>
   );
 });

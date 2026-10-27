@@ -57,6 +57,8 @@ export interface QuizConfig {
   barnQuestions: Question[];
   vuxenQuestions: Question[];
   themeId?: string; // Default theme for the entire quiz
+  barnThemeId?: string; // Theme for kids' questions (overrides quiz theme)
+  vuxenThemeId?: string; // Theme for adults' questions (overrides quiz theme)
 }
 
 export interface QuizMetadata {

@@ -1863,6 +1863,9 @@ ${exampleJson}`;
               title: parsed.title || 'Quiz',
               password: parsed.password || '',
               logoUrl: parsed.logoUrl,
+              themeId: typeof parsed.themeId === 'string' ? parsed.themeId : undefined,
+              barnThemeId: typeof parsed.barnThemeId === 'string' ? parsed.barnThemeId : undefined,
+              vuxenThemeId: typeof parsed.vuxenThemeId === 'string' ? parsed.vuxenThemeId : undefined,
               barnQuestions: barnQs,
               vuxenQuestions: vuxenQs,
               geotagUnlockDistance: typeof parsed.geotagUnlockDistance === 'number' ? parsed.geotagUnlockDistance : 20,
@@ -1981,6 +1984,18 @@ ${exampleJson}`;
 
       const updateList = (qList: Question[]) => 
         qList.map(q => q.id === id ? { ...q, ...updates, originalLanguage: newOrigLang } : q);
+
+      // Theme is per category: a shared question can have different themes for kids and adults
+      const isThemeOnly = Object.keys(updates).length === 1 && 'themeId' in updates;
+      if (isThemeOnly) {
+        const setTheme = (qList: Question[]) =>
+          qList.map(q => q.id === id ? { ...q, themeId: updates.themeId } : q);
+        return {
+          ...prev,
+          barnQuestions: category === 'barn' ? setTheme(prev.barnQuestions) : prev.barnQuestions,
+          vuxenQuestions: category === 'vuxen' ? setTheme(prev.vuxenQuestions) : prev.vuxenQuestions
+        };
+      }
 
       return {
         ...prev,
@@ -2770,6 +2785,9 @@ ${exampleJson}`;
         title: parsed.title || presetTitle || 'Quiz',
         password: parsed.password || '',
         logoUrl: parsed.logoUrl,
+        themeId: typeof parsed.themeId === 'string' ? parsed.themeId : undefined,
+        barnThemeId: typeof parsed.barnThemeId === 'string' ? parsed.barnThemeId : undefined,
+        vuxenThemeId: typeof parsed.vuxenThemeId === 'string' ? parsed.vuxenThemeId : undefined,
         barnQuestions: barnQs,
         vuxenQuestions: vuxenQs,
         geotagUnlockDistance: typeof parsed.geotagUnlockDistance === 'number' ? parsed.geotagUnlockDistance : 20,

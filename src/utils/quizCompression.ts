@@ -46,6 +46,7 @@ interface MinifiedQuestion {
   a?: string;
   k?: string[];
   g?: string;
+  th?: string; // themeId
   r?: Record<string, { q: string; o?: string[] }>;
 }
 
@@ -57,6 +58,9 @@ interface MinifiedQuizConfig {
   d?: number;
   s?: boolean;
   x?: 'strict' | 'normal' | 'lenient';
+  th?: string; // quiz themeId
+  tb?: string; // barnThemeId
+  tv?: string; // vuxenThemeId
   b: MinifiedQuestion[];
   v: MinifiedQuestion[];
 }
@@ -89,6 +93,7 @@ function minifyQuestion(q: Question, compactForQr?: boolean): MinifiedQuestion {
     min.k = compactForQr ? q.acceptedTextAnswers.slice(0, 3) : q.acceptedTextAnswers;
   }
   if (q.originalLanguage && q.originalLanguage !== 'sv') min.g = q.originalLanguage;
+  if (q.themeId) min.th = q.themeId;
 
   // Include image URL links only (omit giant base64 data URLs to keep share codes and QR codes tiny)
   if (q.imageUrl && (!q.imageUrl.startsWith('data:') || q.imageUrl.length < 150)) {
@@ -147,6 +152,7 @@ function unminifyQuestion(min: MinifiedQuestion, fallbackIdx: number): Question 
     acceptedTextAnswers: min.k,
     originalLanguage: (min.g as any) || 'sv',
     imageUrl: min.j || undefined,
+    themeId: min.th || undefined,
     optionImages: min.p && min.p.length > 0 ? min.p : undefined,
     translations
   };
@@ -177,6 +183,9 @@ export function compressQuizToUrlCode(config: QuizConfig, options?: { compactFor
   if (config.textMatchStrictness && config.textMatchStrictness !== 'normal') {
     minified.x = config.textMatchStrictness;
   }
+  if (config.themeId) minified.th = config.themeId;
+  if (config.barnThemeId) minified.tb = config.barnThemeId;
+  if (config.vuxenThemeId) minified.tv = config.vuxenThemeId;
 
   const jsonStr = JSON.stringify(minified);
   // compressToEncodedURIComponent produces [a-zA-Z0-9 -_.!~*'()] string safe for URL hashes without encoding
@@ -245,6 +254,9 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
       geotagUnlockDistance: min.d || 20,
       requireSequentialAnswers: min.s === true,
       textMatchStrictness: min.x || 'normal',
+      themeId: min.th || undefined,
+      barnThemeId: min.tb || undefined,
+      vuxenThemeId: min.tv || undefined,
       barnQuestions: (min.b || []).map((q, idx) => unminifyQuestion(q, idx)),
       vuxenQuestions: (min.v || []).map((q, idx) => unminifyQuestion(q, idx))
     };

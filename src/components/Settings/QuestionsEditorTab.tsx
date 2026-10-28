@@ -34,6 +34,7 @@ import { Language, t, translateQuestion } from '../../i18n';
 import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
+import { THEMES } from '../../data/themes';
 
 export interface QuestionsEditorTabProps {
   quizConfig: QuizConfig;
@@ -732,6 +733,17 @@ export const QuestionsEditorTab: React.FC<QuestionsEditorTabProps> = ({
                                             </span>
                                           )}
                                         </div>
+                                        {(() => {
+                                          const qTheme = q.themeId && q.themeId !== 'default' ? THEMES.find(th => th.id === q.themeId) : undefined;
+                                          return qTheme ? (
+                                            <span
+                                              className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-fuchsia-100 text-fuchsia-800 border border-fuchsia-200"
+                                              title={t(lang, 'themeLabel')}
+                                            >
+                                              🎨 {t(lang, qTheme.nameKey)}
+                                            </span>
+                                          ) : null;
+                                        })()}
                                         {isFollowUp && (
                                           <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
                                             ↳ {t(lang, 'followUpQuestionLabel')}

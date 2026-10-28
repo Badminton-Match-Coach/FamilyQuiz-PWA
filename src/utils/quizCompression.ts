@@ -184,8 +184,8 @@ export function compressQuizToUrlCode(config: QuizConfig, options?: { compactFor
     minified.x = config.textMatchStrictness;
   }
   if (config.themeId) minified.th = config.themeId;
-  if (config.barnThemeId) minified.tb = config.barnThemeId;
-  if (config.vuxenThemeId) minified.tv = config.vuxenThemeId;
+  minified.tb = config.barnThemeId;
+  minified.tv = config.vuxenThemeId;
 
   const jsonStr = JSON.stringify(minified);
   // compressToEncodedURIComponent produces [a-zA-Z0-9 -_.!~*'()] string safe for URL hashes without encoding

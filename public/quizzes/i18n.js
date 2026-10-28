@@ -48,6 +48,18 @@ window.I18N = {
   [`Vuxen`]: [`Adult`, `Adulte`, `Erwachsene`],
   [`Vuxna`]: [`Adults`, `Adultes`, `Erwachsene`],
   [`Barn och vuxna`]: [`Children and adults`, `Enfants et adultes`, `Kinder und Erwachsene`],
+  [`Quiztema`]: [`Quiz theme`, `Thème du quiz`, `Quiz-Thema`],
+  [`Standardtema`]: [`Default theme`, `Thème par défaut`, `Standardthema`],
+  [`Tema för barnfrågor`]: [`Theme for children's questions`, `Thème des questions pour enfants`, `Thema für Kinderfragen`],
+  [`Tema för vuxenfrågor`]: [`Theme for adult questions`, `Thème des questions pour adultes`, `Thema für Erwachsenenfragen`],
+  [`Tema för frågan`]: [`Question theme`, `Thème de la question`, `Fragenthema`],
+  [`Använd quizets tema`]: [`Use the quiz theme`, `Utiliser le thème du quiz`, `Quiz-Thema verwenden`],
+  [`Standard`]: [`Default`, `Par défaut`, `Standard`],
+  [`Halloween`]: [`Halloween`, `Halloween`, `Halloween`],
+  [`Fest`]: [`Party`, `Fête`, `Party`],
+  [`Tipspromenad`]: [`Quiz walk`, `Jeu de piste`, `Quiz-Rallye`],
+  [`Musik`]: [`Music`, `Musique`, `Musik`],
+  [`Skattjakt`]: [`Treasure hunt`, `Chasse au trésor`, `Schatzsuche`],
 
   // Logotyp
   [`Quizens logotyp`]: [`Quiz logo`, `Logo du quiz`, `Quiz-Logo`],

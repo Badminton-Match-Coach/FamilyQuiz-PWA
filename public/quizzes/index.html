@@ -89,6 +89,15 @@
 'use strict';
 const TYPES = { options:'Flerval', text:'Fritext', points:'Poäng', ladder:'Ledtrådsstege' };
 const GROUPS = { barnQuestions:'Barn', vuxenQuestions:'Vuxen' };
+const THEMES = [
+  ['default', 'Standard'],
+  ['halloween', 'Halloween'],
+  ['party', 'Fest'],
+  ['kids', 'Barn'],
+  ['rally', 'Tipspromenad'],
+  ['music', 'Musik'],
+  ['treasurehunt', 'Skattjakt']
+];
 const FS = 'showDirectoryPicker' in window;
 const APP_LOGO = new URL('../Quiz/icon.png', location.href).href;
 const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, lang:'', group:'barnQuestions', dirty:false, open:new Set(), logoPreview:null };
@@ -230,6 +239,14 @@ function input(obj, key, o = {}) {
   return e;
 }
 const field = (label, ctl) => el('label', { class: 'f' }, el('span', {}, label), ctl);
+function themeSelect(value, onChange, inheritLabel = 'Använd quizets tema') {
+  const select = el('select', {},
+    el('option', { value: '' }, inheritLabel),
+    ...THEMES.map(([id, label]) => el('option', { value: id, selected: value === id }, label)));
+  select.value = value || '';
+  select.addEventListener('change', () => onChange(select.value || undefined));
+  return select;
+}
 
 const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
 const AI_KEY_STORAGE = 'bgl_quiz_editor_gemini_api_key';
@@ -738,7 +755,20 @@ function renderEditor() {
     el('div', { class: 'grid2' },
       field('Upplåsningsavstånd för platsfrågor (m)', input(quiz, 'geotagUnlockDistance', { type: 'number' })),
       field('Textmatchning', strict)),
+    field('Quiztema', themeSelect(quiz.themeId, value => {
+      if (value) quiz.themeId = value; else delete quiz.themeId;
+      markDirty();
+    }, 'Standardtema')),
     el('label', { class: 'row' }, seq, 'Frågorna måste besvaras i ordning'));
+  sb.append(el('div', { class: 'grid2' },
+    field('Tema för barnfrågor', themeSelect(quiz.barnThemeId, value => {
+      if (value) quiz.barnThemeId = value; else delete quiz.barnThemeId;
+      markDirty();
+    })),
+    field('Tema för vuxenfrågor', themeSelect(quiz.vuxenThemeId, value => {
+      if (value) quiz.vuxenThemeId = value; else delete quiz.vuxenThemeId;
+      markDirty();
+    }))));
   set.append(sb); ed.append(set);
   updateLogoPreview(quiz.logoUrl);
 
@@ -835,6 +865,10 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   sel.addEventListener('change', () => { q.type = sel.value; ensureType(q); markDirty(); S.open.add(q.id); renderEditor(); });
   body.append(el('div', { class: 'grid2' }, field('Frågetyp', sel), field('Bild (URL eller filnamn)', input(q, 'imageUrl', { optional: true }))));
   body.append(field('Frågetext', input(q, 'text', { area: true, after: retag })));
+  body.append(field('Tema för frågan', themeSelect(q.themeId, value => {
+    if (value) q.themeId = value; else delete q.themeId;
+    markDirty();
+  })));
 
   if (q.type === 'options') body.append(optionsEditor(q));
   if (q.type === 'text' || q.type === 'ladder') {

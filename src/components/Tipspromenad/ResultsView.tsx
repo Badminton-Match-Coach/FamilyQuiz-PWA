@@ -33,6 +33,8 @@ import { QuizConfig, Participant, UserType, Question } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
 import { evaluateTextAnswer } from '../../utils/soundex';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
+import { THEMES } from '../../data/themes';
+import { getActiveTheme, getThemeHeroImage } from '../../utils/themeUtils';
 
 import { AnswerRecord } from '../../types';
 
@@ -105,6 +107,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
 }) => {
   const [showDetailedSummary, setShowDetailedSummary] = useState(false);
   const [expandedFacitQuestionId, setExpandedFacitQuestionId] = useState<string | null>(null);
+  const activeTheme = getActiveTheme(null, participants[0]?.type || 'barn', quizConfig);
 
   return (
             <motion.div 
@@ -455,7 +458,12 @@ export const ResultsView = React.memo<ResultsViewProps>(({
 
 
                     <div className="w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
-                      <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt={t(lang, 'familyWalkingAlt')} referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                      <img 
+                        src={`${import.meta.env.BASE_URL}src/data/frames/${getThemeHeroImage(quizConfig)}`}
+                        alt={t(lang, 'familyWalkingAlt')} 
+                        referrerPolicy="no-referrer" 
+                        className="w-full h-full object-contain" 
+                      />
                     </div>
                     {(() => {
                       const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');

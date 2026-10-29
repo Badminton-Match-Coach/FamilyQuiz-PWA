@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   Users,
   Edit2,
@@ -24,6 +25,7 @@ import {
   Download
 } from 'lucide-react';
 import { QuizConfig, Participant, UserType } from '../../types';
+import { getThemeHeroImage } from '../../utils/themeUtils';
 import { Language, t } from '../../i18n';
 import { isReservedParticipantName } from '../../utils/answerSharing';
 import { calculateDistanceMeters, formatDistance, calculateWalkingTimeMinutes } from '../../utils/geoUtils';
@@ -63,6 +65,7 @@ export const SetupView = React.memo<SetupViewProps>(({
   isDirectLinkLocked,
   setView
 }) => {
+  const theme = useTheme();
   const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
   const [showParticipantActions, setShowParticipantActions] = useState(false);
 
@@ -79,7 +82,7 @@ export const SetupView = React.memo<SetupViewProps>(({
                   <Users className="w-4 h-4" />
                   <span>{t(lang, 'participantsTab')} ({participants.length})</span>
                 </h2>
-                <div className="bg-white rounded-[2rem] p-6 shadow-2xl flex flex-col gap-4 flex-1 border border-indigo-200/50">
+                <div className="rounded-[2rem] p-6 shadow-2xl flex flex-col gap-4 flex-1 border border-indigo-200/50" style={{ backgroundColor: theme.contentBackgroundColor, color: theme.textColor }}>
                   <div className="flex-1 space-y-3 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
                     {participants.map(p => {
                       const isNameReserved = !p.name || !p.name.trim() || isReservedParticipantName(p.name);
@@ -242,37 +245,42 @@ export const SetupView = React.memo<SetupViewProps>(({
                 </div>
               </div>
 
-              <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 bg-white/10 backdrop-blur-md rounded-[2rem] border border-white/20 text-white space-y-4">
+              <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 backdrop-blur-md rounded-[2rem] border border-indigo-200/50 space-y-4" style={{ backgroundColor: theme.contentBackgroundColor, color: theme.textColor }}>
                 <div className="space-y-3">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-transparent text-indigo-950 rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-white/30">
-                    <img src={`${import.meta.env.BASE_URL}HelFamilj.png`} alt={t(lang, 'familyWalkingAlt')} referrerPolicy="no-referrer" className="w-full h-full object-contain" />
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-transparent rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-indigo-100">
+                    <img 
+                      src={`${import.meta.env.BASE_URL}src/data/frames/${getThemeHeroImage(quizConfig)}`}
+                      alt={t(lang, 'familyWalkingAlt')} 
+                      referrerPolicy="no-referrer" 
+                      className="w-full h-full object-contain" 
+                    />
                   </div>
                   <div>
-                    <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-md">
+                    <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-sm">
                       {t(lang, 'readyForWalk')}
                     </h2>
-                    <p className="text-indigo-100 font-medium text-sm sm:text-base mt-2 opacity-90">
+                    <p className="font-medium text-sm sm:text-base mt-2 opacity-80">
                       {t(lang, 'readyWalkDesc')}
                     </p>
                   </div>
                 </div>
 
-                <div className="bg-black/20 p-4 sm:p-5 rounded-2xl border border-white/10 space-y-2 text-xs">
-                  <div className="flex items-center justify-between py-1 border-b border-white/10">
-                    <span className="text-indigo-200">{t(lang, 'totalQuestionsLabel')}</span>
+                <div className="p-4 sm:p-5 rounded-2xl border border-indigo-100/50 space-y-2 text-xs" style={{ backgroundColor: `${theme.textColor}10` }}>
+                  <div className="flex items-center justify-between py-1 border-b border-indigo-100/30">
+                    <span className="opacity-70">{t(lang, 'totalQuestionsLabel')}</span>
                     <span className="font-black text-sm">{totalQuestions}</span>
                   </div>
-                  <div className="flex items-center justify-between py-1 border-b border-white/10">
-                    <span className="text-indigo-200">{t(lang, 'kidsQuestionsLabel')}</span>
-                    <span className="font-bold text-amber-300">{quizConfig.barnQuestions.length}</span>
+                  <div className="flex items-center justify-between py-1 border-b border-indigo-100/30">
+                    <span className="opacity-70">{t(lang, 'kidsQuestionsLabel')}</span>
+                    <span className="font-bold text-amber-600">{quizConfig.barnQuestions.length}</span>
                   </div>
-                  <div className="flex items-center justify-between py-1 border-b border-white/10">
-                    <span className="text-indigo-200">{t(lang, 'adultsQuestionsLabel')}</span>
-                    <span className="font-bold text-pink-300">{quizConfig.vuxenQuestions.length}</span>
+                  <div className="flex items-center justify-between py-1 border-b border-indigo-100/30">
+                    <span className="opacity-70">{t(lang, 'adultsQuestionsLabel')}</span>
+                    <span className="font-bold text-pink-600">{quizConfig.vuxenQuestions.length}</span>
                   </div>
                   <div className="flex items-center justify-between py-1">
-                    <span className="text-indigo-200">{t(lang, 'geotaggedStations')}</span>
-                    <span className="font-bold text-emerald-300">
+                    <span className="opacity-70">{t(lang, 'geotaggedStations')}</span>
+                    <span className="font-bold text-emerald-600">
                       {Array.from({ length: totalQuestions }).filter((_, idx) => quizConfig.barnQuestions[idx]?.location || quizConfig.vuxenQuestions[idx]?.location).length}
                     </span>
                   </div>
@@ -280,13 +288,13 @@ export const SetupView = React.memo<SetupViewProps>(({
                   {(() => {
                     const quizLangsSummary = getQuizAvailableLanguages(quizConfig);
                     return (
-                      <div className="pt-2.5 border-t border-white/10 space-y-2">
+                      <div className="pt-2.5 border-t border-indigo-100/30 space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-indigo-200 flex items-center gap-1.5 font-bold text-xs">
-                            <Globe className="w-3.5 h-3.5 text-yellow-300" />
+                          <span className="opacity-70 flex items-center gap-1.5 font-bold text-xs">
+                            <Globe className="w-3.5 h-3.5" style={{ color: theme.frameColor }} />
                             <span>{t(lang, 'quizLanguagesTitle')}</span>
                           </span>
-                          <span className="text-[10px] font-black uppercase text-indigo-300 bg-white/10 px-2 py-0.5 rounded-full">
+                          <span className="text-[10px] font-black uppercase opacity-60 bg-black/5 px-2 py-0.5 rounded-full">
                             {quizLangsSummary.allLanguages.length} {t(lang, 'availableLanguagesLabel')?.toLowerCase()}
                           </span>
                         </div>
@@ -299,15 +307,19 @@ export const SetupView = React.memo<SetupViewProps>(({
                                 key={l.code}
                                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-black transition-all shadow-sm ${
                                   isSelected
-                                    ? 'bg-yellow-400 text-indigo-950 ring-2 ring-yellow-200 scale-105'
-                                    : 'bg-white/15 text-white border border-white/20 hover:bg-white/25'
+                                    ? 'ring-2 ring-indigo-200 scale-105'
+                                    : 'opacity-60 hover:opacity-100 border border-indigo-100/30'
                                 }`}
+                                style={{
+                                  backgroundColor: isSelected ? theme.frameColor : 'transparent',
+                                  color: isSelected ? '#ffffff' : undefined,
+                                }}
                                 title={`${l.name} (${qCount}/${totalQuestions} ${t(lang, 'questionsShort') || 'frågor'})`}
                               >
                                 <span className="text-sm leading-none">{l.flag}</span>
                                 <span>{l.name}</span>
                                 {isSelected && (
-                                  <span className="text-[9px] font-black uppercase bg-indigo-950 text-yellow-300 px-1.5 py-0.5 rounded-md ml-0.5">
+                                  <span className="text-[9px] font-black uppercase bg-black/20 text-white px-1.5 py-0.5 rounded-md ml-0.5">
                                     Aktiv
                                   </span>
                                 )}

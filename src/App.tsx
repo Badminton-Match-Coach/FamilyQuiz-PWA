@@ -45,6 +45,8 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
+import * as ThemeUtils from './utils/themeUtils';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { Header } from './components/Navigation/Header';
 import { SetupView } from './components/Tipspromenad/SetupView';
 import { compressImageFile, getOptionLabel } from './utils/imageAndLabelUtils';
@@ -3805,8 +3807,14 @@ ${exampleJson}`;
       )
     : null;
 
+  const activeTheme = ThemeUtils.getActiveTheme(null, participants[0]?.type || 'barn', quizConfig);
+  
   return (
-    <div className="min-h-screen bg-indigo-600 text-slate-900 font-sans p-2 sm:p-3 md:p-6 flex flex-col">
+    <ThemeProvider theme={activeTheme}>
+    <div 
+      className="min-h-screen font-sans p-2 sm:p-3 md:p-6 flex flex-col transition-colors duration-300"
+      style={{ backgroundColor: activeTheme.backgroundColor, color: activeTheme.textColor }}
+    >
       {languageMenuPortal}
       <div className="fixed inset-x-0 top-0 z-[200] bg-slate-950/85 backdrop-blur-sm border-b border-white/10 shadow-md">
         <a
@@ -4461,5 +4469,6 @@ ${exampleJson}`;
         )}
       </div>
     </div>
+    </ThemeProvider>
   );
 }

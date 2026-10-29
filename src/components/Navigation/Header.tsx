@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   Users,
   MapPin,
@@ -58,12 +59,14 @@ export const Header = React.memo<HeaderProps>(({
   setShowConfigInput,
   setConfigTab
 }) => {
+  const theme = useTheme();
   const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
   const { isAllAnswered } = getQuizAnswerProgress();
   const canShowMenus = !isQuizModeLocked || isFacitUnlocked || isAdmin || (!hasQuizPassword && isAllAnswered);
 
   return (
-    <header className="flex flex-col gap-3 mb-3 sm:mb-5 bg-white/10 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl">
+    <header className="flex flex-col gap-3 mb-3 sm:mb-5 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl"
+            style={{ backgroundColor: theme.backgroundColor + '80', color: theme.textColor }}>
       <div className="flex flex-col gap-3.5 sm:gap-4">
         {/* Top Header Row: Logo & Full-Width Quiz Title */}
         <div className="flex items-center gap-3.5 w-full min-w-0">
@@ -125,7 +128,7 @@ export const Header = React.memo<HeaderProps>(({
             )}
           </button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-white leading-tight tracking-tight break-words [overflow-wrap:anywhere]">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-black leading-tight tracking-tight break-words [overflow-wrap:anywhere]" style={{ color: theme.textColor }}>
               {quizConfig.title === defaultQuiz.title ? t(lang, 'defaultQuizTitle').toUpperCase() : quizConfig.title.toUpperCase()}
             </h1>
           </div>
@@ -137,9 +140,13 @@ export const Header = React.memo<HeaderProps>(({
             onClick={() => setView('setup')}
             className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'setup' 
-                ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
-                : 'text-white/80 hover:text-white hover:bg-white/10'
+                ? 'shadow-md scale-[1.02]' 
+                : 'hover:bg-black/10'
             }`}
+            style={view === 'setup' 
+              ? { backgroundColor: theme.contentBackgroundColor, color: theme.textColor } 
+              : { color: theme.textColor }
+            }
           >
             <Users className="w-3.5 h-3.5" />
             <span>{t(lang, 'participantsTab')}</span>
@@ -149,9 +156,13 @@ export const Header = React.memo<HeaderProps>(({
             onClick={() => setView('quiz')}
             className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'quiz' 
-                ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
-                : 'text-white/80 hover:text-white hover:bg-white/10'
+                ? 'shadow-md scale-[1.02]' 
+                : 'hover:bg-black/10'
             }`}
+            style={view === 'quiz' 
+              ? { backgroundColor: theme.contentBackgroundColor, color: theme.textColor } 
+              : { color: theme.textColor }
+            }
           >
             <MapPin className="w-3.5 h-3.5" />
             <span>{t(lang, 'walkQuizTab')}</span>
@@ -161,9 +172,13 @@ export const Header = React.memo<HeaderProps>(({
             onClick={() => setView('results')}
             className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'results' 
-                ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
-                : 'text-white/80 hover:text-white hover:bg-white/10'
+                ? 'shadow-md scale-[1.02]' 
+                : 'hover:bg-black/10'
             }`}
+            style={view === 'results' 
+              ? { backgroundColor: theme.contentBackgroundColor, color: theme.textColor } 
+              : { color: theme.textColor }
+            }
           >
             <Trophy className="w-3.5 h-3.5 text-amber-400" />
             <span>{t(lang, 'resultsTab')}</span>
@@ -174,9 +189,13 @@ export const Header = React.memo<HeaderProps>(({
               onClick={() => setView('config')}
               className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
                 view === 'config' 
-                  ? 'bg-white text-indigo-950 shadow-md scale-[1.02]' 
-                  : 'text-white/80 hover:text-white hover:bg-white/10'
+                  ? 'shadow-md scale-[1.02]' 
+                  : 'hover:bg-black/10'
               }`}
+              style={view === 'config' 
+                ? { backgroundColor: theme.contentBackgroundColor, color: theme.textColor } 
+                : { color: theme.textColor }
+              }
             >
               <Settings className="w-3.5 h-3.5" />
               <span>{t(lang, 'edit')}</span>
@@ -189,7 +208,8 @@ export const Header = React.memo<HeaderProps>(({
                 setShowConfigInput(true);
                 setConfigTab('library');
               }}
-              className="flex-1 px-3 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0 cursor-pointer"
+              className="flex-1 px-3 py-2.5 hover:opacity-90 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0 cursor-pointer"
+              style={{ backgroundColor: theme.frameColor, color: theme.backgroundColor }}
               title={t(lang, 'libraryTitle')}
             >
               <FolderOpen className="w-3.5 h-3.5" />
@@ -201,7 +221,8 @@ export const Header = React.memo<HeaderProps>(({
           {deferredInstallPrompt && (
             <button
               onClick={handleInstallPwa}
-              className="px-2.5 sm:px-3 py-2.5 bg-yellow-400 hover:bg-yellow-300 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 animate-bounce shrink-0 cursor-pointer"
+              className="px-2.5 sm:px-3 py-2.5 hover:opacity-90 font-black text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 animate-bounce shrink-0 cursor-pointer"
+              style={{ backgroundColor: theme.frameAccentColor, color: theme.backgroundColor }}
               title={t(lang, 'pwaInstallBtn')}
             >
               <Download className="w-3.5 h-3.5" />
@@ -215,13 +236,14 @@ export const Header = React.memo<HeaderProps>(({
               ref={languageMenuButtonRef}
               type="button"
               onClick={() => setIsLanguageMenuOpen((open) => !open)}
-              className="flex items-center gap-1.5 rounded-xl border border-white/20 bg-white/15 hover:bg-white/25 px-2.5 sm:px-3 py-2.5 text-white transition-all shadow-md relative z-[1400] active:scale-95 cursor-pointer"
+              className="flex items-center gap-1.5 rounded-xl border border-white/20 hover:opacity-80 px-2.5 sm:px-3 py-2.5 transition-all shadow-md relative z-[1400] active:scale-95 cursor-pointer"
+              style={{ backgroundColor: theme.contentBackgroundColor + '40', color: theme.textColor }}
               title={selectedLanguage.name}
               aria-label={`Selected language: ${selectedLanguage.name}`}
             >
               <span className="text-base sm:text-lg leading-none">{selectedLanguage.flag}</span>
               <span className="text-[11px] font-black uppercase tracking-wider">{selectedLanguage.code}</span>
-              <ChevronDown className={`w-3.5 h-3.5 text-white/80 transition-transform ${isLanguageMenuOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isLanguageMenuOpen ? 'rotate-180' : ''}`} />
             </button>
           </div>
         </div>

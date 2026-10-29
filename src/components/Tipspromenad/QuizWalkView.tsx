@@ -41,6 +41,7 @@ import { OfflineImage } from '../Common/OfflineImage';
 
 import { AnswerRecord } from '../../types';
 import { THEMES } from '../../data/themes';
+import { getActiveTheme } from '../../utils/themeUtils';
 
 export interface QuizWalkViewProps {
   lang: Language;
@@ -116,6 +117,8 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
   const submitLadderAnswer = submitLadderAnswerProp
     || ((text: string, _points: number, _cluesCount?: number) => submitTextAnswer(text));
 
+  const overviewTheme = getActiveTheme(null, participants[0]?.type || 'barn', quizConfig);
+
   return (
             <motion.div 
               key="quiz"
@@ -134,7 +137,10 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                   return (
                     <div className="space-y-6">
                       {/* Top Bar with Participants & Results action */}
-                      <div className="bg-white/10 rounded-2xl sm:rounded-3xl p-4 sm:p-5 backdrop-blur-md border border-white/20 text-white flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div 
+                        className="rounded-2xl sm:rounded-3xl p-4 sm:p-5 border border-white/20 flex flex-col sm:flex-row items-center justify-between gap-4"
+                        style={{ backgroundColor: overviewTheme.frameColor, color: '#ffffff' }}
+                      >
                         <div className="flex items-center gap-3 w-full sm:w-auto">
                           <div className="w-10 h-10 bg-yellow-400 text-indigo-900 rounded-2xl flex items-center justify-center font-black text-lg shrink-0 shadow">
                             🗺️
@@ -403,22 +409,25 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                 /* Question View: Quick Question Navbar + Question Form */
                 <div className="space-y-4">
                   {/* Top Bar for fast navigation between questions */}
-                  <div className="bg-white/10 rounded-2xl p-3 backdrop-blur-md border border-white/20 text-white flex items-center justify-between gap-3 overflow-x-auto">
+                  <div
+                    className="rounded-2xl p-3 backdrop-blur-md border border-white/20 text-white flex items-center justify-between gap-3 overflow-x-auto"
+                    style={{ backgroundColor: `${overviewTheme.frameColor}dd` }}
+                  >
                     <button
                       onClick={() => {
                         setSelectedQuestionIndex(null);
                         setSelectedParticipantId(null);
                       }}
-                      className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 shrink-0 transition-all"
+                      className="px-3 py-1.5 bg-black/20 hover:bg-black/30 text-white rounded-xl text-xs font-black uppercase flex items-center gap-1.5 shrink-0 transition-all"
                     >
                       {t(lang, 'allQuestionsAndMap')}
                     </button>
 
                     <div className="flex items-center gap-1.5 overflow-x-auto py-1">
                       {visibleQuestionIndexes.map((idx) => {
-                            const question = quizQuestionPool?.[idx]
-                              || quizConfig.barnQuestions[idx]
-                              || quizConfig.vuxenQuestions[idx];
+                        const question = quizQuestionPool?.[idx]
+                          || quizConfig.barnQuestions[idx]
+                          || quizConfig.vuxenQuestions[idx];
                         const location = question?.location;
                         const answeredBy = participants.filter(p => answers.some(a => a.participantId === p.id && a.questionIndex === idx));
                         const isFullyAnswered = participants.length > 0 && answeredBy.length === participants.length;
@@ -438,12 +447,12 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                             onClick={() => handleSelectQuestionIndex(idx)}
                             className={`w-8 h-8 rounded-xl font-black text-xs shrink-0 flex items-center justify-center transition-all ${
                               isSelected
-                                ? 'bg-yellow-400 text-indigo-950 scale-110 shadow-md ring-2 ring-yellow-200'
+                                ? 'bg-white text-indigo-950 scale-110 shadow-md ring-2 ring-white/50'
                                 : isFullyAnswered
                                   ? 'bg-emerald-500 text-white'
                                   : isUnlocked
-                                    ? 'bg-white/20 text-white hover:bg-white/30'
-                                    : 'bg-black/30 text-white/40'
+                                    ? 'bg-black/30 text-white hover:bg-black/40'
+                                    : 'bg-black/10 text-white/50'
                             }`}
                           >
                             {visibleQuestionIndexes.indexOf(idx) + 1}
@@ -744,11 +753,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                           originalLanguage: lang,
                         };
                         
-                        const categoryThemeId = isBarn ? quizConfig.barnThemeId : quizConfig.vuxenThemeId;
-                        const theme = (rawQ.themeId && THEMES.find(t => t.id === rawQ.themeId)) ||
-                                      (categoryThemeId && THEMES.find(t => t.id === categoryThemeId)) ||
-                                      (quizConfig.themeId && THEMES.find(t => t.id === quizConfig.themeId)) ||
-                                      THEMES[0];
+                        const theme = getActiveTheme(rawQ, currentParticipant?.type || 'barn', quizConfig);
 
                         return (
                           <div 
@@ -810,7 +815,10 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                         
                         return (
                           <>
-                            <div className="mb-4 sm:mb-6 relative">
+                            <div 
+                              className="mb-4 sm:mb-6 relative p-6 rounded-2xl"
+                              style={{ backgroundColor: theme.contentBackgroundColor, color: theme.textColor }}
+                            >
                               <div className="flex items-center gap-3 mb-2 flex-wrap">
                                 <span className={`px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest text-white ${
                                   isBarn ? 'bg-amber-400' : 'bg-pink-400'
@@ -839,7 +847,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   );
                                 })()}
                               </div>
-                              <h3 className="text-2xl sm:text-4xl font-black leading-tight text-slate-800">
+                              <h3 className="text-2xl sm:text-4xl font-black leading-tight">
                                 {activeQ.text}
                               </h3>
 

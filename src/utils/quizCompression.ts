@@ -1,5 +1,5 @@
 import LZString from 'lz-string';
-import { QuizConfig, Question } from '../types';
+import { QuizConfig, Question, isQuizEffectId } from '../types';
 import { assertValidQuizConfig } from './quizValidation';
 
 /**
@@ -61,6 +61,7 @@ interface MinifiedQuizConfig {
   th?: string; // quiz themeId
   tb?: string; // barnThemeId
   tv?: string; // vuxenThemeId
+  ef?: string; // effectId
   b: MinifiedQuestion[];
   v: MinifiedQuestion[];
 }
@@ -186,6 +187,7 @@ export function compressQuizToUrlCode(config: QuizConfig, options?: { compactFor
   if (config.themeId) minified.th = config.themeId;
   minified.tb = config.barnThemeId;
   minified.tv = config.vuxenThemeId;
+  if (config.effectId) minified.ef = config.effectId;
 
   const jsonStr = JSON.stringify(minified);
   // compressToEncodedURIComponent produces [a-zA-Z0-9 -_.!~*'()] string safe for URL hashes without encoding
@@ -257,6 +259,7 @@ export function decompressQuizFromUrlCode(code: string): QuizConfig | null {
       themeId: min.th || undefined,
       barnThemeId: min.tb || undefined,
       vuxenThemeId: min.tv || undefined,
+      effectId: isQuizEffectId(min.ef) ? min.ef : undefined,
       barnQuestions: (min.b || []).map((q, idx) => unminifyQuestion(q, idx)),
       vuxenQuestions: (min.v || []).map((q, idx) => unminifyQuestion(q, idx))
     };

@@ -158,6 +158,30 @@ export function getDefaultQuestionTranslations(): Record<string, Record<Language
 }
 
 const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = {
+  quizEffectTitle: {
+    sv: 'Effekt',
+    en: 'Effect'
+  },
+  quizEffectDescription: {
+    sv: 'Välj en dekoration som visas för både barn och vuxna, oavsett quizets tema.',
+    en: 'Choose a decoration shown for both kids and adults, regardless of the quiz theme.'
+  },
+  quizEffectNone: {
+    sv: 'Ingen effekt',
+    en: 'No effect'
+  },
+  quizEffectSpider: {
+    sv: 'Spindel',
+    en: 'Spider'
+  },
+  quizEffectSanta: {
+    sv: 'Tomtar',
+    en: 'Santa'
+  },
+  quizEffectEasterWitch: {
+    sv: 'Påskkärringar',
+    en: 'Easter witches'
+  },
   defaultParticipantName: {
     sv: 'Jag',
     en: 'Me',

@@ -29,7 +29,7 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
-import { HalloweenSpider } from '../Effects/HalloweenSpider';
+import { QuizEffect } from '../Effects/QuizEffect';
 import { QuizConfig, Participant, UserType, Question } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
 import { evaluateTextAnswer } from '../../utils/soundex';
@@ -115,8 +115,9 @@ export const ResultsView = React.memo<ResultsViewProps>(({
               key="results"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="max-w-2xl mx-auto w-full space-y-4"
+              className="relative max-w-2xl mx-auto w-full space-y-4"
             >
+              {quizConfig.effectId && <QuizEffect effectId={quizConfig.effectId} />}
               {viewingParticipantId ? (
                 (() => {
                   const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');
@@ -465,7 +466,6 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                         referrerPolicy="no-referrer" 
                         className="w-full h-full object-contain" 
                       />
-                      {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && <HalloweenSpider />}
                     </div>
                     {(() => {
                       const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');

@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { THEMES } from '../../data/themes';
 import { Language, t } from '../../i18n';
-import { QuizConfig, Participant } from '../../types';
+import { QuizConfig, Participant, QUIZ_EFFECT_IDS } from '../../types';
 import { compressImageFile } from '../../utils/imageAndLabelUtils';
 import { cacheLogoAsDataUrl } from '../../utils/logoCache';
 
@@ -455,7 +455,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 <label key={key} className="space-y-1 block">
                                   <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
                                   <select
-                                    className="w-full p-2.5 border-2 border-indigo-200 rounded-xl text-sm font-bold bg-white outline-none focus:border-indigo-500"
+                                    className="quiz-setting-select w-full p-2.5 border-2 border-indigo-200 rounded-xl text-sm font-bold outline-none focus:border-indigo-500"
                                     value={quizConfig[key] || ''}
                                     onChange={(e) => {
                                       const val = e.target.value || undefined;
@@ -470,6 +470,33 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                                 </label>
                               ))}
                             </div>
+                          </div>
+
+                          <div className="p-4 bg-violet-50/70 border border-violet-200/80 rounded-2xl space-y-3">
+                            <div className="flex items-start gap-2.5">
+                              <Sparkles className="w-4 h-4 text-violet-700 mt-0.5 shrink-0" />
+                              <div>
+                                <h4 className="font-black text-xs text-violet-950 uppercase tracking-wide">
+                                  {t(lang, 'quizEffectTitle')}
+                                </h4>
+                                <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                                  {t(lang, 'quizEffectDescription')}
+                                </p>
+                              </div>
+                            </div>
+                            <select
+                              className="quiz-setting-select w-full p-2.5 border-2 border-violet-200 rounded-xl text-sm font-bold outline-none focus:border-violet-500"
+                              value={quizConfig.effectId || ''}
+                              onChange={(e) => {
+                                const effectId = QUIZ_EFFECT_IDS.find(id => id === e.target.value);
+                                setQuizConfig(prev => ({ ...prev, effectId }));
+                              }}
+                            >
+                              <option value="">{t(lang, 'quizEffectNone')}</option>
+                              <option value="spider">{t(lang, 'quizEffectSpider')}</option>
+                              <option value="santa">{t(lang, 'quizEffectSanta')}</option>
+                              <option value="easter-witch">{t(lang, 'quizEffectEasterWitch')}</option>
+                            </select>
                           </div>
 
                           {/* Direct Quiz Link Button (Top recommended) */}

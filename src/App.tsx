@@ -44,7 +44,7 @@ import {
   Key,
   ExternalLink
 } from 'lucide-react';
-import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location } from './types';
+import { Participant, QuizConfig, QuizMetadata, AnswerRecord, UserType, Question, QuestionType, Location, isQuizEffectId } from './types';
 import * as ThemeUtils from './utils/themeUtils';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Header } from './components/Navigation/Header';
@@ -400,6 +400,7 @@ export default function App() {
         }));
         return ensureQuizId({
           ...parsed,
+          effectId: isQuizEffectId(parsed.effectId) ? parsed.effectId : undefined,
           barnQuestions: migrateQuestions(parsed.barnQuestions),
           vuxenQuestions: migrateQuestions(parsed.vuxenQuestions)
         });
@@ -1868,6 +1869,7 @@ ${exampleJson}`;
               themeId: typeof parsed.themeId === 'string' ? parsed.themeId : undefined,
               barnThemeId: typeof parsed.barnThemeId === 'string' ? parsed.barnThemeId : undefined,
               vuxenThemeId: typeof parsed.vuxenThemeId === 'string' ? parsed.vuxenThemeId : undefined,
+              effectId: isQuizEffectId(parsed.effectId) ? parsed.effectId : undefined,
               barnQuestions: barnQs,
               vuxenQuestions: vuxenQs,
               geotagUnlockDistance: typeof parsed.geotagUnlockDistance === 'number' ? parsed.geotagUnlockDistance : 20,
@@ -2790,6 +2792,7 @@ ${exampleJson}`;
         themeId: typeof parsed.themeId === 'string' ? parsed.themeId : undefined,
         barnThemeId: typeof parsed.barnThemeId === 'string' ? parsed.barnThemeId : undefined,
         vuxenThemeId: typeof parsed.vuxenThemeId === 'string' ? parsed.vuxenThemeId : undefined,
+        effectId: isQuizEffectId(parsed.effectId) ? parsed.effectId : undefined,
         barnQuestions: barnQs,
         vuxenQuestions: vuxenQs,
         geotagUnlockDistance: typeof parsed.geotagUnlockDistance === 'number' ? parsed.geotagUnlockDistance : 20,

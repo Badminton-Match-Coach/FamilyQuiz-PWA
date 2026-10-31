@@ -24,7 +24,7 @@ import {
   ChevronDown,
   Download
 } from 'lucide-react';
-import { HalloweenSpider } from '../Effects/HalloweenSpider';
+import { QuizEffect } from '../Effects/QuizEffect';
 import { QuizConfig, Participant, UserType } from '../../types';
 import { getThemeHeroImage } from '../../utils/themeUtils';
 import { Language, t } from '../../i18n';
@@ -76,8 +76,9 @@ export const SetupView = React.memo<SetupViewProps>(({
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="grid grid-cols-1 md:grid-cols-12 gap-4 flex-1"
+              className="relative grid grid-cols-1 md:grid-cols-12 gap-4 flex-1"
             >
+              {quizConfig.effectId && <QuizEffect effectId={quizConfig.effectId} />}
               <div className="md:col-span-5 flex flex-col gap-4">
                 <h2 className="text-indigo-800 text-xs font-bold uppercase tracking-widest px-2 flex items-center gap-2">
                   <Users className="w-4 h-4" />
@@ -255,7 +256,6 @@ export const SetupView = React.memo<SetupViewProps>(({
                       referrerPolicy="no-referrer" 
                       className="w-full h-full object-contain" 
                     />
-                    {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && <HalloweenSpider />}
                   </div>
                   <div>
                     <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-sm">

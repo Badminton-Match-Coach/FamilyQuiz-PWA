@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AnswerRecord, Participant, QuizConfig } from './types';
+import { AnswerRecord, Participant, QuizConfig, isQuizEffectId } from './types';
 import { assertValidQuizConfig } from './utils/quizValidation';
 import { cacheAllQuizImages } from './utils/offlineImageCache';
 import { robustParseQuizJson } from './utils/quizParsers';
@@ -422,6 +422,7 @@ export async function importIndexedDBFromJSON(jsonString: string): Promise<numbe
         password: item.password || '',
         geotagUnlockDistance: item.geotagUnlockDistance || 20,
         requireSequentialAnswers: item.requireSequentialAnswers === true,
+        effectId: isQuizEffectId(item.effectId) ? item.effectId : undefined,
         barnQuestions: item.barnQuestions || [],
         vuxenQuestions: item.vuxenQuestions || [],
       };
@@ -563,4 +564,3 @@ export async function exportIndividualQuizzesToFiles(): Promise<{ count: number 
 
   return { count: quizzes.length };
 }
-

@@ -38,7 +38,7 @@ import {
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
 import { OfflineImage } from '../Common/OfflineImage';
-import { HalloweenSpider } from '../Effects/HalloweenSpider';
+import { QuizEffect } from '../Effects/QuizEffect';
 
 import { AnswerRecord } from '../../types';
 import { THEMES } from '../../data/themes';
@@ -771,12 +771,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                               boxShadow: `inset 0 0 0 4px ${theme.backgroundColor}, inset 0 0 0 7px ${theme.frameAccentColor}, 0 10px 30px rgba(0,0,0,0.5)`
                             }}
                           >
-                            {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && (
-                              <>
-                                <HalloweenSpider />
-                                <div className="halloween-spider-thread"></div>
-                              </>
-                            )}
+                            {quizConfig.effectId && <QuizEffect effectId={quizConfig.effectId} />}
                             {/* Big Decorative Number */}
                             <div className="absolute -top-10 -right-10 opacity-[0.1] pointer-events-none text-[12rem] font-black text-[#5d4037] select-none">
                               {selectedQuestionIndex! + 1}

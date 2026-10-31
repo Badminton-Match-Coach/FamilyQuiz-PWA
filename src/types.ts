@@ -7,6 +7,12 @@ import { Language } from './i18n';
 
 export type UserType = 'barn' | 'vuxen';
 
+export const QUIZ_EFFECT_IDS = ['spider', 'santa', 'easter-witch'] as const;
+export type QuizEffectId = (typeof QUIZ_EFFECT_IDS)[number];
+
+export const isQuizEffectId = (value: unknown): value is QuizEffectId =>
+  typeof value === 'string' && QUIZ_EFFECT_IDS.some(effectId => effectId === value);
+
 export interface Participant {
   id: string;
   uniqueId: string; // Stable ID for merging answers across multiple imports
@@ -59,6 +65,7 @@ export interface QuizConfig {
   themeId?: string; // Default theme for the entire quiz
   barnThemeId?: string; // Theme for kids' questions (overrides quiz theme)
   vuxenThemeId?: string; // Theme for adults' questions (overrides quiz theme)
+  effectId?: QuizEffectId; // Optional visual effect shared by all participants
 }
 
 export interface QuizMetadata {

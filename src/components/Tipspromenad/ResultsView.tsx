@@ -29,6 +29,7 @@ import {
   ChevronRight,
   Download
 } from 'lucide-react';
+import { HalloweenSpider } from '../Effects/HalloweenSpider';
 import { QuizConfig, Participant, UserType, Question } from '../../types';
 import { Language, t, translateQuestion } from '../../i18n';
 import { evaluateTextAnswer } from '../../utils/soundex';
@@ -251,7 +252,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                       </div>
                       <div className="min-w-0">
                         <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-none mb-1 truncate">{participants.find(p => p.id === viewingParticipantId)?.name}</h3>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t(lang, 'detailedReview')}</p>
+                        <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{t(lang, 'detailedReview')}</p>
                       </div>
                     </div>
                     <button 
@@ -457,13 +458,14 @@ export const ResultsView = React.memo<ResultsViewProps>(({
                   <div className="relative bg-white rounded-[2rem] sm:rounded-[3rem] p-6 sm:p-10 shadow-2xl border border-indigo-200/50 text-center">
 
 
-                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
+                    <div className="relative w-20 h-20 sm:w-24 sm:h-24 bg-transparent rounded-[1.5rem] sm:rounded-[2rem] flex items-center justify-center mx-auto mb-6 sm:mb-8 shadow-xl rotate-6 border-4 border-white overflow-hidden">
                       <img 
-                        src={`${import.meta.env.BASE_URL}src/data/frames/${getThemeHeroImage(quizConfig)}`}
+                        src={getThemeHeroImage(quizConfig)}
                         alt={t(lang, 'familyWalkingAlt')} 
                         referrerPolicy="no-referrer" 
                         className="w-full h-full object-contain" 
                       />
+                      {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && <HalloweenSpider />}
                     </div>
                     {(() => {
                       const hasQuizPassword = Boolean(quizConfig.password && quizConfig.password.trim() !== '');

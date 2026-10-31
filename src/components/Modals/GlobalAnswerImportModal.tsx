@@ -284,14 +284,14 @@ export const GlobalAnswerImportModal: React.FC<GlobalAnswerImportModalProps> = (
                 <Users className="w-4 h-4 text-indigo-500 shrink-0" />
                 <div>
                   <div className="font-black text-slate-800">{participantsCount}</div>
-                  <div className="text-[10px] text-slate-400 font-medium">{lang === 'sv' ? 'Deltagare' : 'Participants'}</div>
+                  <div className="text-[10px] text-slate-600 font-medium">{lang === 'sv' ? 'Deltagare' : 'Participants'}</div>
                 </div>
               </div>
               <div className="p-2.5 rounded-xl bg-white border border-emerald-100 flex items-center gap-2">
                 <FileCheck2 className="w-4 h-4 text-emerald-500 shrink-0" />
                 <div>
                   <div className="font-black text-slate-800">{answersCount}</div>
-                  <div className="text-[10px] text-slate-400 font-medium">{lang === 'sv' ? 'Registrerade svar' : 'Recorded answers'}</div>
+                  <div className="text-[10px] text-slate-600 font-medium">{lang === 'sv' ? 'Registrerade svar' : 'Recorded answers'}</div>
                 </div>
               </div>
             </div>

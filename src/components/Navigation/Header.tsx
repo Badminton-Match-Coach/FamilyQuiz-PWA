@@ -65,9 +65,9 @@ export const Header = React.memo<HeaderProps>(({
   const canShowMenus = !isQuizModeLocked || isFacitUnlocked || isAdmin || (!hasQuizPassword && isAllAnswered);
 
   return (
-    <header className="flex flex-col gap-3 mb-3 sm:mb-5 p-3 sm:p-4 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl"
+    <header className="flex flex-col gap-2 mb-2 sm:mb-3 p-2 sm:p-3 rounded-[1.5rem] sm:rounded-[2rem] backdrop-blur-md border border-white/20 shadow-xl"
             style={{ backgroundColor: theme.backgroundColor + '80', color: theme.textColor }}>
-      <div className="flex flex-col gap-3.5 sm:gap-4">
+      <div className="flex flex-col gap-2 sm:gap-3">
         {/* Top Header Row: Logo & Full-Width Quiz Title */}
         <div className="flex items-center gap-3.5 w-full min-w-0">
           <button
@@ -135,10 +135,10 @@ export const Header = React.memo<HeaderProps>(({
         </div>
 
         {/* Navigation Tabs + Far Right Language Selection & PWA Install */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-black/20 p-1.5 rounded-2xl border border-white/10 w-full overflow-visible">
+        <div className="flex flex-wrap items-center gap-1 bg-black/20 p-1 rounded-2xl border border-white/10 w-full overflow-visible">
           <button
             onClick={() => setView('setup')}
-            className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`flex-1 px-2.5 sm:px-3 py-2 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'setup' 
                 ? 'shadow-md scale-[1.02]' 
                 : 'hover:bg-black/10'
@@ -154,7 +154,7 @@ export const Header = React.memo<HeaderProps>(({
 
           <button
             onClick={() => setView('quiz')}
-            className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`flex-1 px-2.5 sm:px-3 py-2 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'quiz' 
                 ? 'shadow-md scale-[1.02]' 
                 : 'hover:bg-black/10'
@@ -170,7 +170,7 @@ export const Header = React.memo<HeaderProps>(({
 
           <button
             onClick={() => setView('results')}
-            className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`flex-1 px-2.5 sm:px-3 py-2 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
               view === 'results' 
                 ? 'shadow-md scale-[1.02]' 
                 : 'hover:bg-black/10'
@@ -187,7 +187,7 @@ export const Header = React.memo<HeaderProps>(({
           {canShowMenus && (
             <button
               onClick={() => setView('config')}
-              className={`flex-1 px-3 sm:px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+              className={`flex-1 px-2.5 sm:px-3 py-2 rounded-xl font-black text-[11px] transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
                 view === 'config' 
                   ? 'shadow-md scale-[1.02]' 
                   : 'hover:bg-black/10'
@@ -208,7 +208,7 @@ export const Header = React.memo<HeaderProps>(({
                 setShowConfigInput(true);
                 setConfigTab('library');
               }}
-              className="flex-1 px-3 py-2.5 hover:opacity-90 rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0 cursor-pointer"
+              className="flex-1 px-2 py-2 hover:opacity-90 rounded-xl font-black text-[11px] flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 shrink-0 cursor-pointer"
               style={{ backgroundColor: theme.frameColor, color: theme.backgroundColor }}
               title={t(lang, 'libraryTitle')}
             >
@@ -221,7 +221,7 @@ export const Header = React.memo<HeaderProps>(({
           {deferredInstallPrompt && (
             <button
               onClick={handleInstallPwa}
-              className="px-2.5 sm:px-3 py-2.5 hover:opacity-90 font-black text-xs rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 animate-bounce shrink-0 cursor-pointer"
+              className="px-2 sm:px-2.5 py-2 hover:opacity-90 font-black text-[11px] rounded-xl shadow-md flex items-center justify-center gap-1.5 transition-all active:scale-95 animate-bounce shrink-0 cursor-pointer"
               style={{ backgroundColor: theme.frameAccentColor, color: theme.backgroundColor }}
               title={t(lang, 'pwaInstallBtn')}
             >
@@ -236,7 +236,7 @@ export const Header = React.memo<HeaderProps>(({
               ref={languageMenuButtonRef}
               type="button"
               onClick={() => setIsLanguageMenuOpen((open) => !open)}
-              className="flex items-center gap-1.5 rounded-xl border border-white/20 hover:opacity-80 px-2.5 sm:px-3 py-2.5 transition-all shadow-md relative z-[1400] active:scale-95 cursor-pointer"
+              className="flex items-center gap-1 rounded-xl border border-white/20 hover:opacity-80 px-2 sm:px-2.5 py-2 transition-all shadow-md relative z-[1400] active:scale-95 cursor-pointer"
               style={{ backgroundColor: theme.contentBackgroundColor + '40', color: theme.textColor }}
               title={selectedLanguage.name}
               aria-label={`Selected language: ${selectedLanguage.name}`}

@@ -24,6 +24,7 @@ import {
   ChevronDown,
   Download
 } from 'lucide-react';
+import { HalloweenSpider } from '../Effects/HalloweenSpider';
 import { QuizConfig, Participant, UserType } from '../../types';
 import { getThemeHeroImage } from '../../utils/themeUtils';
 import { Language, t } from '../../i18n';
@@ -78,7 +79,7 @@ export const SetupView = React.memo<SetupViewProps>(({
               className="grid grid-cols-1 md:grid-cols-12 gap-4 flex-1"
             >
               <div className="md:col-span-5 flex flex-col gap-4">
-                <h2 className="text-indigo-100 text-xs font-bold uppercase tracking-widest px-2 flex items-center gap-2">
+                <h2 className="text-indigo-800 text-xs font-bold uppercase tracking-widest px-2 flex items-center gap-2">
                   <Users className="w-4 h-4" />
                   <span>{t(lang, 'participantsTab')} ({participants.length})</span>
                 </h2>
@@ -247,13 +248,14 @@ export const SetupView = React.memo<SetupViewProps>(({
 
               <div className="md:col-span-7 flex flex-col justify-between p-4 sm:p-6 backdrop-blur-md rounded-[2rem] border border-indigo-200/50 space-y-4" style={{ backgroundColor: theme.contentBackgroundColor, color: theme.textColor }}>
                 <div className="space-y-3">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-transparent rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-indigo-100">
+                  <div className="relative w-16 h-16 sm:w-20 sm:h-20 bg-transparent rounded-[1.5rem] flex items-center justify-center rotate-3 shadow-xl overflow-hidden border border-indigo-100">
                     <img 
-                      src={`${import.meta.env.BASE_URL}src/data/frames/${getThemeHeroImage(quizConfig)}`}
+                      src={getThemeHeroImage(quizConfig)}
                       alt={t(lang, 'familyWalkingAlt')} 
                       referrerPolicy="no-referrer" 
                       className="w-full h-full object-contain" 
                     />
+                    {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && <HalloweenSpider />}
                   </div>
                   <div>
                     <h2 className="text-2xl sm:text-4xl font-black leading-tight drop-shadow-sm">

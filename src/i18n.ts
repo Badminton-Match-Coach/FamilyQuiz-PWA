@@ -177,6 +177,25 @@ const DICTIONARY_OVERRIDES: Record<string, Partial<Record<Language, string>>> = 
     it: 'Io',
     es: 'Yo'
   },
+  moreLabel: {
+    sv: 'MER & DELA',
+    en: 'MORE & SHARE',
+    nl: 'MEER & DELEN',
+    be: 'MEER & DELEN',
+    no: 'MER & DEL',
+    da: 'MERE & DEL',
+    fi: 'LISÄÄ & JAA',
+    is: 'FLEIRA & DEILA',
+    se: 'EAIT & JUOGE',
+    et: 'ROHKEM & JAGA',
+    lv: 'VAIRĀK & KOPĪGOT',
+    lt: 'DAUGIAU & DALINTIS',
+    uk: 'БІЛЬШЕ & ПОДІЛИТИСЯ',
+    de: 'MEHR & TEILEN',
+    fr: 'PLUS & PARTAGER',
+    it: 'ALTRO & CONDIVIDI',
+    es: 'MÁS & COMPARTIR'
+  },
   submitAnswersClipboardHint: {
     sv: 'kopierar till urklipp',
     en: 'copies to clipboard',

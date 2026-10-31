@@ -38,6 +38,7 @@ import {
 import { getQuestionAvailableLanguages } from '../../utils/quizLanguages';
 import { getOptionLabel } from '../../utils/imageAndLabelUtils';
 import { OfflineImage } from '../Common/OfflineImage';
+import { HalloweenSpider } from '../Effects/HalloweenSpider';
 
 import { AnswerRecord } from '../../types';
 import { THEMES } from '../../data/themes';
@@ -670,7 +671,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <p className="font-black text-lg sm:text-xl text-slate-800 truncate">{p.name}</p>
-                                  <span className="text-[10px] font-black uppercase text-slate-400">{p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}</span>
+                                  <span className="text-[10px] font-black uppercase text-slate-600">{p.type === 'barn' ? t(lang, 'kid') : t(lang, 'adult')}</span>
                                 </div>
                                 {hasAnswered && (
                                   <div className={`absolute top-2 right-2 sm:top-4 sm:right-4 text-[8px] sm:text-[10px] font-black px-2 py-0.5 sm:py-1 rounded-lg uppercase flex items-center gap-1 ${
@@ -770,6 +771,12 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                               boxShadow: `inset 0 0 0 4px ${theme.backgroundColor}, inset 0 0 0 7px ${theme.frameAccentColor}, 0 10px 30px rgba(0,0,0,0.5)`
                             }}
                           >
+                            {(quizConfig.themeId === 'halloween' || quizConfig.barnThemeId === 'halloween' || quizConfig.vuxenThemeId === 'halloween') && (
+                              <>
+                                <HalloweenSpider />
+                                <div className="halloween-spider-thread"></div>
+                              </>
+                            )}
                             {/* Big Decorative Number */}
                             <div className="absolute -top-10 -right-10 opacity-[0.1] pointer-events-none text-[12rem] font-black text-[#5d4037] select-none">
                               {selectedQuestionIndex! + 1}

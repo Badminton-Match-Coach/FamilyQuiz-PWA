@@ -5,6 +5,11 @@
 
 import { QuizConfig, Question, UserType } from '../types';
 import { THEMES } from '../data/themes';
+import familyQuizImage from '../data/frames/HelFamilj.webp';
+import halloweenQuizImage from '../data/frames/halloween_quiz.webp';
+import kidsQuizImage from '../data/frames/kids_quiz.webp';
+import musicQuizImage from '../data/frames/music_quiz.webp';
+import rallyQuizImage from '../data/frames/rally_quiz.webp';
 
 export const getActiveTheme = (question: Question | null, category: UserType, config: QuizConfig) => {
     const categoryThemeId = category === 'barn' ? config.barnThemeId : config.vuxenThemeId;
@@ -15,13 +20,16 @@ export const getActiveTheme = (question: Question | null, category: UserType, co
 };
 export const getThemeHeroImage = (config: QuizConfig) => {
     if (config.themeId === 'halloween' || config.barnThemeId === 'halloween' || config.vuxenThemeId === 'halloween') {
-        return 'halloween_quiz.webp';
+        return halloweenQuizImage;
     }
     if (config.themeId === 'music' || config.barnThemeId === 'music' || config.vuxenThemeId === 'music') {
-        return 'music_quiz.webp';
+        return musicQuizImage;
     }
     if (config.themeId === 'rally' || config.barnThemeId === 'rally' || config.vuxenThemeId === 'rally') {
-        return 'rally_quiz.webp';
+        return rallyQuizImage;
     }
-    return 'HelFamilj.webp';
+    if (config.themeId === 'kids' || config.barnThemeId === 'kids' || config.vuxenThemeId === 'kids') {
+        return kidsQuizImage;
+    }
+    return familyQuizImage;
 };

@@ -1,0 +1,165 @@
+{
+  "title": "Introduktionstips/Introductory (Svenska/English)",
+  "description": "Exempelquiz med frågor för både barn och vuxna.",
+  "timeLimit": 0,
+  "barnQuestions": [
+    {
+      "id": "intro-barn-1",
+      "text": "Vilken färg har en mogen banan?",
+      "options": [
+        "Röd",
+        "Gul",
+        "Blå"
+      ],
+      "explanation": "Mogna bananer är gula.",
+      "category": "Natur",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "What color is a ripe banana?",
+          "options": [
+            "Red",
+            "Yellow",
+            "Blue"
+          ]
+        }
+      }
+    },
+    {
+      "id": "intro-barn-2",
+      "text": "Vilket djur jamar?",
+      "options": [
+        "Hund",
+        "Katt",
+        "Ko"
+      ],
+      "explanation": "Katter säger mjau och jamar.",
+      "category": "Djur",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "Which animal meows?",
+          "options": [
+            "Dog",
+            "Cat",
+            "Cow"
+          ]
+        }
+      }
+    },
+    {
+      "id": "intro-barn-3",
+      "text": "Hur många ben har en spindel?",
+      "options": [
+        "6",
+        "8",
+        "10"
+      ],
+      "explanation": "Spindlar har åtta ben, medan insekter har sex ben.",
+      "category": "Natur",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "How many legs does a spider have?",
+          "options": [
+            "6",
+            "8",
+            "10"
+          ]
+        }
+      }
+    }
+  ],
+  "vuxenQuestions": [
+    {
+      "id": "intro-vuxen-1",
+      "text": "Vilket år föll Berlinmuren?",
+      "options": [
+        "1987",
+        "1989",
+        "1991"
+      ],
+      "explanation": "Berlinmuren öppnades den 9 november 1989.",
+      "category": "Historia",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "What year did the Berlin Wall fall?",
+          "options": [
+            "1987",
+            "1989",
+            "1991"
+          ]
+        }
+      }
+    },
+    {
+      "id": "intro-vuxen-2",
+      "text": "Vilket är det kemiska tecknet för guld?",
+      "options": [
+        "Ag",
+        "Au",
+        "Fe"
+      ],
+      "explanation": "Au kommer från det latinska ordet Aurum.",
+      "category": "Vetenskap",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "What is the chemical symbol for gold?",
+          "options": [
+            "Ag",
+            "Au",
+            "Fe"
+          ]
+        }
+      }
+    },
+    {
+      "id": "intro-vuxen-3",
+      "text": "Vilken planet i vårt solsystem är störst?",
+      "options": [
+        "Mars",
+        "Jupiter",
+        "Saturnus"
+      ],
+      "explanation": "Jupiter är solsystemets överlägset största planet.",
+      "category": "Astronomi",
+      "type": "options",
+      "correctAnswers": [
+        1
+      ],
+      "originalLanguage": "sv",
+      "translations": {
+        "en": {
+          "text": "Which planet in our solar system is the largest?",
+          "options": [
+            "Mars",
+            "Jupiter",
+            "Saturn"
+          ]
+        }
+      }
+    }
+  ]
+}

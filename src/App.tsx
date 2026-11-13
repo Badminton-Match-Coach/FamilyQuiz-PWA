@@ -3815,7 +3815,7 @@ ${exampleJson}`;
   return (
     <ThemeProvider theme={activeTheme}>
     <div 
-      className="min-h-screen font-sans p-2 sm:p-3 md:p-6 flex flex-col transition-colors duration-300"
+      className="min-h-screen font-sans p-1.5 sm:p-3 md:p-4 flex flex-col transition-colors duration-300"
       style={{ backgroundColor: activeTheme.backgroundColor, color: activeTheme.textColor }}
     >
       {languageMenuPortal}
@@ -3824,14 +3824,14 @@ ${exampleJson}`;
           href={cachedAppUrl}
           target="_blank"
           rel="noreferrer"
-          className="block max-w-5xl mx-auto px-2 py-1.5 text-center text-[8px] sm:text-[10px] font-black tracking-[0.08em] text-indigo-100 hover:text-white transition-colors truncate"
+          className="block max-w-7xl mx-auto px-2 py-1.5 text-center text-[8px] sm:text-[10px] font-black tracking-[0.08em] text-indigo-100 hover:text-white transition-colors truncate"
           title={cachedAppUrl}
         >
           {cachedAppUrl}
         </a>
       </div>
 
-      <div className="max-w-5xl mx-auto w-full flex flex-col flex-1 pt-7 sm:pt-9">
+      <div className="max-w-7xl mx-auto w-full flex flex-col flex-1 pt-7 sm:pt-9">
         {/* Messenger & Instagram In-App Browser Breakout Modal / Banner */}
         <InAppBreakoutModal lang={lang} />
 

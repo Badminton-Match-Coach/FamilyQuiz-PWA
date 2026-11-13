@@ -115,7 +115,7 @@ export const ResultsView = React.memo<ResultsViewProps>(({
               key="results"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="relative max-w-2xl mx-auto w-full space-y-4"
+              className="relative max-w-5xl mx-auto w-full space-y-4"
             >
               {quizConfig.effectId && <QuizEffect effectId={quizConfig.effectId} />}
               {viewingParticipantId ? (

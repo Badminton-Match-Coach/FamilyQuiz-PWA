@@ -126,7 +126,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col gap-4 flex-1 max-w-5xl mx-auto w-full"
+              className="flex flex-col gap-4 flex-1 max-w-7xl mx-auto w-full"
             >
               {selectedQuestionIndex === null ? (
                 /* Unified Overview View: Map + Unified Question Selection */
@@ -758,11 +758,13 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
 
                         return (
                           <div 
-                            className="relative z-10 p-16 sm:p-24 flex flex-col flex-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+                            className={`relative z-10 flex flex-col flex-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)] ${
+                              theme.frameImageUrl ? 'p-1.5 sm:p-2.5 md:p-3' : 'p-3 sm:p-4 md:p-5'
+                            }`}
                             style={theme.frameImageUrl ? {
                               backgroundColor: theme.backgroundColor,
-                              border: 'clamp(40px, 9vw, 80px) solid transparent',
-                              borderImage: `url(${theme.frameImageUrl}) 215 fill / clamp(40px, 9vw, 80px) stretch`,
+                              border: 'clamp(16px, 4vw, 40px) solid transparent',
+                              borderImage: `url(${theme.frameImageUrl}) 215 fill / clamp(16px, 4vw, 40px) stretch`,
                               filter: 'drop-shadow(0 10px 20px rgba(0,0,0,0.5))'
                             } : {
                               backgroundColor: theme.backgroundColor,
@@ -773,7 +775,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                           >
                             {quizConfig.effectId && <QuizEffect effectId={quizConfig.effectId} />}
                             {/* Big Decorative Number */}
-                            <div className="absolute -top-10 -right-10 opacity-[0.1] pointer-events-none text-[12rem] font-black text-[#5d4037] select-none">
+                            <div className="absolute -top-4 right-2 sm:-top-6 sm:right-4 opacity-[0.1] pointer-events-none text-[7rem] sm:text-[10rem] font-black text-[#5d4037] select-none leading-none">
                               {selectedQuestionIndex! + 1}
                             </div>
                             <div className="flex-1 flex flex-col relative">
@@ -818,7 +820,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                         return (
                           <>
                             <div 
-                              className="mb-4 sm:mb-6 relative p-6 rounded-2xl"
+                              className="mb-3 sm:mb-4 relative p-3 sm:p-4 md:p-5 rounded-xl sm:rounded-2xl"
                               style={{ backgroundColor: theme.contentBackgroundColor, color: theme.textColor }}
                             >
                               <div className="flex items-center gap-3 mb-2 flex-wrap">
@@ -983,7 +985,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                             </div>
 
                             {activeQ.type === 'points' ? (
-                              <div className="bg-indigo-50/80 border-4 border-indigo-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">
+                              <div className="bg-indigo-50/80 border-4 border-indigo-200 rounded-2xl sm:rounded-[1.75rem] p-3.5 sm:p-5 space-y-4 text-center shadow-lg">
                                 <div className="space-y-1">
                                   <div className="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm">
                                     <Trophy className="w-4 h-4" />
@@ -1093,7 +1095,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                 </button>
                               </div>
                             ) : activeQ.type === 'ladder' ? (
-                              <div className="bg-purple-50/80 border-4 border-purple-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">
+                              <div className="bg-purple-50/80 border-4 border-purple-200 rounded-2xl sm:rounded-[1.75rem] p-3 sm:p-5 space-y-4 text-center shadow-lg">
                                 <div className="space-y-1">
                                   <div className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm">
                                     <span>🪜</span>
@@ -1111,13 +1113,13 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   const currentPoints = ladderPoints[currentRevealed] || Math.max(1, 10 - currentRevealed * 3);
 
                                   return (
-                                    <div className="space-y-4 max-w-lg mx-auto">
+                                    <div className="space-y-3 w-full">
                                       {/* Revealed Clues List */}
-                                      <div className="space-y-3 text-left">
+                                      <div className="space-y-2.5 text-left">
                                         {clues.slice(0, currentRevealed + 1).map((clueText, cIdx) => {
                                           const pts = ladderPoints[cIdx] || Math.max(1, 10 - cIdx * 3);
                                           return (
-                                            <div key={cIdx} className="p-4 bg-white border-2 border-purple-300 rounded-2xl shadow-sm flex items-start gap-3">
+                                            <div key={cIdx} className="p-3 sm:p-4 bg-white border-2 border-purple-300 rounded-xl sm:rounded-2xl shadow-sm flex items-start gap-2.5 sm:gap-3">
                                               <span className="w-8 h-8 bg-purple-600 text-white rounded-xl flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
                                                 #{cIdx + 1}
                                               </span>
@@ -1205,7 +1207,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                 })()}
                               </div>
                             ) : activeQ.type === 'text' ? (
-                              <div className="bg-sky-50/80 border-4 border-sky-200 rounded-[2rem] p-6 sm:p-8 space-y-6 text-center shadow-lg">
+                              <div className="bg-sky-50/80 border-4 border-sky-200 rounded-2xl sm:rounded-[1.75rem] p-3.5 sm:p-5 space-y-4 text-center shadow-lg">
                                 <div className="space-y-1">
                                   <div className="inline-flex items-center gap-2 bg-sky-600 text-white px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider shadow-sm">
                                     <span>🔤</span>
@@ -1216,7 +1218,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                   </p>
                                 </div>
 
-                                <div className="space-y-3 max-w-md mx-auto">
+                                <div className="space-y-3 w-full">
                                   <input
                                     type="text"
                                     disabled={isParticipantAnswered}
@@ -1263,7 +1265,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                 </button>
                               </div>
                             ) : (
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 flex-1">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3.5 flex-1">
                                 {activeQ.options.map((opt, idx) => {
                                   const colors = ['border-rose-500 bg-rose-50 text-rose-600 hover:bg-rose-100', 'border-amber-500 bg-amber-50 text-amber-600 hover:bg-amber-100', 'border-emerald-500 bg-emerald-50 text-emerald-600 hover:bg-emerald-100', 'border-sky-500 bg-sky-50 text-sky-600 hover:bg-sky-100'];
                                   const color = colors[idx % colors.length];
@@ -1276,7 +1278,7 @@ export const QuizWalkView = React.memo<QuizWalkViewProps>(({
                                       key={idx}
                                       disabled={isParticipantAnswered}
                                       onClick={() => !isParticipantAnswered && submitAnswer(idx)}
-                                      className={`p-3.5 sm:p-5 rounded-[1.5rem] sm:rounded-[2rem] border-4 flex flex-col sm:flex-row items-center justify-between text-left text-base sm:text-lg font-black transition-all gap-3 ${
+                                      className={`p-3 sm:p-4 rounded-2xl sm:rounded-3xl border-4 flex flex-col sm:flex-row items-center justify-between text-left text-base sm:text-lg font-black transition-all gap-3 ${
                                         isParticipantAnswered
                                           ? isCurrentAnswer
                                             ? 'ring-4 ring-indigo-600 ring-offset-4 bg-indigo-100/90 border-indigo-500 text-indigo-950 cursor-default shadow-md'

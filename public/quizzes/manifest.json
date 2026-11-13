@@ -1,20 +1,11 @@
 [
   {
-    "id": "intro-sv",
-    "title": "Introduktionstips (Svenska)",
-    "description": "Klassisk tipspromenad med 3 barnfrågor och 3 vuxenfrågor.",
-    "filename": "intro_sv.json",
+    "id": "intro",
+    "title": "Introduktionstips/Introductory (Svenska/English)",
+    "description": "Exempelquiz med frågor för både barn och vuxna.",
+    "filename": "intro.json",
     "barnCount": 3,
     "vuxenCount": 3,
     "language": "sv"
-  },
-  {
-    "id": "intro-en",
-    "title": "Introductory Quiz (English)",
-    "description": "Standard quiz trail with 3 kids questions and 3 adult questions.",
-    "filename": "intro_en.json",
-    "barnCount": 3,
-    "vuxenCount": 3,
-    "language": "en"
   }
 ]

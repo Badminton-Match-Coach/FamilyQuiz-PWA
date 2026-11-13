@@ -89,6 +89,20 @@
 'use strict';
 const TYPES = { options:'Flerval', text:'Fritext', points:'Poäng', ladder:'Ledtrådsstege' };
 const GROUPS = { barnQuestions:'Barn', vuxenQuestions:'Vuxen' };
+const THEMES = [
+  ['default', 'Standard'],
+  ['halloween', 'Halloween'],
+  ['party', 'Fest'],
+  ['kids', 'Barn'],
+  ['rally', 'Tipspromenad'],
+  ['music', 'Musik'],
+  ['treasurehunt', 'Skattjakt']
+];
+const EFFECTS = [
+  ['spider', 'Spindel'],
+  ['easter-witch', 'Påskkärringar'],
+  ['santa', 'Tomtar']
+];
 const FS = 'showDirectoryPicker' in window;
 const APP_LOGO = new URL('../Quiz/icon.png', location.href).href;
 const S = { dir:null, items:[], manifest:{ list:[], wrap:null }, cur:null, lang:'', group:'barnQuestions', dirty:false, open:new Set(), logoPreview:null };
@@ -157,6 +171,31 @@ function fileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error(tr('Kunde inte läsa bildfilen')));
+    reader.readAsDataURL(file);
+  });
+}
+function compressImageFile(file, maxWidth = 800, maxHeight = 800, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') { reject(new Error(tr('Kunde inte läsa bildfilen'))); return; }
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const scale = Math.min(1, maxWidth / image.width, maxHeight / image.height);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(image.width * scale);
+          canvas.height = Math.round(image.height * scale);
+          const context = canvas.getContext('2d');
+          if (!context) { resolve(reader.result); return; }
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (error) { reject(error); }
+      };
+      image.onerror = () => reject(new Error(tr('Kunde inte läsa bildfilen')));
+      image.src = reader.result;
+    };
     reader.onerror = () => reject(reader.error || new Error(tr('Kunde inte läsa bildfilen')));
     reader.readAsDataURL(file);
   });
@@ -230,6 +269,14 @@ function input(obj, key, o = {}) {
   return e;
 }
 const field = (label, ctl) => el('label', { class: 'f' }, el('span', {}, label), ctl);
+function themeSelect(value, onChange, inheritLabel = 'Använd quizets tema') {
+  const select = el('select', {},
+    el('option', { value: '' }, inheritLabel),
+    ...THEMES.map(([id, label]) => el('option', { value: id, selected: value === id }, label)));
+  select.value = value || '';
+  select.addEventListener('change', () => onChange(select.value || undefined));
+  return select;
+}
 
 const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
 const AI_KEY_STORAGE = 'bgl_quiz_editor_gemini_api_key';
@@ -625,9 +672,12 @@ function ensureType(q) {
 }
 function normalize(raw) {
   const quiz = quizOf(raw);
+  const migratedEffect = quiz.effectId === 'easter';
+  if (migratedEffect) quiz.effectId = 'easter-witch';
   for (const g of Object.keys(GROUPS)) { if (!Array.isArray(quiz[g])) quiz[g] = []; quiz[g].forEach(ensureType); }
+  return migratedEffect;
 }
-const newQuestion = () => ensureType({ type: 'options', text: '', options: ['', '', ''], correctAnswers: [0] });
+const newQuestion = () => ensureType({ type: 'options', text: '', options: ['', '', ''], correctAnswers: [0], originalLanguage: UI_LANG });
 
 /* ---------- lista och inläsning ---------- */
 const looksLikeQuiz = raw => { const q = quizOf(raw); return q && typeof q === 'object' && (Array.isArray(q.barnQuestions) || Array.isArray(q.vuxenQuestions)); };
@@ -682,9 +732,9 @@ async function openQuiz(filename) {
     const text = S.dir ? await readDirFile(filename) : await (await fetch(filename + '?_t=' + Date.now())).text();
     const raw = parseJson(text);
     if (!looksLikeQuiz(raw)) throw new Error(tr('Filen ser inte ut som en quiz'));
-    normalize(raw);
+    const migratedEffect = normalize(raw);
     S.cur = { filename, raw, isNew: false };
-    S.dirty = false; $('save').disabled = true;
+    S.dirty = migratedEffect; $('save').disabled = !migratedEffect;
     renderList(); renderEditor();
   } catch (e) { toast('Kunde inte öppna {0}: {1}', filename, e.message); }
 }
@@ -725,20 +775,75 @@ function renderEditor() {
   strict.addEventListener('change', () => { if (strict.value) quiz.textMatchStrictness = strict.value; else delete quiz.textMatchStrictness; markDirty(); });
   const seq = el('input', { type: 'checkbox', checked: !!quiz.requireSequentialAnswers });
   seq.addEventListener('change', () => { quiz.requireSequentialAnswers = seq.checked; markDirty(); });
+  const effect = el('select', {},
+    el('option', { value: '' }, 'Ingen effekt'),
+    ...EFFECTS.map(([id, label]) => el('option', { value: id, selected: quiz.effectId === id }, label)));
+  effect.value = quiz.effectId || '';
+  effect.addEventListener('change', () => {
+    if (effect.value) quiz.effectId = effect.value; else delete quiz.effectId;
+    markDirty();
+  });
+  const geotagDistanceInput = input(quiz, 'geotagUnlockDistance', { type: 'number' });
+  geotagDistanceInput.min = '5';
+  geotagDistanceInput.step = '1';
+  geotagDistanceInput.value = quiz.geotagUnlockDistance ?? 20;
+  geotagDistanceInput.setAttribute('aria-labelledby', 'geotagDistanceLabel');
+  const geotagDistances = [5, 10, 15, 20, 35, 50];
+  const geotagDistancePresets = geotagDistances.map(meters =>
+    el('button', {
+      type: 'button',
+      class: `sm${Number(geotagDistanceInput.value) === meters ? ' pri' : ''}`,
+      onclick: () => {
+        quiz.geotagUnlockDistance = meters;
+        geotagDistanceInput.value = meters;
+        updateGeotagDistancePresets();
+        markDirty();
+      }
+    }, `${meters} m${meters === 20 ? ` ${tr('(standard)')}` : ''}`));
+  function updateGeotagDistancePresets() {
+    geotagDistancePresets.forEach((button, index) => {
+      button.className = `sm${Number(geotagDistanceInput.value) === geotagDistances[index] ? ' pri' : ''}`;
+    });
+  }
+  geotagDistanceInput.addEventListener('input', updateGeotagDistancePresets);
+  geotagDistanceInput.addEventListener('blur', () => {
+    const enteredValue = Number.parseInt(geotagDistanceInput.value, 10);
+    const distance = Number.isFinite(enteredValue) ? Math.max(5, enteredValue) : 20;
+    geotagDistanceInput.value = distance;
+    quiz.geotagUnlockDistance = distance;
+    updateGeotagDistancePresets();
+    markDirty();
+  });
   sb.append(
-    el('div', { class: 'grid2' },
-      field('Tidsgräns (minuter, 0 = ingen)', input(quiz, 'timeLimit', { type: 'number' })),
-      field('Quiz-lösenord (facit)', input(quiz, 'password', { optional: true }))),
+    field('Quiz-lösenord (facit)', input(quiz, 'password', { optional: true })),
     el('div', { class: 'mut' },
-      'Detta lösenord används i appen för att låsa upp facit och slutresultat. Om fältet lämnas tomt låses facit normalt upp automatiskt när alla deltagare har svarat. Det är inte samma lösenord som appens adminlösenord för att öppna Redigera/Inställningar.'),
+      'Detta lösenord används i appen för att låsa upp facit och slutresultat. Om fältet lämnas tomt låses facit upp när alla deltagare har svarat. Det är inte samma lösenord som appens adminlösenord för att öppna Redigera/Inställningar.'),
     field('Logotyp (URL)', el('div', { class: 'logo-field' },
       input(quiz, 'logoUrl', { optional: true, after: () => updateLogoPreview(quiz.logoUrl) }),
       el('button', { type: 'button', onclick: event => { event.preventDefault(); chooseLogo(quiz, event.currentTarget.parentElement.querySelector('input')); } }, 'Välj logga…'))),
     el('div', { class: 'logo-preview' }, el('img', { id: 'quizLogoPreview', alt: 'Förhandsvisning av quizets logotyp' })),
     el('div', { class: 'grid2' },
-      field('Upplåsningsavstånd för platsfrågor (m)', input(quiz, 'geotagUnlockDistance', { type: 'number' })),
+      el('div', { class: 'f' },
+        el('span', { id: 'geotagDistanceLabel' }, 'Upplåsningsavstånd för platsfrågor (m)'),
+        geotagDistanceInput,
+        el('div', { class: 'bar' }, geotagDistancePresets)),
       field('Textmatchning', strict)),
+    field('Quiztema', themeSelect(quiz.themeId, value => {
+      if (value) quiz.themeId = value; else delete quiz.themeId;
+      markDirty();
+    }, 'Standardtema')),
+    field('Effekter', effect),
+    el('div', { class: 'mut' }, 'Välj en dekoration som visas för både barn och vuxna, oavsett quizets tema.'),
     el('label', { class: 'row' }, seq, 'Frågorna måste besvaras i ordning'));
+  sb.append(el('div', { class: 'grid2' },
+    field('Tema för barnfrågor', themeSelect(quiz.barnThemeId, value => {
+      if (value) quiz.barnThemeId = value; else delete quiz.barnThemeId;
+      markDirty();
+    })),
+    field('Tema för vuxenfrågor', themeSelect(quiz.vuxenThemeId, value => {
+      if (value) quiz.vuxenThemeId = value; else delete quiz.vuxenThemeId;
+      markDirty();
+    }))));
   set.append(sb); ed.append(set);
   updateLogoPreview(quiz.logoUrl);
 
@@ -810,7 +915,27 @@ function questionRows(list) {
 }
 
 function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollowUp: false }) {
-  const q = list[i];
+  const sourceQuestion = list[i];
+  const quiz = quizOf(S.cur.raw);
+  const otherGroup = S.group === 'barnQuestions' ? 'vuxenQuestions' : 'barnQuestions';
+  const q = new Proxy(sourceQuestion, {
+    set(target, key, value) {
+      target[key] = value;
+      if (key !== 'themeId') {
+        const sharedQuestion = quiz[otherGroup].find(question => question.id === target.id);
+        if (sharedQuestion && sharedQuestion !== target) sharedQuestion[key] = value;
+      }
+      return true;
+    },
+    deleteProperty(target, key) {
+      delete target[key];
+      if (key !== 'themeId') {
+        const sharedQuestion = quiz[otherGroup].find(question => question.id === target.id);
+        if (sharedQuestion && sharedQuestion !== target) delete sharedQuestion[key];
+      }
+      return true;
+    }
+  });
   const lang = S.lang && S.lang !== (q.originalLanguage || 'sv') ? S.lang : '';
   const label = () => {
     const shown = lang ? (q.translations?.[lang]?.text || q.text) : q.text;
@@ -831,15 +956,42 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
     return d;
   }
 
+  const otherGroupToggle = el('input', {
+    type: 'checkbox',
+    checked: quiz[otherGroup].some(question => question.id === q.id)
+  });
+  otherGroupToggle.addEventListener('change', () => {
+    const otherQuestions = quiz[otherGroup];
+    const otherIndex = otherQuestions.findIndex(question => question.id === q.id);
+    if (otherGroupToggle.checked && otherIndex === -1) {
+      otherQuestions.push({ ...q });
+    } else if (!otherGroupToggle.checked && otherIndex !== -1) {
+      otherQuestions.splice(otherIndex, 1);
+    }
+    markDirty();
+    renderEditor();
+  });
+  body.append(el('label', { class: 'row' }, otherGroupToggle, otherGroup === 'barnQuestions' ? tr('Även för barn') : tr('Även för vuxna')));
+
   const sel = el('select', {}, ...Object.entries(TYPES).map(([v, t]) => el('option', { value: v, selected: q.type === v }, t)));
   sel.addEventListener('change', () => { q.type = sel.value; ensureType(q); markDirty(); S.open.add(q.id); renderEditor(); });
   body.append(el('div', { class: 'grid2' }, field('Frågetyp', sel), field('Bild (URL eller filnamn)', input(q, 'imageUrl', { optional: true }))));
   body.append(field('Frågetext', input(q, 'text', { area: true, after: retag })));
+  body.append(field('Tema för frågan', themeSelect(q.themeId, value => {
+    if (value) q.themeId = value; else delete q.themeId;
+    markDirty();
+  })));
+  if (q.type === 'options' || q.type === 'text') {
+    const pointsValue = input(q, 'pointsValue', { type: 'number' });
+    pointsValue.min = '0';
+    pointsValue.value = q.pointsValue ?? 1;
+    body.append(field('Poängvärde', pointsValue));
+  }
 
   if (q.type === 'options') body.append(optionsEditor(q));
   if (q.type === 'text' || q.type === 'ladder') {
     body.append(field('Rätt svar', input(q, 'correctTextAnswer')));
-    const acc = el('input', { type: 'text', placeholder: 'Alternativa svar, kommaseparerade', value: (q.acceptedTextAnswers || []).join(', ') });
+    const acc = el('input', { type: 'text', placeholder: tr('Alternativa svar, kommaseparerade'), value: (q.acceptedTextAnswers || []).join(', ') });
     acc.addEventListener('input', () => { const a = acc.value.split(',').map(s => s.trim()).filter(Boolean); if (a.length) q.acceptedTextAnswers = a; else delete q.acceptedTextAnswers; markDirty(); });
     body.append(field('Godkända alternativ', acc));
   }
@@ -849,8 +1001,8 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   const latIn = locInput(q, 'lat', true), lngIn = locInput(q, 'lng', true), nameIn = locInput(q, 'name', false);
   const coordinatesIn = el('input', {
     type: 'text',
-    placeholder: 't.ex. [56,2432187, 12,8614824] eller OpenStreetMap-länk',
-    'aria-label': 'Klistra in koordinater eller OpenStreetMap-länk'
+    placeholder: tr('t.ex. [56,2432187, 12,8614824] eller OpenStreetMap-länk'),
+    'aria-label': tr('Klistra in koordinater eller OpenStreetMap-länk')
   });
   const useCoordinates = () => {
     const coordinates = parseCoordinates(coordinatesIn.value);
@@ -884,9 +1036,9 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
   });
   const followUpMode = el('select', { disabled: !q.followUpQuestionId },
     ...[
-      ['always', 'Alltid'],
-      ['correct', 'Endast vid rätt svar'],
-      ['incorrect', 'Endast vid fel svar']
+      ['always', tr('Alltid')],
+      ['correct', tr('Endast vid rätt svar')],
+      ['incorrect', tr('Endast vid fel svar')]
     ].map(([value, label]) => el('option', { value, selected: (q.followUpMode || 'always') === value }, label)));
   followUpMode.value = q.followUpMode || 'always';
   followUpMode.addEventListener('change', () => {
@@ -894,12 +1046,29 @@ function questionCard(list, i, row = { number: String(i + 1), depth: 0, isFollow
     markDirty();
   });
   const mapBox = el('div', { class: 'locmap' });
+  const hideLocation = el('input', { type: 'checkbox', checked: !!q.hideLocationOnMap || !!q.location?.hideOnMap });
+  const hideLocationRow = el('label', { class: 'row', hidden: !q.location },
+    hideLocation, tr('Dölj platsen på deltagarkartan (skattjakt)'));
+  hideLocation.addEventListener('change', () => {
+    if (!q.location) return;
+    q.hideLocationOnMap = hideLocation.checked;
+    q.location.hideOnMap = hideLocation.checked;
+    markDirty();
+  });
+  const syncHideLocation = () => {
+    hideLocationRow.hidden = !q.location;
+    hideLocation.disabled = !q.location;
+    hideLocation.checked = !!q.hideLocationOnMap || !!q.location?.hideOnMap;
+  };
+  latIn.addEventListener('input', syncHideLocation);
+  lngIn.addEventListener('input', syncHideLocation);
   const loc = el('details', { ontoggle: e => { if (e.target.open) initLocationLink(mapBox, latIn, lngIn); } },
     el('summary', {}, 'Plats (valfritt)'),
     el('div', { class: 'body' },
       field('Klistra in koordinater', el('div', { class: 'row coordinate-entry' }, coordinatesIn, coordinatesButton)),
       el('div', { class: 'grid2' }, field('Latitud', latIn), field('Longitud', lngIn), field('Platsnamn', nameIn)),
       mapBox,
+      hideLocationRow,
       el('section', { class: 'follow-up' },
         el('h3', {}, 'Följdfråga'),
         el('p', { class: 'mut' }, 'Välj en fråga som ska visas efter den här frågan och när den ska visas.'),
@@ -963,6 +1132,17 @@ function translationEditor(q, lang, retag) {
 function optionsEditor(q) {
   const box = el('div', {}, el('div', { class: 'mut' }, 'Bocka i rätt svar (flera går bra).'));
   const rows = el('div');
+  const setOptionImage = (index, value) => {
+    const currentImages = Array.isArray(q.optionImages) ? q.optionImages : [];
+    const images = Array.from(
+      { length: Math.max(index + 1, currentImages.length) },
+      (_, imageIndex) => currentImages[imageIndex] || ''
+    );
+    images[index] = value.trim();
+    if (images.some(Boolean)) q.optionImages = images;
+    else delete q.optionImages;
+    markDirty();
+  };
   const draw = () => {
     rows.replaceChildren();
     q.options.forEach((o, r) => {
@@ -977,7 +1157,47 @@ function optionsEditor(q) {
         for (const t of Object.values(q.translations || {})) if (Array.isArray(t.options)) t.options.splice(r, 1);
         markDirty(); draw();
       } }, '✕');
-      rows.append(el('div', { class: 'row' }, chk, txt, rm));
+      const imageInput = el('input', {
+        type: 'text',
+        value: Array.isArray(q.optionImages) ? q.optionImages[r] || '' : '',
+        placeholder: tr('Svarbild (URL eller data-URL)'),
+        'aria-label': tr('Svarbild för alternativ {0}', r + 1)
+      });
+      const preview = el('img', {
+        alt: tr('Förhandsvisning av svarbild {0}', r + 1),
+        hidden: true,
+        style: 'width:48px;height:48px;object-fit:cover;border:1px solid #cbd5e1;border-radius:8px'
+      });
+      const updatePreview = () => {
+        const value = imageInput.value.trim();
+        if (!value) { preview.hidden = true; preview.removeAttribute('src'); return; }
+        try { preview.src = new URL(value, dirUrl()).href; preview.hidden = false; }
+        catch { preview.hidden = true; }
+      };
+      preview.onerror = () => { preview.hidden = true; };
+      imageInput.addEventListener('input', () => { setOptionImage(r, imageInput.value); updatePreview(); });
+      const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        try {
+          const dataUrl = await compressImageFile(file);
+          imageInput.value = dataUrl;
+          setOptionImage(r, dataUrl);
+          updatePreview();
+        } catch (error) { toast('Kunde inte läsa bildfilen: {0}', error instanceof Error ? error.message : String(error)); }
+        finally { fileInput.value = ''; }
+      });
+      const chooseImage = el('button', {
+        class: 'sm',
+        type: 'button',
+        onclick: () => fileInput.click()
+      }, tr('Välj bild…'));
+      updatePreview();
+      rows.append(
+        el('div', { class: 'row' }, chk, txt, rm),
+        el('div', { class: 'row coordinate-entry' }, imageInput, chooseImage, preview, fileInput)
+      );
     });
   };
   draw();

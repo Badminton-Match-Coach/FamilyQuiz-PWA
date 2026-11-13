@@ -343,7 +343,12 @@ export const SetupView = React.memo<SetupViewProps>(({
                   </button>
                   <button 
                     onClick={() => setShowHowItWorks(true)}
-                    className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-sm uppercase border border-white/20 transition-all flex items-center justify-center gap-2"
+                    className="w-full py-3 hover:opacity-90 rounded-xl font-bold text-sm uppercase border transition-all flex items-center justify-center gap-2"
+                    style={{
+                      backgroundColor: theme.textColor,
+                      color: theme.contentBackgroundColor,
+                      borderColor: theme.textColor,
+                    }}
                   >
                     <HelpCircle className="w-4 h-4" />
                     <span>{t(lang, 'howItWorksBtn')}</span>

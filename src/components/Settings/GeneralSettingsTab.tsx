@@ -300,7 +300,7 @@ export const GeneralSettingsTab: React.FC<GeneralSettingsTabProps> = ({
                             placeholder={t(lang, 'newPasswordPlaceholder')}
                             className={`w-full p-3 border rounded-xl text-sm font-mono outline-none transition-all ${
                               isAdmin 
-                                ? 'bg-white border-slate-200 focus:border-indigo-500 shadow-sm' 
+                                ? 'bg-white text-slate-800 border-slate-200 focus:border-indigo-500 shadow-sm'
                                 : 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed'
                             }`}
                             value={newQuizPassword}

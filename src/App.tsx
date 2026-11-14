@@ -521,6 +521,8 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
     }
 
     // Question is non-geotagged or within unlock radius -> open question!
+    setTextInputValue('');
+    setPointsInputValue(0);
     setSelectedQuestionIndex(idx);
     setSelectedParticipantId(
       isFollowUp ? activePartId : participants.length === 1 ? participants[0].id : null
@@ -989,6 +991,11 @@ const [pendingQuestionIndex, setPendingQuestionIndex] = useState<number | null>(
 
   const [pointsInputValue, setPointsInputValue] = useState<number>(0);
   const [textInputValue, setTextInputValue] = useState<string>('');
+
+  useEffect(() => {
+    setTextInputValue('');
+    setPointsInputValue(0);
+  }, [selectedQuestionIndex, selectedParticipantId]);
   const [editorTestWord, setEditorTestWord] = useState<string>('');
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [showSettingsHelp, setShowSettingsHelp] = useState(false);
@@ -1578,6 +1585,7 @@ ${exampleJson}`;
     };
 
     setAnswers([...answers, newAnswer]);
+    setPointsInputValue(0);
 
     const openedFollowUp = openFollowUpQuestion(question, activePartId);
     if (!openedFollowUp) {
@@ -1628,6 +1636,7 @@ ${exampleJson}`;
     };
 
     setAnswers([...answers, newAnswer]);
+    setTextInputValue('');
 
     // Optional AI Linguistic Engine check when online with Gemini key if initial offline test was inconclusive
     const storedApiKey = getStoredApiKey();
@@ -1702,6 +1711,7 @@ ${exampleJson}`;
     };
 
     setAnswers([...answers, newAnswer]);
+    setTextInputValue('');
 
     // Optional AI Linguistic Engine check when online with Gemini key if initial offline test was inconclusive
     const storedApiKey = getStoredApiKey();
@@ -3958,6 +3968,7 @@ ${exampleJson}`;
               textInputValue={textInputValue}
               setTextInputValue={setTextInputValue}
               submitTextAnswer={submitTextAnswer}
+              submitLadderAnswer={submitLadderAnswer}
               submitAnswer={submitAnswer}
               setZoomedImageUrl={setZoomedImageUrl}
               isFacitUnlocked={isFacitUnlocked}
